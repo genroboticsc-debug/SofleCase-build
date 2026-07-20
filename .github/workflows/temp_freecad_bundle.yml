@@ -11,7 +11,7 @@ jobs:
   bundle-freecad:
     runs-on: ubuntu-latest
     steps:
-      - name: Download latest stable FreeCAD AppImage
+      - name: Download and split latest stable FreeCAD AppImage
         shell: bash
         run: |
           set -euxo pipefail
@@ -23,13 +23,29 @@ jobs:
           test -n "$url"
           echo "$url"
           curl -fL "$url" -o FreeCAD.AppImage
-          chmod +x FreeCAD.AppImage
-          ls -lh FreeCAD.AppImage
-      - name: Upload FreeCAD AppImage
+          sha256sum FreeCAD.AppImage > FreeCAD.AppImage.sha256
+          split -b 350M -d -a 2 FreeCAD.AppImage FreeCAD.AppImage.part-
+          ls -lh FreeCAD.AppImage FreeCAD.AppImage.part-* FreeCAD.AppImage.sha256
+      - name: Upload FreeCAD part 00
         uses: actions/upload-artifact@v4
         with:
-          name: freecad-appimage
-          path: FreeCAD.AppImage
+          name: freecad-appimage-part-00
+          path: FreeCAD.AppImage.part-00
           compression-level: 0
-          if-no-files-found: error
+          retention-days: 1
+      - name: Upload FreeCAD part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: freecad-appimage-part-01
+          path: FreeCAD.AppImage.part-01
+          compression-level: 0
+          retention-days: 1
+      - name: Upload FreeCAD part 02 and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: freecad-appimage-part-02
+          path: |
+            FreeCAD.AppImage.part-02
+            FreeCAD.AppImage.sha256
+          compression-level: 0
           retention-days: 1
