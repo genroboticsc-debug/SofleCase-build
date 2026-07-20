@@ -1,0 +1,53 @@
+name: Fetch Urchin Exact Reference
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fetch-urchin-reference.yml'
+  workflow_dispatch:
+
+jobs:
+  fetch-and-convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Create output directory
+        run: mkdir -p out
+
+      - name: Download exact upstream Urchin source files
+        shell: bash
+        run: |
+          set -euxo pipefail
+          base='https://raw.githubusercontent.com/duckyb/urchin/main/3d-prints/case-by-chewiedies'
+          curl -fL --retry 5 --retry-delay 2 "$base/Urchin_Tray_Case.f3d" -o out/Urchin_Tray_Case_reference.f3d
+          curl -fL --retry 5 --retry-delay 2 "$base/v1-TrayWithChamfer-capture.stl" -o out/v1-TrayWithChamfer-capture_reference.stl
+          curl -fL --retry 5 --retry-delay 2 "$base/v1-TrayWithChamfer-inserts.stl" -o out/v1-TrayWithChamfer-inserts_reference.stl
+          curl -fL --retry 5 --retry-delay 2 "$base/v1-TrayWithFillet-capture.stl" -o out/v1-TrayWithFillet-capture_reference.stl
+          curl -fL --retry 5 --retry-delay 2 "$base/v1-TrayWithFillet-inserts.stl" -o out/v1-TrayWithFillet-inserts_reference.stl
+          sha256sum out/* > out/SHA256SUMS.txt
+          ls -lah out
+
+      - name: Install cadmpeg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/cadmpeg/cadmpeg/releases/latest/download/cadmpeg-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Decode and convert native F3D
+        shell: bash
+        run: |
+          set -o pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          cadmpeg --version 2>&1 | tee out/cadmpeg-version.txt
+          cadmpeg inspect out/Urchin_Tray_Case_reference.f3d --json > out/Urchin_Tray_Case_inspect.json 2> out/Urchin_Tray_Case_inspect.stderr.txt || true
+          cadmpeg convert out/Urchin_Tray_Case_reference.f3d -f step -o out/Urchin_Tray_Case_reference_cadmpeg.step 2>&1 | tee out/Urchin_Tray_Case_convert.log || true
+          ls -lah out
+
+      - name: Upload exact references and decoded output
+        uses: actions/upload-artifact@v4
+        with:
+          name: urchin-exact-reference
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
