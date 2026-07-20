@@ -33,20 +33,21 @@ jobs:
         run: |
           set -euxo pipefail
           curl --proto '=https' --tlsv1.2 -LsSf https://github.com/cadmpeg/cadmpeg/releases/latest/download/cadmpeg-installer.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          cp "$HOME/.local/bin/cadmpeg" out/cadmpeg-linux-x86_64
+          CADMPEG_BIN="$(command -v cadmpeg || find "$HOME" -type f -name cadmpeg -perm -111 | head -n 1)"
+          test -n "$CADMPEG_BIN"
+          echo "CADMPEG_BIN=$CADMPEG_BIN" >> "$GITHUB_ENV"
+          cp "$CADMPEG_BIN" out/cadmpeg-linux-x86_64
           chmod +x out/cadmpeg-linux-x86_64
 
       - name: Decode and convert native F3D
         shell: bash
         run: |
           set -o pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          cadmpeg --version 2>&1 | tee out/cadmpeg-version.txt
-          cadmpeg convert --help > out/cadmpeg-convert-help.txt 2>&1 || true
-          cadmpeg inspect out/Urchin_Tray_Case_reference.f3d --json > out/Urchin_Tray_Case_inspect.json 2> out/Urchin_Tray_Case_inspect.stderr.txt || true
-          cadmpeg decode out/Urchin_Tray_Case_reference.f3d -o out/Urchin_Tray_Case_reference.cadir.json 2>&1 | tee out/Urchin_Tray_Case_decode.log || true
-          cadmpeg convert out/Urchin_Tray_Case_reference.f3d -f step -o out/Urchin_Tray_Case_reference_cadmpeg.step --allow-invalid 2>&1 | tee out/Urchin_Tray_Case_convert_allow_invalid.log || true
+          "$CADMPEG_BIN" --version 2>&1 | tee out/cadmpeg-version.txt
+          "$CADMPEG_BIN" convert --help > out/cadmpeg-convert-help.txt 2>&1 || true
+          "$CADMPEG_BIN" inspect out/Urchin_Tray_Case_reference.f3d --json > out/Urchin_Tray_Case_inspect.json 2> out/Urchin_Tray_Case_inspect.stderr.txt || true
+          "$CADMPEG_BIN" decode out/Urchin_Tray_Case_reference.f3d -o out/Urchin_Tray_Case_reference.cadir.json 2>&1 | tee out/Urchin_Tray_Case_decode.log || true
+          "$CADMPEG_BIN" convert out/Urchin_Tray_Case_reference.f3d -f step -o out/Urchin_Tray_Case_reference_cadmpeg.step --allow-invalid 2>&1 | tee out/Urchin_Tray_Case_convert_allow_invalid.log || true
           ls -lah out
 
       - name: Upload exact references and decoded output
