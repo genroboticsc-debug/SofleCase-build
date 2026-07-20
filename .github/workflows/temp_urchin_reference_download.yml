@@ -1,9 +1,9 @@
 name: Temp Urchin Reference Download
 
 on:
-  push:
+  pull_request:
     branches:
-      - temp-urchin-reference-download
+      - master
     paths:
       - '.github/workflows/temp_urchin_reference_download.yml'
 
