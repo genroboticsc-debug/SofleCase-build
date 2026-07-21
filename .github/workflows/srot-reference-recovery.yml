@@ -1,0 +1,102 @@
+name: SROT Dilemma Reference Recovery
+
+on:
+  push:
+    branches:
+      - srot-reference-recovery
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pinned Dilemma repository
+        uses: actions/checkout@v4
+        with:
+          repository: Bastardkb/Dilemma
+          ref: f5cffb4821fe560b095418b71382ac7d8043c61a
+          path: Dilemma
+          fetch-depth: 1
+
+      - name: Build exact reference archive and manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_commit="$(git -C Dilemma rev-parse HEAD)"
+          test "$actual_commit" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import shutil
+          import zipfile
+
+          root = Path('Dilemma')
+          payload = Path('payload')
+          snapshot = payload / 'Dilemma-pinned-f5cffb4821fe560b095418b71382ac7d8043c61a'
+          snapshot.mkdir(parents=True, exist_ok=True)
+
+          official_3d_exts = {
+              '.step', '.stp', '.stl', '.wrl', '.vrml', '.iges', '.igs',
+              '.brep', '.fcstd', '.3mf', '.f3d', '.ipt', '.sldprt', '.sldasm'
+          }
+          supporting_exts = {'.kicad_pcb', '.dxf'}
+
+          records = []
+          for source in sorted(p for p in root.rglob('*') if p.is_file()):
+              suffix = source.suffix.lower()
+              classification = None
+              if suffix in official_3d_exts:
+                  classification = 'official_3d_source_candidate'
+              elif suffix in supporting_exts:
+                  classification = 'supporting_2d_source'
+              if classification is None:
+                  continue
+
+              rel = source.relative_to(root)
+              target = snapshot / rel
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, target)
+              digest = hashlib.sha256(source.read_bytes()).hexdigest()
+              records.append({
+                  'path': rel.as_posix(),
+                  'classification': classification,
+                  'extension': suffix,
+                  'size_bytes': source.stat().st_size,
+                  'sha256': digest,
+              })
+
+          metadata = {
+              'repository': 'https://github.com/Bastardkb/Dilemma',
+              'pinned_commit': 'f5cffb4821fe560b095418b71382ac7d8043c61a',
+              'record_count': len(records),
+              'records': records,
+          }
+          (snapshot / 'RECOVERY_METADATA.json').write_text(
+              json.dumps(metadata, indent=2) + '\n', encoding='utf-8'
+          )
+          with (snapshot / 'SOURCE_FILES.sha256').open('w', encoding='utf-8', newline='\n') as manifest:
+              for record in records:
+                  manifest.write(f"{record['sha256']}  {record['path']}\n")
+
+          archive = payload / 'Dilemma-pinned-reference-snapshot.zip'
+          with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+              for file_path in sorted(p for p in snapshot.rglob('*') if p.is_file()):
+                  zf.write(file_path, file_path.relative_to(payload).as_posix())
+          (payload / 'ARCHIVE.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest()
+              + '  Dilemma-pinned-reference-snapshot.zip\n',
+              encoding='utf-8',
+          )
+          print(f"Archived {len(records)} exact source files")
+          PY
+
+      - name: Upload pinned reference snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-reference-snapshot
+          path: payload/
+          if-no-files-found: error
+          retention-days: 7
