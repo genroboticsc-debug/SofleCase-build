@@ -46,7 +46,7 @@ def load_occ():
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut
     from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepCheck import BRepCheck_Analyzer
-    from OCP.BRepGProp import brepgprop
+    from OCP.BRepGProp import BRepGProp
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.GProp import GProp_GProps
     from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
@@ -82,21 +82,21 @@ def explore(shape, kind):
 def volume(shape) -> float:
     o = load_occ()
     p = o["GProp_GProps"]()
-    o["brepgprop"].VolumeProperties_s(shape, p)
+    o["BRepGProp"].VolumeProperties_s(shape, p)
     return float(p.Mass())
 
 
 def area(shape) -> float:
     o = load_occ()
     p = o["GProp_GProps"]()
-    o["brepgprop"].SurfaceProperties_s(shape, p)
+    o["BRepGProp"].SurfaceProperties_s(shape, p)
     return float(p.Mass())
 
 
 def center_of_mass(shape) -> tuple[float, float, float]:
     o = load_occ()
     p = o["GProp_GProps"]()
-    o["brepgprop"].VolumeProperties_s(shape, p)
+    o["BRepGProp"].VolumeProperties_s(shape, p)
     c = p.CentreOfMass()
     return (float(c.X()), float(c.Y()), float(c.Z()))
 
