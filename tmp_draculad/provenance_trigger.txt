@@ -2,3 +2,4 @@ Trigger exact historical provenance scan for the Kailh soldered reference.
 Trigger corrected ten-edge terminal-roll candidate validation.
 Refresh current exact candidate workflow state.
 Candidate trigger stamp: 2026-07-22T04:36:00+05:30.
+Final trigger state for PR reopen.
