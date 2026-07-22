@@ -1,0 +1,118 @@
+        str(o["GeomAbs_SurfaceType"].GeomAbs_Torus): "torus",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_BezierSurface): "bezier_surface",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_BSplineSurface): "bspline_surface",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_SurfaceOfRevolution): "surface_of_revolution",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_SurfaceOfExtrusion): "surface_of_extrusion",
+    }
+    inventory = []
+    for idx, raw in enumerate(explore(shape, o["TopAbs_FACE"])):
+        face = o["TopoDS"].Face_s(raw)
+        ad = o["BRepAdaptor_Surface"](face, True)
+        t = ad.GetType()
+        item = {"index": idx, "type": names.get(str(t), str(t)), "area": area(face),
+                "bbox": bbox(face)}
+        try:
+            if item["type"] == "cylinder":
+                item["radius"] = float(ad.Cylinder().Radius())
+            elif item["type"] == "sphere":
+                item["radius"] = float(ad.Sphere().Radius())
+            elif item["type"] == "torus":
+                item["major_radius"] = float(ad.Torus().MajorRadius())
+                item["minor_radius"] = float(ad.Torus().MinorRadius())
+            elif item["type"] == "cone":
+                item["semi_angle"] = float(ad.Cone().SemiAngle())
+                item["reference_radius"] = float(ad.Cone().RefRadius())
+        except Exception as exc:
+            item["detail_error"] = str(exc)
+        inventory.append(item)
+    return inventory
+
+
+def metrics(shape):
+    return {"volume": volume(shape), "area": area(shape), "bbox": bbox(shape),
+            "center_of_mass": center_of_mass(shape), "valid": is_valid(shape)}
+
+
+def main() -> int:
+    WORK.mkdir(parents=True, exist_ok=True)
+    decode_chunks("ref_xz_", REFERENCE)
+    decode_chunks("script_xz_", SCRIPT)
+    hashes = {"reference": sha256(REFERENCE), "script": sha256(SCRIPT)}
+    if hashes["reference"] != EXPECTED_REF_SHA256:
+        raise RuntimeError(f"Reference SHA mismatch: {hashes['reference']}")
+    if hashes["script"] != EXPECTED_SCRIPT_SHA256:
+        raise RuntimeError(f"Script SHA mismatch: {hashes['script']}")
+
+    env = dict(os.environ, OCP_SHOW="0", PYTHONUNBUFFERED="1")
+    build = subprocess.run([sys.executable, str(SCRIPT), str(GENERATED_DIR)],
+                           text=True, capture_output=True, env=env, timeout=900)
+    if build.returncode != 0 or not GENERATED.exists():
+        raise RuntimeError(f"Build failed\nSTDOUT:\n{build.stdout}\nSTDERR:\n{build.stderr}")
+
+    o = load_occ()
+    ref_shape = read_step(REFERENCE)
+    gen_shape = read_step(GENERATED)
+    ref_solids = explore(ref_shape, o["TopAbs_SOLID"])
+    gen_solids = explore(gen_shape, o["TopAbs_SOLID"])
+    ref_solids.sort(key=volume, reverse=True)
+    gen_solids.sort(key=volume, reverse=True)
+    ref_h, gen_h = ref_solids[0], gen_solids[0]
+
+    ref_metrics = metrics(ref_shape)
+    gen_metrics = metrics(gen_shape)
+    ref_h_metrics = metrics(ref_h)
+    gen_h_metrics = metrics(gen_h)
+    cm_shift = math.dist(ref_metrics["center_of_mass"], gen_metrics["center_of_mass"])
+    rb, gb = ref_metrics["bbox"], gen_metrics["bbox"]
+    bbox_size_ref = (rb[3]-rb[0], rb[4]-rb[1], rb[5]-rb[2])
+    bbox_size_gen = (gb[3]-gb[0], gb[4]-gb[1], gb[5]-gb[2])
+
+    direct = run_boolean_cell(None, timeout_s=240)
+    root = tuple(min(ref_h_metrics["bbox"][i], gen_h_metrics["bbox"][i]) for i in range(3)) + \
+           tuple(max(ref_h_metrics["bbox"][i], gen_h_metrics["bbox"][i]) for i in range(3, 6))
+    partitioned = None
+    if not direct.get("ok"):
+        partitioned = exact_partitioned_xor(root, ref_h_metrics["volume"])
+    else:
+        xor = direct["a_minus_b"] + direct["b_minus_a"]
+        direct["xor_volume"] = xor
+        direct["xor_percent_reference"] = 100.0 * xor / ref_h_metrics["volume"]
+        direct["method"] = "whole_housing_zero_fuzzy_OpenCascade_AminusB_plus_BminusA"
+
+    contact_results = []
+    for index in range(1, min(len(ref_solids), len(gen_solids))):
+        rs = ref_solids[index]
+        j = min(range(1, len(gen_solids)), key=lambda k: abs(volume(gen_solids[k]) - volume(rs)))
+        try:
+            _, ab = boolean("cut", rs, gen_solids[j])
+            _, ba = boolean("cut", gen_solids[j], rs)
+            contact_results.append({"reference_index": index, "generated_index": j,
+                                    "a_minus_b": ab, "b_minus_a": ba,
+                                    "xor_volume": ab + ba,
+                                    "xor_percent_reference": 100.0*(ab+ba)/volume(rs),
+                                    "boolean_success": True})
+        except Exception as exc:
+            contact_results.append({"reference_index": index, "generated_index": j,
+                                    "boolean_success": False, "error": str(exc)})
+
+    result = {
+        "input_sha256": hashes,
+        "generated_sha256": sha256(GENERATED),
+        "build_stdout": build.stdout,
+        "build_stderr": build.stderr,
+        "solid_count": {"reference": len(ref_solids), "generated": len(gen_solids)},
+        "compound": {
+            "reference": ref_metrics,
+            "generated": gen_metrics,
+            "volume_error_percent": 100.0*(gen_metrics["volume"]-ref_metrics["volume"])/ref_metrics["volume"],
+            "area_error_percent": 100.0*(gen_metrics["area"]-ref_metrics["area"])/ref_metrics["area"],
+            "bbox_size_reference": bbox_size_ref,
+            "bbox_size_generated": bbox_size_gen,
+            "bbox_size_abs_diff": tuple(abs(a-b) for a,b in zip(bbox_size_ref,bbox_size_gen)),
+            "center_of_mass_shift": cm_shift,
+        },
+        "housing": {"reference": ref_h_metrics, "generated": gen_h_metrics,
+                    "direct_boolean": direct, "partitioned_boolean": partitioned},
+        "contacts": contact_results,
+        "reference_housing_surface_inventory": surface_inventory(ref_h),
+        "generated_housing_surface_inventory": surface_inventory(gen_h),
