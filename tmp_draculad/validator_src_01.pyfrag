@@ -10,12 +10,16 @@ def boolean(op: str, a, b):
         alg.SetRunParallel(False)
     if hasattr(alg, "SetUseOBB"):
         alg.SetUseOBB(True)
+    if hasattr(alg, "SetNonDestructive"):
+        alg.SetNonDestructive(True)
     alg.Build()
     if not alg.IsDone():
         raise RuntimeError(f"OpenCascade {op} failed")
     result = alg.Shape()
     if result.IsNull():
         return result, 0.0
+    if not is_valid(result):
+        raise RuntimeError(f"OpenCascade {op} returned an invalid B-Rep")
     return result, volume(result)
 
 
@@ -38,14 +42,57 @@ def worker(bounds_json: str) -> None:
         gen, gv = boolean("common", gen, clip)
     else:
         rv, gv = volume(ref), volume(gen)
-    if rv <= 1e-15 and gv <= 1e-15:
+
+    empty_tol = 1.0e-12
+    if rv <= empty_tol and gv <= empty_tol:
         print(json.dumps({"ok": True, "a_minus_b": 0.0, "b_minus_a": 0.0,
-                          "ref_cell_volume": rv, "gen_cell_volume": gv}))
+                          "common_volume": 0.0, "ref_cell_volume": rv,
+                          "gen_cell_volume": gv, "identity_error_a": 0.0,
+                          "identity_error_b": 0.0}))
         return
+    if rv <= empty_tol:
+        print(json.dumps({"ok": True, "a_minus_b": 0.0, "b_minus_a": gv,
+                          "common_volume": 0.0, "ref_cell_volume": rv,
+                          "gen_cell_volume": gv, "identity_error_a": 0.0,
+                          "identity_error_b": 0.0}))
+        return
+    if gv <= empty_tol:
+        print(json.dumps({"ok": True, "a_minus_b": rv, "b_minus_a": 0.0,
+                          "common_volume": 0.0, "ref_cell_volume": rv,
+                          "gen_cell_volume": gv, "identity_error_a": 0.0,
+                          "identity_error_b": 0.0}))
+        return
+
+    _, common_volume = boolean("common", ref, gen)
     _, ab = boolean("cut", ref, gen)
     _, ba = boolean("cut", gen, ref)
-    print(json.dumps({"ok": True, "a_minus_b": ab, "b_minus_a": ba,
-                      "ref_cell_volume": rv, "gen_cell_volume": gv}))
+
+    identity_error_a = abs((ab + common_volume) - rv)
+    identity_error_b = abs((ba + common_volume) - gv)
+    identity_tol = max(1.0e-8, 2.0e-6 * max(rv, gv, 1.0))
+    xor = ab + ba
+    reasons = []
+    if identity_error_a > identity_tol or identity_error_b > identity_tol:
+        reasons.append("boolean_volume_identity_failure")
+    if ab > rv + identity_tol or ba > gv + identity_tol:
+        reasons.append("residual_exceeds_operand_volume")
+    if common_volume > min(rv, gv) + identity_tol:
+        reasons.append("common_exceeds_smaller_operand")
+    # This guard only rejects a suspect whole/cell result and forces finer exact
+    # partitioning; it never substitutes an approximate result. Near-equal CAD
+    # bodies with overlapping envelopes cannot be certified by a 100-200% XOR
+    # returned from a coincident-face failure.
+    if abs(rv - gv) <= 0.01 * max(rv, gv) and xor > 0.50 * (rv + gv):
+        reasons.append("implausible_near_equal_body_xor")
+
+    payload = {"ok": not reasons, "a_minus_b": ab, "b_minus_a": ba,
+               "common_volume": common_volume, "ref_cell_volume": rv,
+               "gen_cell_volume": gv, "identity_error_a": identity_error_a,
+               "identity_error_b": identity_error_b,
+               "identity_tolerance": identity_tol}
+    if reasons:
+        payload["reason"] = ";".join(reasons)
+    print(json.dumps(payload))
 
 
 def run_boolean_cell(bounds, timeout_s: int = 120) -> dict[str, Any]:
@@ -78,13 +125,14 @@ def split_bounds(bounds):
     return low, high
 
 
-def exact_partitioned_xor(root_bounds, reference_volume: float, max_depth: int = 7):
+def exact_partitioned_xor(root_bounds, reference_volume: float, max_depth: int = 9):
     totals = {"a_minus_b": 0.0, "b_minus_a": 0.0}
     leaves = []
     unresolved = []
 
     def solve(bounds, depth):
-        r = run_boolean_cell(bounds, timeout_s=90 if depth < 2 else 45)
+        timeout_s = 30 if depth < 2 else (20 if depth < 4 else 12)
+        r = run_boolean_cell(bounds, timeout_s=timeout_s)
         if r.get("ok"):
             totals["a_minus_b"] += r["a_minus_b"]
             totals["b_minus_a"] += r["b_minus_a"]
@@ -106,7 +154,7 @@ def exact_partitioned_xor(root_bounds, reference_volume: float, max_depth: int =
         "resolved_cells": len(leaves),
         "unresolved_cells": unresolved,
         "all_exact_booleans_succeeded": not unresolved,
-        "method": "disjoint_axis_aligned_cells_zero_fuzzy_OpenCascade_AminusB_plus_BminusA",
+        "method": "disjoint_axis_aligned_cells_zero_fuzzy_OpenCascade_AminusB_plus_BminusA_with_identity_checks",
         "leaves": leaves,
     }
 
