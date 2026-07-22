@@ -10,27 +10,40 @@ permissions:
   contents: read
 
 jobs:
-  fetch-exact-novtk:
+  fetch-exact-runtime:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Download exact no-VTK OCP wheel
+
+      - name: Download Build123d and direct pure-Python runtime wheels
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p runtime
-          python -m pip index versions cadquery-ocp-novtk | tee versions.txt
-          python -m pip download --only-binary=:all: --no-deps --dest runtime 'cadquery-ocp-novtk==7.8.1.1'
+          python -m pip download --only-binary=:all: --no-deps --dest runtime \
+            'build123d==0.9.1' \
+            'typing_extensions>=4.6.0,<5' \
+            'svgpathtools>=1.5.1,<2' \
+            'anytree>=2.8.0,<3' \
+            'ezdxf>=1.1.0,<2' \
+            'ipython>=8.0.0,<9' \
+            'py-lib3mf>=2.3.1' \
+            'ocpsvg>=0.4' \
+            'trianglesolver'
           (cd runtime && sha256sum * > SHA256SUMS.txt)
-      - name: Upload exact no-VTK OCP runtime
+          python - <<'PY'
+          from pathlib import Path
+          for wheel in sorted(Path('runtime').glob('*.whl')):
+              print(wheel.name)
+          PY
+
+      - name: Upload Build123d runtime
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cadquery-ocp-novtk-7.8.1.1-cp313
-          path: |
-            runtime/
-            versions.txt
-          if-no-files-found: warn
+          name: build123d-0.9.1-py313-runtime
+          path: runtime/
+          if-no-files-found: error
           retention-days: 1
