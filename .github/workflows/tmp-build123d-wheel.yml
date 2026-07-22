@@ -10,47 +10,27 @@ permissions:
   contents: read
 
 jobs:
-  discover-ocp-artifact:
+  fetch-exact-novtk:
     runs-on: ubuntu-latest
     steps:
-      - name: Discover official OCP 7.8.1.1 no-VTK artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact no-VTK OCP wheel
         shell: bash
         run: |
           set -euo pipefail
-          target='cadquery-ocp-novtk-7.8.1.1-ubuntu-22.04-cp3.13'
-          : > discovery.txt
-          found=0
-          for page in 1 2 3 4 5; do
-            runs=$(curl -fsSL -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/CadQuery/ocp-build-system/actions/workflows/build-ocp.yml/runs?per_page=100&page=$page")
-            count=$(jq '.workflow_runs | length' <<<"$runs")
-            echo "page=$page runs=$count" | tee -a discovery.txt
-            [ "$count" -eq 0 ] && break
-            while read -r run_id created head_sha event; do
-              year=${created%%-*}
-              [ "$year" -gt 2025 ] && continue
-              [ "$created" \< "2025-01-15" ] && continue
-              [ "$created" \> "2025-03-01" ] && continue
-              artifacts=$(curl -fsSL -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                "https://api.github.com/repos/CadQuery/ocp-build-system/actions/runs/$run_id/artifacts?per_page=100")
-              jq -r --arg target "$target" --arg run "$run_id" --arg created "$created" --arg sha "$head_sha" \
-                '.artifacts[] | select(.name == $target or (.name | contains("7.8.1.1") and contains("ubuntu-22.04") and contains("cp3.13"))) | "MATCH run=\($run) created=\($created) sha=\($sha) artifact_id=\(.id) name=\(.name) expired=\(.expired)"' \
-                <<<"$artifacts" | tee -a discovery.txt
-              if jq -e --arg target "$target" '.artifacts[] | select(.name == $target)' <<<"$artifacts" >/dev/null; then
-                found=1
-              fi
-            done < <(jq -r '.workflow_runs[] | [.id,.created_at,.head_sha,.event] | @tsv' <<<"$runs")
-          done
-          cat discovery.txt
-          [ "$found" -eq 1 ]
-      - name: Upload discovery evidence
+          mkdir -p runtime
+          python -m pip index versions cadquery-ocp-novtk | tee versions.txt
+          python -m pip download --only-binary=:all: --no-deps --dest runtime 'cadquery-ocp-novtk==7.8.1.1'
+          (cd runtime && sha256sum * > SHA256SUMS.txt)
+      - name: Upload exact no-VTK OCP runtime
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ocp-7.8.1.1-artifact-discovery
-          path: discovery.txt
+          name: cadquery-ocp-novtk-7.8.1.1-cp313
+          path: |
+            runtime/
+            versions.txt
+          if-no-files-found: warn
           retention-days: 1
