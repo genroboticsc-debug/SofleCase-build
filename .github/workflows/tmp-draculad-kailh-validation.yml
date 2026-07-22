@@ -6,6 +6,10 @@ on:
       - 'tmp_draculad/**'
       - '.github/workflows/tmp-draculad-kailh-validation.yml'
 
+concurrency:
+  group: temporary-draculad-kailh-exact-validation
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
