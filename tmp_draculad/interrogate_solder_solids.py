@@ -84,6 +84,49 @@ def edge_detail(edge):
     return item
 
 
+def curvature_samples(adaptor, uv_bounds):
+    """Measure principal curvatures on the trimmed reference face.
+
+    These samples are analysis evidence only. They are used to identify native
+    constant-radius blend families; no surface poles, knots, or pcurves are
+    transferred to production code.
+    """
+    from OCP.BRepLProp import BRepLProp_SLProps
+
+    u0, u1, v0, v1 = uv_bounds
+    fractions = (0.2, 0.35, 0.5, 0.65, 0.8)
+    samples = []
+    for fu in fractions:
+        for fv in fractions:
+            u = u0 + (u1 - u0) * fu
+            vv = v0 + (v1 - v0) * fv
+            try:
+                props = BRepLProp_SLProps(adaptor, u, vv, 2, 1.0e-9)
+                if not props.IsCurvatureDefined():
+                    continue
+                kmax = float(props.MaxCurvature())
+                kmin = float(props.MinCurvature())
+                radii = [
+                    None if abs(k) < 1.0e-12 else abs(1.0 / k)
+                    for k in (kmax, kmin)
+                ]
+                samples.append(
+                    {
+                        "u": u,
+                        "v": vv,
+                        "point": point_tuple(adaptor.Value(u, vv)),
+                        "max_curvature": kmax,
+                        "min_curvature": kmin,
+                        "principal_radii": radii,
+                        "gaussian_curvature": float(props.GaussianCurvature()),
+                        "mean_curvature": float(props.MeanCurvature()),
+                    }
+                )
+            except Exception as exc:
+                samples.append({"u": u, "v": vv, "error": str(exc)})
+    return samples
+
+
 def face_detail(face, index):
     o = v.load_occ()
     names = {
@@ -102,17 +145,18 @@ def face_detail(face, index):
     f = o["TopoDS"].Face_s(face)
     adaptor = o["BRepAdaptor_Surface"](f, True)
     kind = names.get(str(adaptor.GetType()), str(adaptor.GetType()))
+    uv_bounds = [
+        float(adaptor.FirstUParameter()),
+        float(adaptor.LastUParameter()),
+        float(adaptor.FirstVParameter()),
+        float(adaptor.LastVParameter()),
+    ]
     item = {
         "index": index,
         "type": kind,
         "area": v.area(f),
         "bbox": v.bbox(f),
-        "uv_bounds": [
-            float(adaptor.FirstUParameter()),
-            float(adaptor.LastUParameter()),
-            float(adaptor.FirstVParameter()),
-            float(adaptor.LastVParameter()),
-        ],
+        "uv_bounds": uv_bounds,
         "edges": [edge_detail(edge) for edge in v.explore(f, o["TopAbs_EDGE"])],
     }
     try:
@@ -143,6 +187,7 @@ def face_detail(face, index):
             item["v_periodic"] = bool(surface.IsVPeriodic())
             item["u_rational"] = bool(surface.IsURational())
             item["v_rational"] = bool(surface.IsVRational())
+            item["curvature_samples"] = curvature_samples(adaptor, uv_bounds)
     except Exception as exc:
         item["surface_detail_error"] = str(exc)
     return item
