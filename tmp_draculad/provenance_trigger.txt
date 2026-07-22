@@ -1,1 +1,2 @@
 Trigger exact historical provenance scan for the Kailh soldered reference.
+Trigger corrected ten-edge terminal-roll candidate validation.
