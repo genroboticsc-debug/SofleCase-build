@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from collections import Counter
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
@@ -11,125 +13,57 @@ if str(ROOT) not in sys.path:
 
 import run_validation as v
 
+REFERENCE_SOLDER_INDEX = 1
+RAW_EXTRUSION_LENGTH_MM = 2.0
+TERMINAL_ROLL_RADIUS_MM = 0.375
+JUNCTION_ROUND_RADIUS_MM = 0.07
+PAD_Z_MIN_MM = 1.75
+PAD_Z_MAX_MM = 1.80
+PAD_POINTS_XY = (
+    (4.54488778941404, 3.76578476453536),
+    (7.210189558447279, 3.7479184533604792),
+    (7.21019340060459, 6.41087029507891),
+    (4.54488778941404, 6.41087029507891),
+)
+
 
 def point_tuple(point):
     return [float(point.X()), float(point.Y()), float(point.Z())]
 
 
-def direction_tuple(direction):
-    return [float(direction.X()), float(direction.Y()), float(direction.Z())]
+def load_production_module(generated_step: Path):
+    script = (
+        generated_step.parent.parent.parent
+        / "scripts"
+        / "components"
+        / "kailh cherry socket soldered.py"
+    )
+    spec = importlib.util.spec_from_file_location("kailh_soldered_production", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load production module: {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, script
 
 
-def edge_detail(edge):
+def write_step_shape(shape, path: Path):
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer = STEPControl_Writer()
+    transfer_status = writer.Transfer(shape, STEPControl_AsIs)
+    if int(transfer_status) != int(IFSelect_RetDone):
+        raise RuntimeError(f"STEP transfer failed: {transfer_status}")
+    write_status = writer.Write(str(path))
+    if int(write_status) != int(IFSelect_RetDone):
+        raise RuntimeError(f"STEP write failed: {write_status}")
+
+
+def shape_summary(shape):
     o = v.load_occ()
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
-
-    names = {
-        str(o["GeomAbs_CurveType"].GeomAbs_Line): "line",
-        str(o["GeomAbs_CurveType"].GeomAbs_Circle): "circle",
-        str(o["GeomAbs_CurveType"].GeomAbs_Ellipse): "ellipse",
-        str(o["GeomAbs_CurveType"].GeomAbs_Hyperbola): "hyperbola",
-        str(o["GeomAbs_CurveType"].GeomAbs_Parabola): "parabola",
-        str(o["GeomAbs_CurveType"].GeomAbs_BezierCurve): "bezier",
-        str(o["GeomAbs_CurveType"].GeomAbs_BSplineCurve): "bspline",
-        str(o["GeomAbs_CurveType"].GeomAbs_OtherCurve): "other",
-    }
-    e = o["TopoDS"].Edge_s(edge)
-    adaptor = o["BRepAdaptor_Curve"](e)
-    first = float(adaptor.FirstParameter())
-    last = float(adaptor.LastParameter())
-    props = GProp_GProps()
-    BRepGProp.LinearProperties_s(e, props)
-    kind = names.get(str(adaptor.GetType()), str(adaptor.GetType()))
-    item = {
-        "type": kind,
-        "length": float(props.Mass()),
-        "parameter_range": [first, last],
-        "start": point_tuple(adaptor.Value(first)),
-        "mid": point_tuple(adaptor.Value((first + last) / 2.0)),
-        "end": point_tuple(adaptor.Value(last)),
-        "bbox": v.bbox(e),
-    }
-    try:
-        if kind == "line":
-            line = adaptor.Line()
-            item["location"] = point_tuple(line.Location())
-            item["direction"] = direction_tuple(line.Direction())
-        elif kind == "circle":
-            circle = adaptor.Circle()
-            item["radius"] = float(circle.Radius())
-            item["center"] = point_tuple(circle.Location())
-            item["axis"] = direction_tuple(circle.Axis().Direction())
-        elif kind == "ellipse":
-            ellipse = adaptor.Ellipse()
-            item["major_radius"] = float(ellipse.MajorRadius())
-            item["minor_radius"] = float(ellipse.MinorRadius())
-            item["center"] = point_tuple(ellipse.Location())
-            item["axis"] = direction_tuple(ellipse.Axis().Direction())
-        elif kind == "bezier":
-            curve = adaptor.Bezier()
-            item["degree"] = int(curve.Degree())
-            item["pole_count"] = int(curve.NbPoles())
-            item["rational"] = bool(curve.IsRational())
-        elif kind == "bspline":
-            curve = adaptor.BSpline()
-            item["degree"] = int(curve.Degree())
-            item["pole_count"] = int(curve.NbPoles())
-            item["knot_count"] = int(curve.NbKnots())
-            item["periodic"] = bool(curve.IsPeriodic())
-            item["rational"] = bool(curve.IsRational())
-    except Exception as exc:
-        item["detail_error"] = str(exc)
-    return item
-
-
-def curvature_samples(adaptor, uv_bounds):
-    """Measure principal curvatures on the trimmed reference face.
-
-    These samples are analysis evidence only. They are used to identify native
-    constant-radius blend families; no surface poles, knots, or pcurves are
-    transferred to production code.
-    """
-    from OCP.BRepLProp import BRepLProp_SLProps
-
-    u0, u1, v0, v1 = uv_bounds
-    fractions = (0.2, 0.35, 0.5, 0.65, 0.8)
-    samples = []
-    for fu in fractions:
-        for fv in fractions:
-            u = u0 + (u1 - u0) * fu
-            vv = v0 + (v1 - v0) * fv
-            try:
-                props = BRepLProp_SLProps(adaptor, u, vv, 2, 1.0e-9)
-                if not props.IsCurvatureDefined():
-                    continue
-                kmax = float(props.MaxCurvature())
-                kmin = float(props.MinCurvature())
-                radii = [
-                    None if abs(k) < 1.0e-12 else abs(1.0 / k)
-                    for k in (kmax, kmin)
-                ]
-                samples.append(
-                    {
-                        "u": u,
-                        "v": vv,
-                        "point": point_tuple(adaptor.Value(u, vv)),
-                        "max_curvature": kmax,
-                        "min_curvature": kmin,
-                        "principal_radii": radii,
-                        "gaussian_curvature": float(props.GaussianCurvature()),
-                        "mean_curvature": float(props.MeanCurvature()),
-                    }
-                )
-            except Exception as exc:
-                samples.append({"u": u, "v": vv, "error": str(exc)})
-    return samples
-
-
-def face_detail(face, index):
-    o = v.load_occ()
-    names = {
+    faces = v.explore(shape, o["TopAbs_FACE"])
+    surface_names = {
         str(o["GeomAbs_SurfaceType"].GeomAbs_Plane): "plane",
         str(o["GeomAbs_SurfaceType"].GeomAbs_Cylinder): "cylinder",
         str(o["GeomAbs_SurfaceType"].GeomAbs_Cone): "cone",
@@ -142,116 +76,197 @@ def face_detail(face, index):
         str(o["GeomAbs_SurfaceType"].GeomAbs_OffsetSurface): "offset_surface",
         str(o["GeomAbs_SurfaceType"].GeomAbs_OtherSurface): "other_surface",
     }
-    f = o["TopoDS"].Face_s(face)
-    adaptor = o["BRepAdaptor_Surface"](f, True)
-    kind = names.get(str(adaptor.GetType()), str(adaptor.GetType()))
-    uv_bounds = [
-        float(adaptor.FirstUParameter()),
-        float(adaptor.LastUParameter()),
-        float(adaptor.FirstVParameter()),
-        float(adaptor.LastVParameter()),
-    ]
-    item = {
-        "index": index,
-        "type": kind,
-        "area": v.area(f),
-        "bbox": v.bbox(f),
-        "uv_bounds": uv_bounds,
-        "edges": [edge_detail(edge) for edge in v.explore(f, o["TopAbs_EDGE"])],
-    }
-    try:
-        if kind == "plane":
-            plane = adaptor.Plane()
-            item["origin"] = point_tuple(plane.Location())
-            item["normal"] = direction_tuple(plane.Axis().Direction())
-        elif kind == "cylinder":
+    types = []
+    cylinders = []
+    for raw_face in faces:
+        face = o["TopoDS"].Face_s(raw_face)
+        adaptor = o["BRepAdaptor_Surface"](face, True)
+        kind = surface_names.get(str(adaptor.GetType()), str(adaptor.GetType()))
+        types.append(kind)
+        if kind == "cylinder":
             cylinder = adaptor.Cylinder()
-            item["radius"] = float(cylinder.Radius())
-            item["axis_location"] = point_tuple(cylinder.Location())
-            item["axis_direction"] = direction_tuple(cylinder.Axis().Direction())
-        elif kind == "cone":
-            cone = adaptor.Cone()
-            item["semi_angle"] = float(cone.SemiAngle())
-            item["reference_radius"] = float(cone.RefRadius())
-            item["axis_location"] = point_tuple(cone.Location())
-            item["axis_direction"] = direction_tuple(cone.Axis().Direction())
-        elif kind == "bspline_surface":
-            surface = adaptor.BSpline()
-            item["u_degree"] = int(surface.UDegree())
-            item["v_degree"] = int(surface.VDegree())
-            item["u_pole_count"] = int(surface.NbUPoles())
-            item["v_pole_count"] = int(surface.NbVPoles())
-            item["u_knot_count"] = int(surface.NbUKnots())
-            item["v_knot_count"] = int(surface.NbVKnots())
-            item["u_periodic"] = bool(surface.IsUPeriodic())
-            item["v_periodic"] = bool(surface.IsVPeriodic())
-            item["u_rational"] = bool(surface.IsURational())
-            item["v_rational"] = bool(surface.IsVRational())
-            item["curvature_samples"] = curvature_samples(adaptor, uv_bounds)
-    except Exception as exc:
-        item["surface_detail_error"] = str(exc)
-    return item
-
-
-def solid_detail(solid, index):
-    o = v.load_occ()
-    faces = v.explore(solid, o["TopAbs_FACE"])
-    detailed_faces = [face_detail(face, i) for i, face in enumerate(faces)]
+            cylinders.append(
+                {
+                    "radius": float(cylinder.Radius()),
+                    "axis_location": point_tuple(cylinder.Location()),
+                    "axis_direction": point_tuple(cylinder.Axis().Direction()),
+                    "area": v.area(face),
+                    "bbox": v.bbox(face),
+                }
+            )
     return {
-        "index": index,
-        "volume": v.volume(solid),
-        "area": v.area(solid),
-        "bbox": v.bbox(solid),
-        "center_of_mass": v.center_of_mass(solid),
-        "valid": v.is_valid(solid),
+        "volume": v.volume(shape),
+        "area": v.area(shape),
+        "bbox": v.bbox(shape),
+        "center_of_mass": v.center_of_mass(shape),
+        "valid": v.is_valid(shape),
         "face_count": len(faces),
-        "surface_type_counts": dict(Counter(face["type"] for face in detailed_faces)),
-        "faces": detailed_faces,
+        "surface_type_counts": dict(Counter(types)),
+        "cylinders": cylinders,
     }
 
 
-def inspect_step(path: Path):
-    o = v.load_occ()
-    shape = v.read_step(path)
-    solids = v.explore(shape, o["TopAbs_SOLID"])
-    solids.sort(key=v.volume, reverse=True)
-    return {
-        "path": str(path),
-        "sha256": v.sha256(path),
-        "compound_volume": v.volume(shape),
-        "compound_area": v.area(shape),
-        "solid_count": len(solids),
-        "solids": [solid_detail(solid, i) for i, solid in enumerate(solids)],
+def build_native_candidate(module):
+    from build123d import Face, Wire, extrude, fillet
+
+    raw_end_x = module.SOLDER_X_START_MM + RAW_EXTRUSION_LENGTH_MM
+    profile_face = Face(module._solder_profile_wire(module.SOLDER_X_START_MM))
+    raw_meniscus = extrude(profile_face, RAW_EXTRUSION_LENGTH_MM, dir=(1, 0, 0))
+
+    terminal_edges = []
+    terminal_edge_bounds = []
+    for edge in raw_meniscus.edges():
+        bounds = v.bbox(edge.wrapped)
+        if abs(bounds[0] - raw_end_x) <= 2.0e-5 and abs(bounds[3] - raw_end_x) <= 2.0e-5:
+            terminal_edges.append(edge)
+            terminal_edge_bounds.append(bounds)
+    if len(terminal_edges) != 2:
+        raise RuntimeError(
+            f"Expected two terminal perimeter edges at X={raw_end_x}, found {len(terminal_edges)}: {terminal_edge_bounds}"
+        )
+
+    rolled_shape = fillet(terminal_edges, TERMINAL_ROLL_RADIUS_MM).clean()
+    rolled = rolled_shape.solids()[0]
+
+    pad_wire = Wire.make_polygon(
+        [(x, y, PAD_Z_MIN_MM) for x, y in PAD_POINTS_XY], close=True
+    )
+    pad = extrude(Face(pad_wire), PAD_Z_MAX_MM - PAD_Z_MIN_MM, dir=(0, 0, 1))
+    fused = rolled.fuse(pad).clean()
+
+    junction_edges = []
+    junction_edge_bounds = []
+    terminal_tangent_x = raw_end_x - TERMINAL_ROLL_RADIUS_MM
+    for edge in fused.edges():
+        bounds = v.bbox(edge.wrapped)
+        lies_on_pad_plane = (
+            abs(bounds[2] - PAD_Z_MIN_MM) <= 2.0e-5
+            and abs(bounds[5] - PAD_Z_MIN_MM) <= 2.0e-5
+        )
+        is_terminal_junction = (
+            bounds[0] >= terminal_tangent_x - 2.0e-5
+            and bounds[3] <= raw_end_x + 2.0e-5
+        )
+        not_pad_outer_edge = (
+            bounds[0] > min(x for x, _ in PAD_POINTS_XY) + 0.05
+            and bounds[3] < max(x for x, _ in PAD_POINTS_XY) - 0.05
+        )
+        if lies_on_pad_plane and is_terminal_junction and not_pad_outer_edge:
+            junction_edges.append(edge)
+            junction_edge_bounds.append(bounds)
+    if not junction_edges:
+        raise RuntimeError("No terminal pad-junction edges identified")
+
+    rounded_shape = fillet(junction_edges, JUNCTION_ROUND_RADIUS_MM).clean()
+    candidate = rounded_shape.solids()[0]
+    if not candidate.is_valid:
+        raise RuntimeError("Native solder candidate is invalid")
+    return candidate, {
+        "raw_end_x": raw_end_x,
+        "terminal_edge_count": len(terminal_edges),
+        "terminal_edge_bounds": terminal_edge_bounds,
+        "junction_edge_count": len(junction_edges),
+        "junction_edge_bounds": junction_edge_bounds,
     }
+
+
+def exact_pair(reference_path: Path, candidate_path: Path):
+    validator = ROOT / "original_validate_geometry.py"
+    attempts = []
+    for operation, fuzzy in (("pairfiles", 0.0), ("pairdirect", 0.0), ("pairfiles", 1.0e-10)):
+        command = [
+            sys.executable,
+            "-u",
+            str(validator),
+            "--worker",
+            "--root",
+            str(ROOT / "work"),
+            operation,
+            str(reference_path),
+            str(candidate_path),
+            str(fuzzy),
+        ]
+        try:
+            process = subprocess.run(
+                command, text=True, capture_output=True, timeout=180
+            )
+        except subprocess.TimeoutExpired:
+            attempts.append({"operation": operation, "fuzzy": fuzzy, "error": "timeout"})
+            continue
+        lines = [
+            line.strip()
+            for line in process.stdout.splitlines()
+            if line.strip().startswith("{")
+        ]
+        payload = json.loads(lines[-1]) if lines else {
+            "success": False,
+            "error": "no JSON result",
+            "stdout": process.stdout[-2000:],
+            "stderr": process.stderr[-2000:],
+        }
+        payload["operation"] = operation
+        payload["fuzzy"] = fuzzy
+        attempts.append(payload)
+        if payload.get("success"):
+            return {"success": True, "selected": payload, "attempts": attempts}
+    return {"success": False, "attempts": attempts}
 
 
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: interrogate_solder_solids.py REFERENCE_STEP GENERATED_STEP")
-    reference = Path(sys.argv[1])
-    generated = Path(sys.argv[2])
+    reference_path = Path(sys.argv[1])
+    generated_path = Path(sys.argv[2])
+    module, production_script = load_production_module(generated_path)
+
+    o = v.load_occ()
+    reference_shape = v.read_step(reference_path)
+    reference_solids = v.explore(reference_shape, o["TopAbs_SOLID"])
+    reference_solids.sort(key=v.volume, reverse=True)
+    reference_solder = reference_solids[REFERENCE_SOLDER_INDEX]
+
+    generated_shape = v.read_step(generated_path)
+    generated_solids = v.explore(generated_shape, o["TopAbs_SOLID"])
+    generated_solids.sort(key=v.volume, reverse=True)
+    generated_solder = generated_solids[REFERENCE_SOLDER_INDEX]
+
     payload = {
-        "reference": inspect_step(reference),
-        "generated": inspect_step(generated),
+        "reference_sha256": v.sha256(reference_path),
+        "generated_sha256": v.sha256(generated_path),
+        "production_script": str(production_script),
+        "reference_solder": shape_summary(reference_solder),
+        "current_generated_solder": shape_summary(generated_solder),
+        "native_candidate_parameters": {
+            "raw_extrusion_length_mm": RAW_EXTRUSION_LENGTH_MM,
+            "terminal_roll_radius_mm": TERMINAL_ROLL_RADIUS_MM,
+            "junction_round_radius_mm": JUNCTION_ROUND_RADIUS_MM,
+            "pad_z_min_mm": PAD_Z_MIN_MM,
+            "pad_z_max_mm": PAD_Z_MAX_MM,
+            "pad_points_xy": PAD_POINTS_XY,
+        },
     }
+
+    try:
+        candidate, selection = build_native_candidate(module)
+        candidate_path = ROOT / "kailh_native_solder_candidate.step"
+        reference_solder_path = ROOT / "kailh_reference_solder_right.step"
+        from build123d import export_step
+
+        export_step(candidate, candidate_path)
+        write_step_shape(reference_solder, reference_solder_path)
+        payload["native_candidate"] = shape_summary(candidate.wrapped)
+        payload["native_candidate_selection"] = selection
+        payload["native_candidate_exact_boolean"] = exact_pair(
+            reference_solder_path, candidate_path
+        )
+        payload["candidate_step"] = str(candidate_path)
+        payload["reference_solder_step"] = str(reference_solder_path)
+    except Exception as exc:
+        payload["native_candidate_error"] = f"{type(exc).__name__}: {exc}"
+
     output = ROOT / "kailh_soldered_feature_interrogation.json"
     output.write_text(json.dumps(payload, indent=2))
-    compact = {
-        side: [
-            {
-                "index": solid["index"],
-                "volume": solid["volume"],
-                "area": solid["area"],
-                "bbox": solid["bbox"],
-                "center_of_mass": solid["center_of_mass"],
-                "face_count": solid["face_count"],
-                "surface_type_counts": solid["surface_type_counts"],
-            }
-            for solid in payload[side]["solids"]
-        ]
-        for side in ("reference", "generated")
-    }
-    print(json.dumps(compact, indent=2))
+    print(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":
