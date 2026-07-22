@@ -1,4 +1,4 @@
-name: Temporary DracuLad Kailh soldered exact validation
+name: Temporary DracuLad Kailh solder candidate validation
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   exact-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout temporary branch
         uses: actions/checkout@v4
@@ -46,8 +46,7 @@ jobs:
           actual = hashlib.sha256(data).hexdigest()
           if actual != expected:
               raise SystemExit(f'Original validator SHA mismatch: {actual}')
-          path = root / 'original_validate_geometry.py'
-          path.write_bytes(data)
+          (root / 'original_validate_geometry.py').write_bytes(data)
           print(f'Original validator SHA-256: {actual}')
           PY
           python -m py_compile tmp_draculad/original_validate_geometry.py
@@ -86,9 +85,7 @@ jobs:
                   break
           if not output.exists():
               raise SystemExit(f'Exact historical reference not found. Candidates: {matches}')
-          print(f'Reference: {output}')
-          print(f'SHA-256: {hashlib.sha256(output.read_bytes()).hexdigest()}')
-          print(f'Candidates checked: {matches}')
+          print(f'Reference SHA-256: {hashlib.sha256(output.read_bytes()).hexdigest()}')
           PY
 
       - name: Decode and fresh-build current production script
@@ -97,32 +94,24 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           python - <<'PY'
-          import base64
-          import hashlib
-          import lzma
-          import os
+          import base64, hashlib, lzma, os, subprocess, sys
           from pathlib import Path
-          import subprocess
-          import sys
 
           root = Path('tmp_draculad')
           work = root / 'work'
           script = work / 'scripts' / 'components' / 'kailh cherry socket soldered.py'
           generated = work / 'generated' / 'components' / 'kailh cherry socket soldered.step'
-          encoded = (root / 'kailh_soldered_script.xz.b64').read_text().strip()
-          data = lzma.decompress(base64.b64decode(encoded))
+          data = lzma.decompress(base64.b64decode((root / 'kailh_soldered_script.xz.b64').read_text().strip()))
           expected = '80c75a9f08d74e4827671d46165d47f1fdf03dae0a438cb1783b025aa2d3b833'
           actual = hashlib.sha256(data).hexdigest()
           if actual != expected:
               raise SystemExit(f'Production script SHA mismatch: {actual}')
           script.parent.mkdir(parents=True, exist_ok=True)
           script.write_bytes(data)
-          env = dict(os.environ, OCP_SHOW='0', PYTHONUNBUFFERED='1')
           result = subprocess.run(
               [sys.executable, str(script), str(generated.parent)],
-              text=True,
-              capture_output=True,
-              env=env,
+              text=True, capture_output=True,
+              env=dict(os.environ, OCP_SHOW='0', PYTHONUNBUFFERED='1'),
               timeout=900,
           )
           (root / 'kailh_soldered_fresh_build.log').write_text(
@@ -133,67 +122,28 @@ jobs:
           print(generated)
           PY
 
-      - name: Interrogate exact reference and generated solids
-        env:
-          OCP_SHOW: '0'
-          PYTHONUNBUFFERED: '1'
-        run: |
-          python tmp_draculad/interrogate_solder_solids.py \
-            'tmp_draculad/work/kailh cherry socket soldered.reference.step' \
-            'tmp_draculad/work/generated/components/kailh cherry socket soldered.step' \
-            2>&1 | tee tmp_draculad/kailh_soldered_interrogation.log
-
-      - name: Run original project exact bodywise Splitter validator
+      - name: Build native feature candidate and run isolated exact Boolean
         env:
           OCP_SHOW: '0'
           PYTHONUNBUFFERED: '1'
         run: |
           set -o pipefail
-          python -u tmp_draculad/original_validate_geometry.py \
-            --worker --root tmp_draculad/work bodywise \
+          python tmp_draculad/interrogate_solder_solids.py \
             'tmp_draculad/work/kailh cherry socket soldered.reference.step' \
             'tmp_draculad/work/generated/components/kailh cherry socket soldered.step' \
-            2>&1 | tee tmp_draculad/kailh_soldered_bodywise_validation.log
+            2>&1 | tee tmp_draculad/kailh_soldered_interrogation.log
 
-      - name: Summarize exact result
-        if: always()
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          log = Path('tmp_draculad/kailh_soldered_bodywise_validation.log')
-          lines = [
-              line.strip() for line in log.read_text().splitlines()
-              if line.strip().startswith('{')
-          ] if log.exists() else []
-          payload = json.loads(lines[-1]) if lines else {
-              'success': False,
-              'error': 'no JSON result',
-          }
-          interrogation_path = Path('tmp_draculad/kailh_soldered_feature_interrogation.json')
-          if payload.get('success') and interrogation_path.exists():
-              interrogation = json.loads(interrogation_path.read_text())
-              ref_volume = interrogation['reference']['compound_volume']
-              payload['reference_volume_mm3'] = ref_volume
-              payload['xor_percent_reference_compound'] = 100.0 * payload['xor_volume'] / ref_volume
-              payload['strict_under_0_01_percent'] = payload['xor_percent_reference_compound'] < 0.01
-              payload['fallback_used'] = False
-          output = Path('tmp_draculad/kailh_soldered_bodywise_summary.json')
-          output.write_text(json.dumps(payload, indent=2))
-          print(json.dumps(payload, indent=2))
-          PY
-
-      - name: Upload exact validation evidence
+      - name: Upload isolated exact candidate evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: draculad-kailh-soldered-exact-validation
+          name: draculad-kailh-solder-candidate-exact-validation
           if-no-files-found: warn
           path: |
             tmp_draculad/kailh_soldered_feature_interrogation.json
             tmp_draculad/kailh_soldered_interrogation.log
-            tmp_draculad/kailh_soldered_bodywise_summary.json
-            tmp_draculad/kailh_soldered_bodywise_validation.log
             tmp_draculad/kailh_soldered_fresh_build.log
+            tmp_draculad/kailh_native_solder_candidate.step
+            tmp_draculad/kailh_reference_solder_right.step
             tmp_draculad/work/generated/components/kailh cherry socket soldered.step
             tmp_draculad/work/generated/components/kailh cherry socket soldered.stl
