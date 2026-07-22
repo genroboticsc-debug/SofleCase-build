@@ -1,6 +1,9 @@
 name: Temporary DracuLad Kailh solder candidate 2
 
 on:
+  push:
+    branches:
+      - 'tmp/draculad-kailh-validation'
   pull_request:
     paths:
       - '.github/workflows/tmp-draculad-kailh-candidate2.yml'
