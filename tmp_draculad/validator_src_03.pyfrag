@@ -1,0 +1,26 @@
+        "strict_under_0_01_percent": bool(
+            (direct.get("ok") and direct.get("xor_percent_reference", 1e9) < 0.01)
+            or (partitioned and partitioned["all_exact_booleans_succeeded"]
+                and partitioned["xor_percent_reference"] < 0.01)
+        ),
+        "fallback_used": False,
+    }
+    RESULT.write_text(json.dumps(result, indent=2))
+    print(json.dumps({
+        "solid_count": result["solid_count"],
+        "volume_error_percent": result["compound"]["volume_error_percent"],
+        "area_error_percent": result["compound"]["area_error_percent"],
+        "direct_boolean": direct,
+        "partitioned_summary": None if partitioned is None else {
+            k: v for k, v in partitioned.items() if k != "leaves"
+        },
+        "strict_under_0_01_percent": result["strict_under_0_01_percent"],
+    }, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
+        worker(sys.argv[2])
+    else:
+        raise SystemExit(main())
