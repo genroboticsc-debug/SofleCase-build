@@ -122,6 +122,42 @@ jobs:
           print(generated)
           PY
 
+      - name: Patch selector to ten curved terminal edges
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tmp_draculad/interrogate_solder_solids.py')
+          text = path.read_text()
+          old = '''        if abs(bounds[0] - raw_end_x) <= 2.0e-5 and abs(bounds[3] - raw_end_x) <= 2.0e-5:
+            terminal_edges.append(edge)
+            terminal_edge_bounds.append(bounds)
+    if len(terminal_edges) != 2:
+        raise RuntimeError(
+            f"Expected two terminal perimeter edges at X={raw_end_x}, found {len(terminal_edges)}: {terminal_edge_bounds}"
+        )
+'''
+          new = '''        on_terminal_plane = (
+            abs(bounds[0] - raw_end_x) <= 2.0e-5
+            and abs(bounds[3] - raw_end_x) <= 2.0e-5
+        )
+        is_horizontal_top_land = (
+            abs(bounds[2] - PAD_Z_MIN_MM) <= 2.0e-5
+            and abs(bounds[5] - PAD_Z_MIN_MM) <= 2.0e-5
+        )
+        if on_terminal_plane and not is_horizontal_top_land:
+            terminal_edges.append(edge)
+            terminal_edge_bounds.append(bounds)
+    if len(terminal_edges) != 10:
+        raise RuntimeError(
+            f"Expected ten curved terminal perimeter edges at X={raw_end_x}, found {len(terminal_edges)}: {terminal_edge_bounds}"
+        )
+'''
+          if old not in text:
+              raise SystemExit('Expected selector block not found')
+          path.write_text(text.replace(old, new))
+          PY
+          python -m py_compile tmp_draculad/interrogate_solder_solids.py
+
       - name: Build native feature candidate and run isolated exact Boolean
         env:
           OCP_SHOW: '0'
