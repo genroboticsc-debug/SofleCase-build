@@ -1,0 +1,120 @@
+
+
+def boolean(op: str, a, b):
+    o = load_occ()
+    cls = o["BRepAlgoAPI_Cut"] if op == "cut" else o["BRepAlgoAPI_Common"]
+    alg = cls(a, b)
+    if hasattr(alg, "SetFuzzyValue"):
+        alg.SetFuzzyValue(0.0)
+    if hasattr(alg, "SetRunParallel"):
+        alg.SetRunParallel(False)
+    if hasattr(alg, "SetUseOBB"):
+        alg.SetUseOBB(True)
+    alg.Build()
+    if not alg.IsDone():
+        raise RuntimeError(f"OpenCascade {op} failed")
+    result = alg.Shape()
+    if result.IsNull():
+        return result, 0.0
+    return result, volume(result)
+
+
+def largest_solid(path: Path):
+    o = load_occ()
+    solids = explore(read_step(path), o["TopAbs_SOLID"])
+    if not solids:
+        raise RuntimeError(f"No solids in {path}")
+    solids.sort(key=volume, reverse=True)
+    return solids[0]
+
+
+def worker(bounds_json: str) -> None:
+    bounds = json.loads(bounds_json)
+    ref = largest_solid(REFERENCE)
+    gen = largest_solid(GENERATED)
+    if bounds is not None:
+        clip = make_box(bounds)
+        ref, rv = boolean("common", ref, clip)
+        gen, gv = boolean("common", gen, clip)
+    else:
+        rv, gv = volume(ref), volume(gen)
+    if rv <= 1e-15 and gv <= 1e-15:
+        print(json.dumps({"ok": True, "a_minus_b": 0.0, "b_minus_a": 0.0,
+                          "ref_cell_volume": rv, "gen_cell_volume": gv}))
+        return
+    _, ab = boolean("cut", ref, gen)
+    _, ba = boolean("cut", gen, ref)
+    print(json.dumps({"ok": True, "a_minus_b": ab, "b_minus_a": ba,
+                      "ref_cell_volume": rv, "gen_cell_volume": gv}))
+
+
+def run_boolean_cell(bounds, timeout_s: int = 120) -> dict[str, Any]:
+    cmd = [sys.executable, str(Path(__file__).resolve()), "--worker", json.dumps(bounds)]
+    started = time.time()
+    try:
+        p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "reason": "timeout", "seconds": time.time() - started}
+    if p.returncode != 0:
+        return {"ok": False, "reason": "worker_error", "stderr": p.stderr[-4000:],
+                "stdout": p.stdout[-2000:], "seconds": time.time() - started}
+    lines = [line for line in p.stdout.splitlines() if line.strip().startswith("{")]
+    if not lines:
+        return {"ok": False, "reason": "no_json", "stdout": p.stdout[-4000:]}
+    result = json.loads(lines[-1])
+    result["seconds"] = time.time() - started
+    return result
+
+
+def split_bounds(bounds):
+    x0, y0, z0, x1, y1, z1 = bounds
+    lengths = (x1 - x0, y1 - y0, z1 - z0)
+    axis = max(range(3), key=lambda i: lengths[i])
+    mid = ((x0, y0, z0)[axis] + (x1, y1, z1)[axis]) / 2
+    low = [x0, y0, z0, x1, y1, z1]
+    high = list(low)
+    low[axis + 3] = mid
+    high[axis] = mid
+    return low, high
+
+
+def exact_partitioned_xor(root_bounds, reference_volume: float, max_depth: int = 7):
+    totals = {"a_minus_b": 0.0, "b_minus_a": 0.0}
+    leaves = []
+    unresolved = []
+
+    def solve(bounds, depth):
+        r = run_boolean_cell(bounds, timeout_s=90 if depth < 2 else 45)
+        if r.get("ok"):
+            totals["a_minus_b"] += r["a_minus_b"]
+            totals["b_minus_a"] += r["b_minus_a"]
+            leaves.append({"bounds": bounds, "depth": depth, **r})
+            return
+        if depth >= max_depth:
+            unresolved.append({"bounds": bounds, "depth": depth, **r})
+            return
+        a, b = split_bounds(bounds)
+        solve(a, depth + 1)
+        solve(b, depth + 1)
+
+    solve(root_bounds, 0)
+    xor = totals["a_minus_b"] + totals["b_minus_a"]
+    return {
+        **totals,
+        "xor_volume": xor,
+        "xor_percent_reference": 100.0 * xor / reference_volume,
+        "resolved_cells": len(leaves),
+        "unresolved_cells": unresolved,
+        "all_exact_booleans_succeeded": not unresolved,
+        "method": "disjoint_axis_aligned_cells_zero_fuzzy_OpenCascade_AminusB_plus_BminusA",
+        "leaves": leaves,
+    }
+
+
+def surface_inventory(shape):
+    o = load_occ()
+    names = {
+        str(o["GeomAbs_SurfaceType"].GeomAbs_Plane): "plane",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_Cylinder): "cylinder",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_Cone): "cone",
+        str(o["GeomAbs_SurfaceType"].GeomAbs_Sphere): "sphere",
