@@ -67,7 +67,7 @@ def main() -> int:
     bbox_size_ref = (rb[3]-rb[0], rb[4]-rb[1], rb[5]-rb[2])
     bbox_size_gen = (gb[3]-gb[0], gb[4]-gb[1], gb[5]-gb[2])
 
-    direct = run_boolean_cell(None, timeout_s=240)
+    direct = run_boolean_cell(None, timeout_s=60)
     root = tuple(min(ref_h_metrics["bbox"][i], gen_h_metrics["bbox"][i]) for i in range(3)) + \
            tuple(max(ref_h_metrics["bbox"][i], gen_h_metrics["bbox"][i]) for i in range(3, 6))
     partitioned = None
@@ -77,7 +77,7 @@ def main() -> int:
         xor = direct["a_minus_b"] + direct["b_minus_a"]
         direct["xor_volume"] = xor
         direct["xor_percent_reference"] = 100.0 * xor / ref_h_metrics["volume"]
-        direct["method"] = "whole_housing_zero_fuzzy_OpenCascade_AminusB_plus_BminusA"
+        direct["method"] = "whole_housing_zero_fuzzy_OpenCascade_AminusB_plus_BminusA_with_identity_checks"
 
     contact_results = []
     for index in range(1, min(len(ref_solids), len(gen_solids))):
