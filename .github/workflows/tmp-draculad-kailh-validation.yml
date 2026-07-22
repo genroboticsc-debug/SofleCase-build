@@ -25,13 +25,58 @@ jobs:
       - name: Install pinned CAD runtime
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'build123d==0.9.1'
+          python -m pip install 'build123d==0.9.1' scipy
 
-      - name: Assemble auditable validator source
+      - name: Assemble SHA-verified analysis tools
         run: |
           cat tmp_draculad/validator_src_*.pyfrag > tmp_draculad/run_validation.py
           python -m py_compile tmp_draculad/run_validation.py
           python -m py_compile tmp_draculad/interrogate_reference.py
+          python - <<'PY'
+          import base64, hashlib, lzma
+          from pathlib import Path
+          root = Path('tmp_draculad')
+          encoded = ''.join(p.read_text().strip() for p in sorted(root.glob('orig_validator_xz_*.b64')))
+          data = lzma.decompress(base64.b64decode(encoded))
+          expected = '13e4630d7f87a05ab13588caf4d1224a759301f9a3754bc57334b5394608ca7f'
+          actual = hashlib.sha256(data).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'Original validator SHA mismatch: {actual}')
+          path = root / 'original_validate_geometry.py'
+          path.write_bytes(data)
+          print(f'Original validator SHA-256: {actual}')
+          PY
+          python -m py_compile tmp_draculad/original_validate_geometry.py
+
+      - name: Reconstruct exact inputs and fresh-build production script
+        env:
+          OCP_SHOW: '0'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python - <<'PY'
+          import os, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('tmp_draculad').resolve()))
+          import run_validation as v
+          v.WORK.mkdir(parents=True, exist_ok=True)
+          v.decode_chunks('ref_xz_', v.REFERENCE)
+          v.decode_chunks('script_xz_', v.SCRIPT)
+          if v.sha256(v.REFERENCE) != v.EXPECTED_REF_SHA256:
+              raise SystemExit('Reference SHA mismatch')
+          if v.sha256(v.SCRIPT) != v.EXPECTED_SCRIPT_SHA256:
+              raise SystemExit('Production script SHA mismatch')
+          env = dict(os.environ, OCP_SHOW='0', PYTHONUNBUFFERED='1')
+          result = subprocess.run(
+              [sys.executable, str(v.SCRIPT), str(v.GENERATED_DIR)],
+              text=True, capture_output=True, env=env, timeout=900,
+          )
+          Path('tmp_draculad/fresh_build.log').write_text(
+              result.stdout + '\n--- STDERR ---\n' + result.stderr
+          )
+          if result.returncode != 0 or not v.GENERATED.exists():
+              raise SystemExit('Fresh production build failed')
+          print(v.GENERATED)
+          PY
 
       - name: Interrogate exact reference feature boundaries
         env:
@@ -40,13 +85,35 @@ jobs:
         run: |
           python tmp_draculad/interrogate_reference.py 2>&1 | tee tmp_draculad/interrogation_run.log
 
-      - name: Fresh build and exact A-B plus B-A validation
+      - name: Run original project exact bodywise Splitter validator
         env:
           OCP_SHOW: '0'
           PYTHONUNBUFFERED: '1'
         run: |
           set -o pipefail
-          python tmp_draculad/run_validation.py 2>&1 | tee tmp_draculad/validation_run.log
+          python -u tmp_draculad/original_validate_geometry.py \
+            --worker --root tmp_draculad/work bodywise \
+            tmp_draculad/work/Kailh-CherryMX-Socket.reference.step \
+            tmp_draculad/work/generated/components/Kailh-CherryMX-Socket.step \
+            2>&1 | tee tmp_draculad/original_bodywise_validation.log
+
+      - name: Summarize exact result
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          log = Path('tmp_draculad/original_bodywise_validation.log')
+          lines = [line.strip() for line in log.read_text().splitlines() if line.strip().startswith('{')] if log.exists() else []
+          payload = json.loads(lines[-1]) if lines else {'success': False, 'error': 'no JSON result'}
+          if payload.get('success'):
+              ref_volume = 91.70041673163836
+              payload['xor_percent_reference_compound'] = 100.0 * payload['xor_volume'] / ref_volume
+              payload['strict_under_0_01_percent'] = payload['xor_percent_reference_compound'] < 0.01
+              payload['fallback_used'] = False
+          Path('tmp_draculad/original_bodywise_summary.json').write_text(json.dumps(payload, indent=2))
+          print(json.dumps(payload, indent=2))
+          PY
 
       - name: Upload exact validation evidence
         if: always()
@@ -57,7 +124,8 @@ jobs:
           path: |
             tmp_draculad/reference_feature_interrogation.json
             tmp_draculad/interrogation_run.log
-            tmp_draculad/validation_result.json
-            tmp_draculad/validation_run.log
+            tmp_draculad/original_bodywise_summary.json
+            tmp_draculad/original_bodywise_validation.log
+            tmp_draculad/fresh_build.log
             tmp_draculad/work/generated/components/Kailh-CherryMX-Socket.step
             tmp_draculad/work/generated/components/Kailh-CherryMX-Socket.stl
