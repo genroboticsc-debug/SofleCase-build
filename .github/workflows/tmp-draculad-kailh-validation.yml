@@ -31,6 +31,14 @@ jobs:
         run: |
           cat tmp_draculad/validator_src_*.pyfrag > tmp_draculad/run_validation.py
           python -m py_compile tmp_draculad/run_validation.py
+          python -m py_compile tmp_draculad/interrogate_reference.py
+
+      - name: Interrogate exact reference feature boundaries
+        env:
+          OCP_SHOW: '0'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python tmp_draculad/interrogate_reference.py 2>&1 | tee tmp_draculad/interrogation_run.log
 
       - name: Fresh build and exact A-B plus B-A validation
         env:
@@ -47,6 +55,8 @@ jobs:
           name: draculad-kailh-exact-validation
           if-no-files-found: warn
           path: |
+            tmp_draculad/reference_feature_interrogation.json
+            tmp_draculad/interrogation_run.log
             tmp_draculad/validation_result.json
             tmp_draculad/validation_run.log
             tmp_draculad/work/generated/components/Kailh-CherryMX-Socket.step
