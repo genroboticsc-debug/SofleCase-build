@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import lzma
+import math
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent
+WORK = ROOT / "work"
+REFERENCE = WORK / "Kailh-CherryMX-Socket.reference.step"
+SCRIPT = WORK / "scripts" / "components" / "Kailh-CherryMX-Socket.py"
+GENERATED_DIR = WORK / "generated" / "components"
+GENERATED = GENERATED_DIR / "Kailh-CherryMX-Socket.step"
+RESULT = ROOT / "validation_result.json"
+EXPECTED_REF_SHA256 = "d00ae34ef9883a3893d7a93ce5a99082eef358e3346b9bea2b89fe47e691d09c"
+EXPECTED_SCRIPT_SHA256 = "750f822137f43c5be6334bffea233f73a2e0639321b3c7d19b29a032cec1e88d"
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def decode_chunks(prefix: str, output: Path) -> None:
+    chunks = sorted(ROOT.glob(f"{prefix}*.b64"))
+    if not chunks:
+        raise RuntimeError(f"No chunks found for {prefix}")
+    encoded = "".join(p.read_text().strip() for p in chunks)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(lzma.decompress(base64.b64decode(encoded)))
+
+
+def load_occ():
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.BRepCheck import BRepCheck_Analyzer
+    from OCP.BRepGProp import brepgprop
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.GProp import GProp_GProps
+    from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
+    from OCP.gp import gp_Pnt
+    from OCP.STEPControl import STEPControl_Reader
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+    return locals()
+
+
+def read_step(path: Path):
+    o = load_occ()
+    reader = o["STEPControl_Reader"]()
+    status = reader.ReadFile(str(path))
+    if int(status) != 1:
+        raise RuntimeError(f"STEP read failed: {path}, status={status}")
+    if reader.TransferRoots() <= 0:
+        raise RuntimeError(f"STEP transfer failed: {path}")
+    return reader.OneShape()
+
+
+def explore(shape, kind):
+    o = load_occ()
+    exp = o["TopExp_Explorer"](shape, kind)
+    out = []
+    while exp.More():
+        out.append(exp.Current())
+        exp.Next()
+    return out
+
+
+def volume(shape) -> float:
+    o = load_occ()
+    p = o["GProp_GProps"]()
+    o["brepgprop"].VolumeProperties_s(shape, p)
+    return float(p.Mass())
+
+
+def area(shape) -> float:
+    o = load_occ()
+    p = o["GProp_GProps"]()
+    o["brepgprop"].SurfaceProperties_s(shape, p)
+    return float(p.Mass())
+
+
+def center_of_mass(shape) -> tuple[float, float, float]:
+    o = load_occ()
+    p = o["GProp_GProps"]()
+    o["brepgprop"].VolumeProperties_s(shape, p)
+    c = p.CentreOfMass()
+    return (float(c.X()), float(c.Y()), float(c.Z()))
+
+
+def bbox(shape) -> tuple[float, float, float, float, float, float]:
+    o = load_occ()
+    b = o["Bnd_Box"]()
+    o["BRepBndLib"].Add_s(shape, b, True)
+    return tuple(float(x) for x in b.Get())
+
+
+def is_valid(shape) -> bool:
+    return bool(load_occ()["BRepCheck_Analyzer"](shape).IsValid())
+
+
+def make_box(bounds):
+    o = load_occ()
+    x0, y0, z0, x1, y1, z1 = bounds
+    return o["BRepPrimAPI_MakeBox"](
+        o["gp_Pnt"](x0, y0, z0), o["gp_Pnt"](x1, y1, z1)
+    ).Shape()
