@@ -10,29 +10,23 @@ permissions:
   contents: read
 
 jobs:
-  fetch-exact-runtime:
+  fetch-vtk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Download exact compatible CAD runtime wheels
+      - name: Download exact VTK runtime wheel
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p runtime
-          curl -fL --retry 5 --retry-all-errors \
-            -o runtime/build123d-0.9.1-py3-none-any.whl \
-            https://files.pythonhosted.org/packages/fa/f1/9adca2cf75b23c0678bd0460ec0386c9ccf32fe65f29d8ecaa4474905749/build123d-0.9.1-py3-none-any.whl
-          echo "0e2a3c171d7db55329201438a95ab888df6c1b0fd13067a3780efcc8fbe1cc78  runtime/build123d-0.9.1-py3-none-any.whl" | sha256sum -c -
-          python -m pip download --only-binary=:all: --no-deps --dest runtime \
-            'cadquery-ocp==7.8.1.1' 'ocpsvg==0.4.0'
-          echo "a218e63d146ba222923aaabf8f2927668b9e6cfd5e9a1d63de62dc867cdcfbf3  runtime/cadquery_ocp-7.8.1.1-cp313-cp313-manylinux_2_31_x86_64.whl" | sha256sum -c -
+          python -m pip download --only-binary=:all: --no-deps --dest runtime 'vtk==9.3.1'
           (cd runtime && sha256sum * > SHA256SUMS.txt)
-      - name: Upload exact compatible CAD runtime
+      - name: Upload exact VTK runtime
         uses: actions/upload-artifact@v4
         with:
-          name: build123d-0.9.1-ocp-7.8.1.1-cp313
+          name: vtk-9.3.1-cp313
           path: runtime/
           if-no-files-found: error
           retention-days: 1
