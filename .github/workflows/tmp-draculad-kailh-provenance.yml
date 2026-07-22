@@ -21,119 +21,37 @@ jobs:
       - name: Checkout temporary branch
         uses: actions/checkout@v4
 
-      - name: Inspect complete foostan kbd history
+      - name: Recover surviving editable Fusion solder source
         run: |
           set -euo pipefail
           git clone --quiet https://github.com/foostan/kbd.git /tmp/foostan-kbd
-          cd /tmp/foostan-kbd
-          git fetch --quiet --all --tags --prune
+          mkdir -p tmp_draculad/historical_sources
+          git -C /tmp/foostan-kbd cat-file blob \
+            e89e427d7a4a897090d8548b6ded44c6ae091adf \
+            > 'tmp_draculad/historical_sources/D_SOD-123 Soldered.f3z'
           python - <<'PY'
           import hashlib
           import json
           from pathlib import Path
-          import re
-          import subprocess
 
-          repo = Path('/tmp/foostan-kbd')
-          workspace = Path.cwd().parent.parent / 'SofleCase-build' / 'SofleCase-build'
-          artifact_dir = workspace / 'tmp_draculad' / 'historical_sources'
-          artifact_dir.mkdir(parents=True, exist_ok=True)
-          target_sha = '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56'
-          listing = subprocess.check_output(
-              ['git', '-C', str(repo), 'rev-list', '--objects', '--all'], text=True
-          )
-          candidates = []
-          target_objects = []
-          relevant_objects = []
-          for line in listing.splitlines():
-              if ' ' not in line:
-                  continue
-              object_id, path = line.split(' ', 1)
-              if re.search(r'(kailh|socket|solder)', path, re.I):
-                  relevant_objects.append({'object': object_id, 'path': path})
-              if re.search(r'kailh.*cherry.*socket.*soldered.*\.step$', path, re.I):
-                  data = subprocess.check_output(
-                      ['git', '-C', str(repo), 'cat-file', 'blob', object_id]
-                  )
-                  digest = hashlib.sha256(data).hexdigest()
-                  item = {'object': object_id, 'path': path, 'sha256': digest,
-                          'size_bytes': len(data)}
-                  candidates.append(item)
-                  if digest == target_sha:
-                      target_objects.append(item)
-
-          if not target_objects:
-              raise SystemExit(f'Exact reference blob not found: {candidates}')
-
-          commits = []
-          seen = set()
-          for target in target_objects:
-              output = subprocess.check_output(
-                  ['git', '-C', str(repo), 'log', '--all',
-                   '--format=%H%x09%P%x09%aI%x09%an%x09%s',
-                   '--find-object=' + target['object']], text=True
-              )
-              for row in output.splitlines():
-                  if not row.strip():
-                      continue
-                  commit, parents, date, author, subject = row.split('\t', 4)
-                  if commit in seen:
-                      continue
-                  seen.add(commit)
-                  commits.append({'commit': commit, 'parents': parents.split(),
-                                  'date': date, 'author': author, 'subject': subject})
-
-          tree_snapshots = []
-          for commit in commits:
-              sha = commit['commit']
-              paths = subprocess.check_output(
-                  ['git', '-C', str(repo), 'ls-tree', '-r', '--name-only', sha], text=True
-              ).splitlines()
-              nearby = [
-                  path for path in paths
-                  if re.search(r'(kailh|socket|solder|3d.?model|freecad|fusion)', path, re.I)
-              ]
-              tree_snapshots.append({'commit': sha, 'relevant_paths': nearby})
-
-          source_extensions = re.compile(
-              r'\.(FCStd|f3d|f3z|ipt|iam|sldprt|sldasm|scad|py|cq|brep|iges|igs)$', re.I
-          )
-          source_candidates = [
-              item for item in relevant_objects if source_extensions.search(item['path'])
-          ]
-
-          exported_sources = []
-          for source in source_candidates:
-              data = subprocess.check_output(
-                  ['git', '-C', str(repo), 'cat-file', 'blob', source['object']]
-              )
-              name = Path(source['path']).name
-              destination = artifact_dir / name
-              destination.write_bytes(data)
-              exported_sources.append({
-                  **source,
-                  'sha256': hashlib.sha256(data).hexdigest(),
-                  'size_bytes': len(data),
-                  'artifact_path': str(destination.relative_to(workspace)),
-              })
-
+          source = Path('tmp_draculad/historical_sources/D_SOD-123 Soldered.f3z')
           payload = {
-              'target_sha256': target_sha,
-              'target_objects': target_objects,
-              'all_filename_candidates': candidates,
-              'commits_touching_target_blob': commits,
-              'tree_snapshots': tree_snapshots,
-              'historical_source_candidates': source_candidates,
-              'exported_historical_sources': exported_sources,
-              'all_relevant_object_paths': relevant_objects,
+              'kailh_reference_sha256': '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56',
+              'kailh_reference_git_blob': 'f7f6a3420c03fe28eb78dd28473327d710f68a2a',
+              'source_commit': '230c6d634a8d409cbd1c506ec0260420a08a1c83',
+              'source_commit_date': '2020-09-28T01:29:15+09:00',
+              'surviving_editable_source': {
+                  'path': 'kicad-packages3D/kbd.3dshapes/D_SOD-123 Soldered.f3z',
+                  'git_blob': 'e89e427d7a4a897090d8548b6ded44c6ae091adf',
+                  'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+                  'size_bytes': source.stat().st_size,
+              },
+              'finding': 'No editable Kailh source exists in repository history; this Fusion archive is the only soldered editable source in the same author commit.',
           }
-          out = workspace / 'tmp_draculad' / 'kailh_provenance.json'
-          out.write_text(json.dumps(payload, indent=2))
-          print(json.dumps({
-              'target_objects': target_objects,
-              'commits': commits,
-              'exported_sources': exported_sources,
-          }, indent=2))
+          Path('tmp_draculad/kailh_provenance.json').write_text(
+              json.dumps(payload, indent=2)
+          )
+          print(json.dumps(payload, indent=2))
           PY
 
       - name: Upload provenance and editable source evidence
