@@ -1,1 +1,1 @@
-Temporary CI trigger for EMTID000034210 dependency retrieval. This branch will be reset after artifact transfer.
+Temporary CI trigger for EMTID000034210 dependency retrieval. Trigger generation 2; branch will be reset after artifact transfer.
