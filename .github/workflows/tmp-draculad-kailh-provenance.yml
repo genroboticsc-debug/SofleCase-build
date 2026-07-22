@@ -27,7 +27,6 @@ jobs:
           git clone --quiet https://github.com/foostan/kbd.git /tmp/foostan-kbd
           cd /tmp/foostan-kbd
           git fetch --quiet --all --tags --prune
-          target_sha='0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56'
           python - <<'PY'
           import hashlib
           import json
@@ -36,6 +35,9 @@ jobs:
           import subprocess
 
           repo = Path('/tmp/foostan-kbd')
+          workspace = Path.cwd().parent.parent / 'SofleCase-build' / 'SofleCase-build'
+          artifact_dir = workspace / 'tmp_draculad' / 'historical_sources'
+          artifact_dir.mkdir(parents=True, exist_ok=True)
           target_sha = '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56'
           listing = subprocess.check_output(
               ['git', '-C', str(repo), 'rev-list', '--objects', '--all'], text=True
@@ -67,7 +69,8 @@ jobs:
           seen = set()
           for target in target_objects:
               output = subprocess.check_output(
-                  ['git', '-C', str(repo), 'log', '--all', '--format=%H%x09%P%x09%aI%x09%an%x09%s',
+                  ['git', '-C', str(repo), 'log', '--all',
+                   '--format=%H%x09%P%x09%aI%x09%an%x09%s',
                    '--find-object=' + target['object']], text=True
               )
               for row in output.splitlines():
@@ -92,13 +95,27 @@ jobs:
               ]
               tree_snapshots.append({'commit': sha, 'relevant_paths': nearby})
 
-          # Search all historical path names for editable/source-CAD formats.
           source_extensions = re.compile(
               r'\.(FCStd|f3d|f3z|ipt|iam|sldprt|sldasm|scad|py|cq|brep|iges|igs)$', re.I
           )
           source_candidates = [
               item for item in relevant_objects if source_extensions.search(item['path'])
           ]
+
+          exported_sources = []
+          for source in source_candidates:
+              data = subprocess.check_output(
+                  ['git', '-C', str(repo), 'cat-file', 'blob', source['object']]
+              )
+              name = Path(source['path']).name
+              destination = artifact_dir / name
+              destination.write_bytes(data)
+              exported_sources.append({
+                  **source,
+                  'sha256': hashlib.sha256(data).hexdigest(),
+                  'size_bytes': len(data),
+                  'artifact_path': str(destination.relative_to(workspace)),
+              })
 
           payload = {
               'target_sha256': target_sha,
@@ -107,25 +124,22 @@ jobs:
               'commits_touching_target_blob': commits,
               'tree_snapshots': tree_snapshots,
               'historical_source_candidates': source_candidates,
+              'exported_historical_sources': exported_sources,
               'all_relevant_object_paths': relevant_objects,
           }
-          out = Path('/tmp/kailh_provenance.json')
+          out = workspace / 'tmp_draculad' / 'kailh_provenance.json'
           out.write_text(json.dumps(payload, indent=2))
           print(json.dumps({
               'target_objects': target_objects,
               'commits': commits,
-              'source_candidates': source_candidates,
-              'tree_relevant_counts': [
-                  {'commit': snap['commit'], 'count': len(snap['relevant_paths'])}
-                  for snap in tree_snapshots
-              ],
+              'exported_sources': exported_sources,
           }, indent=2))
           PY
 
-          cp /tmp/kailh_provenance.json "$GITHUB_WORKSPACE/tmp_draculad/kailh_provenance.json"
-
-      - name: Upload provenance evidence
+      - name: Upload provenance and editable source evidence
         uses: actions/upload-artifact@v4
         with:
           name: draculad-kailh-source-provenance
-          path: tmp_draculad/kailh_provenance.json
+          path: |
+            tmp_draculad/kailh_provenance.json
+            tmp_draculad/historical_sources/**
