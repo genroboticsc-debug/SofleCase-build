@@ -1,0 +1,80 @@
+name: Windows font glyph audit
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install fontTools
+        run: python -m pip install --disable-pip-version-check fonttools==4.59.0
+      - name: Extract only LCEDA glyph commands from installed Windows fonts
+        shell: pwsh
+        run: |
+          @'
+          import json, os, glob
+          from pathlib import Path
+          from fontTools.ttLib import TTFont
+          from fontTools.pens.recordingPen import RecordingPen
+
+          root = Path(os.environ['WINDIR']) / 'Fonts'
+          patterns = [
+              'arial*.ttf','arial*.otf','calibri*.ttf','calibri*.otf',
+              'segoeui*.ttf','segoeui*.otf','tahoma*.ttf','verdana*.ttf',
+              'micross*.ttf','trebuc*.ttf'
+          ]
+          files=[]
+          for pattern in patterns:
+              files.extend(root.glob(pattern))
+          files=sorted(set(files))
+          out={}
+          for path in files:
+              try:
+                  font=TTFont(str(path), lazy=False)
+                  cmap=font.getBestCmap() or {}
+                  gs=font.getGlyphSet()
+                  rec={
+                      'filename':path.name,
+                      'unitsPerEm':font['head'].unitsPerEm,
+                      'family':[],
+                      'glyphs':{}
+                  }
+                  if 'name' in font:
+                      for n in font['name'].names:
+                          if n.nameID in (1,2,4,6):
+                              try:s=n.toUnicode()
+                              except Exception:continue
+                              if s not in rec['family']:rec['family'].append(s)
+                  for ch in 'LCEDA':
+                      name=cmap.get(ord(ch))
+                      if not name:continue
+                      pen=RecordingPen(); gs[name].draw(pen)
+                      cmds=[]
+                      for op,pts in pen.value:
+                          cmds.append([op, [[float(x),float(y)] for x,y in pts]])
+                      width=font['hmtx'].metrics.get(name,[None,None])[0] if 'hmtx' in font else None
+                      rec['glyphs'][ch]={'name':name,'advanceWidth':width,'commands':cmds}
+                  out[path.name]=rec
+              except Exception as exc:
+                  out[path.name]={'error':repr(exc)}
+          Path('windows_lceda_glyphs.json').write_text(json.dumps(out,indent=2),encoding='utf-8')
+          Path('windows_font_inventory.txt').write_text('\n'.join(str(p) for p in files),encoding='utf-8')
+          print('\n'.join(str(p) for p in files))
+          '@ | Set-Content -Encoding UTF8 extract.py
+          python extract.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-lceda-glyph-audit
+          path: |
+            windows_lceda_glyphs.json
+            windows_font_inventory.txt
+          if-no-files-found: error
+          retention-days: 1
