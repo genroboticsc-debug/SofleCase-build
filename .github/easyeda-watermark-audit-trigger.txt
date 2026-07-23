@@ -1,0 +1,1 @@
+artifact-only trigger for exact EasyEDA 6.5.51 watermark source audit
