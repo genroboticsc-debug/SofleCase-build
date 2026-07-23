@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - .github/workflows/bootstrap-dilemma-cad-runtime.yml
+  pull_request:
+    paths:
+      - .github/bootstrap-dilemma-cad-runtime.trigger
   workflow_dispatch:
 
 permissions:
