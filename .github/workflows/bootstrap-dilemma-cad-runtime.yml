@@ -1,0 +1,40 @@
+name: Bootstrap Dilemma CAD Runtime
+
+on:
+  push:
+    paths:
+      - .github/workflows/bootstrap-dilemma-cad-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-runtime:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Set up CPython 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact runtime wheels
+        run: |
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            'cadquery-ocp==7.8.1.1.post1' \
+            'build123d==0.10.0' \
+            'manifold3d==3.2.1'
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          for path in sorted(Path('wheelhouse').glob('*')):
+              h = hashlib.sha256(path.read_bytes()).hexdigest()
+              print(f'{h}  {path.name}')
+          PY
+      - name: Upload runtime wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-cad-runtime-cp313
+          path: wheelhouse
+          compression-level: 0
+          retention-days: 1
