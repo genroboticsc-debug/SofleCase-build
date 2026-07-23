@@ -1,0 +1,1 @@
+artifact-only trigger for exact Three.js helvetiker font
