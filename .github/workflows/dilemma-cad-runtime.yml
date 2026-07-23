@@ -1,0 +1,64 @@
+name: Dilemma CAD Runtime Payload
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-payload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Download exact CAD runtime wheels
+        run: |
+          python -m pip install --upgrade pip
+          mkdir -p payload/runtime_wheels
+          python -m pip download --dest payload/runtime_wheels \
+            build123d==0.11.1 \
+            cadquery-ocp==7.9.3.1 \
+            manifold3d==3.5.2 \
+            trimesh==4.11.1 \
+            numpy==2.3.5
+
+      - name: Restore pinned Dilemma references
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a -- \
+            'mechanical/cases/3x5_2/tenting_puck/tenting_puck_v3_26.stl' \
+            'mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Integrated Tenting Puck.STEP' \
+            'mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Tenting Puck Opening.STEP' \
+            'mechanical/cases/3x5_2/thin/dilemma_nuts v27.step' \
+            'mechanical/cases/3x5_3_hotswap/mid.stl' \
+            'mechanical/cases/4x6_4/top.stl' \
+            'mechanical/cases/4x6_4_hotswap/mid.stl'
+          cd ..
+          mkdir -p payload/reference/original
+          cp -a upstream/mechanical payload/reference/original/
+          find payload/reference/original -type f -print0 | sort -z | xargs -0 sha256sum > payload/reference_sha256.txt
+
+      - name: Record environment
+        run: |
+          python --version > payload/python_version.txt
+          python -m pip --version > payload/pip_version.txt
+          ls -lah payload/runtime_wheels > payload/runtime_wheels_inventory.txt
+
+      - name: Upload runtime and references
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-cad-runtime-payload
+          path: payload
+          if-no-files-found: error
+          retention-days: 7
