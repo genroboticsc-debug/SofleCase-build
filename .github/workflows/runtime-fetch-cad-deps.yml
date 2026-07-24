@@ -1,0 +1,46 @@
+name: Temporary CAD Dependency Fetch
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download compatible runtime wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheels
+          python -m pip download --dest wheels --only-binary=:all: \
+            'ocp_gordon>=0.2,<0.3' \
+            'ocpsvg>=0.6,<0.7' \
+            'svgpathtools>=1.5.1,<2' \
+            'ezdxf>=1.1.0,<2' \
+            'trianglesolver' \
+            'lib3mf>=2.4.1' \
+            'manifold3d==3.5.2'
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          rows=[]
+          for path in sorted(Path('wheels').glob('*')):
+              rows.append({'name':path.name,'size':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+          Path('wheels/MANIFEST.json').write_text(json.dumps(rows,indent=2)+'\n')
+          PY
+      - name: Upload dependency bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: build123d-0.11.1-runtime-dependencies
+          path: wheels/
+          retention-days: 1
+          if-no-files-found: error
