@@ -1,0 +1,27 @@
+name: Temporary Build123d Runtime Fetch
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and verify exact Build123d wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl'
+          curl --fail --location --retry 4 --retry-all-errors "$url" --output build123d-0.11.1-py3-none-any.whl
+          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  build123d-0.11.1-py3-none-any.whl' | sha256sum --check
+      - name: Upload verified wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: build123d-0.11.1-wheel
+          path: build123d-0.11.1-py3-none-any.whl
+          retention-days: 1
+          if-no-files-found: error
