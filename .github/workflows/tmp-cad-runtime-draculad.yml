@@ -25,6 +25,7 @@ jobs:
           mkdir -p wheels
           python -m pip download --only-binary=:all: --no-deps \
             cadquery-ocp==7.8.1.1 \
+            cadquery-vtk==9.3.1 \
             build123d==0.9.1 \
             manifold3d \
             py-lib3mf \
