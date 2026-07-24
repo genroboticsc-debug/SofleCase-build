@@ -1,0 +1,53 @@
+name: Temporary CAD runtime bundle
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download pinned CAD runtime wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheels
+          python -m pip download --only-binary=:all: --no-deps \
+            cadquery-ocp==7.8.1.1 \
+            build123d==0.9.1 \
+            manifold3d \
+            py-lib3mf \
+            -d wheels
+          python -m pip download --only-binary=:all: \
+            'typing_extensions>=4.6,<5' \
+            'numpy>=2,<3' \
+            'svgpathtools>=1.5.1,<2' \
+            'anytree>=2.8,<3' \
+            'ezdxf>=1.1,<2' \
+            'ipython>=8,<9' \
+            'ocpsvg>=0.4' \
+            trianglesolver \
+            'shapely>=2.1' \
+            'networkx>=3.6,<4' \
+            'matplotlib>=3.10' \
+            'sexpdata>=1.0' \
+            -d wheels
+          ls -lah wheels
+
+      - name: Upload runtime wheel bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cad-runtime-cp313-linux
+          path: wheels/*.whl
+          retention-days: 1
