@@ -5,6 +5,11 @@ on:
     branches: [master]
     paths:
       - .github/workflows/dilemma-runtime-bootstrap.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-runtime-bootstrap.yml
+      - .github/dilemma-runtime-bootstrap-trigger.txt
   workflow_dispatch:
 
 permissions:
