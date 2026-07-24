@@ -1,0 +1,31 @@
+name: Temp Urchin Reference Download
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/temp_urchin_reference_download.yml'
+
+jobs:
+  download-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download authoritative upstream reference STLs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p refs
+          base='https://raw.githubusercontent.com/duckyb/urchin/main/3d-prints/case-by-chewiedies'
+          curl -fL "$base/v1-TrayWithChamfer-capture.stl" -o refs/v1-TrayWithChamfer-capture.stl
+          curl -fL "$base/v1-TrayWithChamfer-inserts.stl" -o refs/v1-TrayWithChamfer-inserts.stl
+          curl -fL "$base/v1-TrayWithFillet-capture.stl" -o refs/v1-TrayWithFillet-capture.stl
+          curl -fL "$base/v1-TrayWithFillet-inserts.stl" -o refs/v1-TrayWithFillet-inserts.stl
+          sha256sum refs/*
+      - name: Upload reference archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: urchin-reference-stls
+          path: refs/
+          if-no-files-found: error
+          retention-days: 1
