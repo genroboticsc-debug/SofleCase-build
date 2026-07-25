@@ -49,10 +49,7 @@ def closed_wire(edges: list[Edge]) -> Wire:
 
 
 def profile_wire(x: float) -> Wire:
-    edges = [
-        Edge.make_bezier(*((x, y, z) for y, z in span))
-        for span in PROFILE_SPANS_YZ
-    ]
+    edges = [Edge.make_bezier(*((x, y, z) for y, z in span)) for span in PROFILE_SPANS_YZ]
     first = PROFILE_SPANS_YZ[0][0]
     last = PROFILE_SPANS_YZ[-1][-1]
     edges.append(Edge.make_line((x, last[0], last[1]), (x, first[0], first[1])))
@@ -65,15 +62,23 @@ def pad_face() -> Face:
     return Face(closed_wire(edges))
 
 
+def _resolved(value):
+    return value() if callable(value) else value
+
+
 def geom_type_name(edge: Edge) -> str:
-    return str(edge.geom_type()).lower()
+    return str(_resolved(edge.geom_type)).lower()
+
+
+def edge_length(edge: Edge) -> float:
+    return float(_resolved(edge.length))
 
 
 def edge_record(edge: Edge) -> dict:
     bb = edge.bounding_box()
     return {
         "geom_type": geom_type_name(edge),
-        "length": edge.length,
+        "length": edge_length(edge),
         "bbox": [bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z],
     }
 
