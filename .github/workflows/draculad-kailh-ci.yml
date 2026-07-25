@@ -29,18 +29,18 @@ jobs:
           mkdir -p draculad-ci/work
           base64 -d draculad-ci/input.zip.b64 > draculad-ci/input.zip
           unzip -q draculad-ci/input.zip -d draculad-ci/work
-          cp draculad-ci/experiment10.py draculad-ci/work/experiment10.py
+          cp draculad-ci/experiment11.py draculad-ci/work/experiment11.py
           curl --fail --location --retry 3 \
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step' \
             --output draculad-ci/work/reference.step
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  draculad-ci/work/reference.step' | sha256sum --check
-      - name: Run closed-profile inward-offset erosion comparison
+      - name: Run local-XY closed-profile erosion comparison
         env:
           OCP_SHOW: '0'
         run: |
           set -o pipefail
           cd draculad-ci/work
-          python experiment10.py 2>&1 | tee output/results10.txt
+          python experiment11.py 2>&1 | tee output/results11.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
