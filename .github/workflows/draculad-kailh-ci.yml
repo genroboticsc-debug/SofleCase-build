@@ -39,6 +39,14 @@ jobs:
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
 
+      - name: Probe R0.375 edge partitions
+        run: |
+          mkdir -p artifacts
+          set +e
+          PYTHONPATH=draculad_kailh python draculad_kailh/fillet_probe.py > artifacts/fillet_probe.log 2>&1
+          echo "$?" > artifacts/fillet_probe_exit_code.txt
+          cat artifacts/fillet_probe.log
+
       - name: Build native candidate and preserve diagnostics
         env:
           OCP_SHOW: '0'
@@ -68,6 +76,7 @@ jobs:
         run: |
           mkdir -p artifacts
           cp draculad_kailh/candidate_joint.py artifacts/
+          cp draculad_kailh/fillet_probe.py artifacts/
           cp draculad_kailh/validate_joint.py artifacts/
           sha256sum reference.step artifacts/* > artifacts/SHA256SUMS.txt || true
 
