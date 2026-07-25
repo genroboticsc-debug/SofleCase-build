@@ -12,9 +12,9 @@ permissions:
   contents: read
 
 jobs:
-  validate-canal-fillet:
+  resolve-canal-and-profile:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,46 +29,35 @@ jobs:
           curl --fail --location --retry 5 --output reference.step \
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
-      - name: Build full analytical canal-fillet candidate
+      - name: Test whole-contour canal strategies
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts/canal_strategy
           set +e
-          timeout 240s env PYTHONPATH=draculad_kailh \
-            python draculad_kailh/swept_cutter_candidate.py \
-            > artifacts/swept_cutter_build.log 2>&1
-          echo "$?" > artifacts/swept_cutter_build.exit
-          cat artifacts/swept_cutter_build.log
-          if [ -f artifacts/swept_cutter/candidate_joint.step ]; then
-            cp artifacts/swept_cutter/candidate_joint.step artifacts/candidate_joint.step
-            cp artifacts/swept_cutter/candidate_joint.stl artifacts/candidate_joint.stl
-            cp artifacts/swept_cutter/candidate_build.json artifacts/candidate_build.json
-          fi
+          for strategy in wire_frenet wire_corrected wire_round individual_union; do
+            echo "--- strategy $strategy ---"
+            timeout 180s env CANAL_STRATEGY="$strategy" PYTHONPATH=draculad_kailh \
+              python draculad_kailh/canal_strategy_probe.py \
+              > "artifacts/canal_strategy/${strategy}.log" 2>&1
+            echo "$?" > "artifacts/canal_strategy/${strategy}.exit"
+            cat "artifacts/canal_strategy/${strategy}.log"
+          done
           exit 0
-      - name: Validate production candidate
+      - name: Evaluate compact fit-point meniscus profiles
         run: |
-          if [ -f artifacts/candidate_joint.step ]; then
-            set +e
-            python draculad_kailh/validate_joint.py > artifacts/validation.log 2>&1
-            echo "$?" > artifacts/validation_exit_code.txt
-            cat artifacts/validation.log
-          else
-            echo 'full canal-fillet candidate was not produced' | tee artifacts/validation.log
-          fi
-      - name: Prove canal law with exact analysis contour
-        run: |
-          mkdir -p artifacts/reference_canal
+          mkdir -p artifacts/profile_fit
           set +e
           timeout 180s env PYTHONPATH=draculad_kailh \
-            python draculad_kailh/reference_canal_probe.py \
-            > artifacts/reference_canal.log 2>&1
-          echo "$?" > artifacts/reference_canal.exit
-          cat artifacts/reference_canal.log
+            python draculad_kailh/profile_fit_analysis.py \
+            > artifacts/profile_fit.log 2>&1
+          echo "$?" > artifacts/profile_fit.exit
+          cat artifacts/profile_fit.log
           exit 0
       - name: Package source and hashes
         if: always()
         run: |
+          cp draculad_kailh/canal_strategy_probe.py artifacts/ || true
+          cp draculad_kailh/profile_fit_analysis.py artifacts/ || true
           cp draculad_kailh/swept_cutter_candidate.py artifacts/ || true
-          cp draculad_kailh/reference_canal_probe.py artifacts/ || true
           cp draculad_kailh/validate_joint.py artifacts/ || true
           sha256sum reference.step artifacts/* > artifacts/SHA256SUMS.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
