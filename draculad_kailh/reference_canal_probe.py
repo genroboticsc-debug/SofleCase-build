@@ -2,26 +2,27 @@ from __future__ import annotations
 
 """Analysis-only proof of the R0.375 canal-fillet construction.
 
-This script may inspect and reuse one reference contour edge because its output
-is validation evidence only. It is never imported by a production builder.
+This script may inspect and reuse one reference end face and contour edge because
+its output is validation evidence only. It is never imported by production code.
 """
 
 import json
 from pathlib import Path
 
-from build123d import Edge, Face, GeomType, Location, Vector, Wire, export_step, extrude, import_step, sweep
+from build123d import Edge, Face, Location, export_step, extrude, import_step, sweep
 
 from candidate_joint import (
     MAIN_ROLL_RADIUS,
     PAD_Z_MAX,
     TOP_Z,
-    UNFILLETED_END_X,
-    X_START,
     _resolved,
-    closed_wire,
     pad_face,
 )
 from swept_cutter_candidate import corner_cutter_face
+
+EXTRUSION_LENGTH = 2.0
+REFERENCE_PROFILE_AREA = 0.9075354150773971
+REFERENCE_CONTOUR_LENGTH = 4.851046962108225
 
 
 def isolate_right_solder(reference):
@@ -35,25 +36,32 @@ def isolate_right_solder(reference):
     return matches[0]
 
 
-def find_profile_edge(solder) -> Edge:
+def find_profile_face(solder) -> Face:
     matches = []
-    for edge in solder.edges():
-        bb = edge.bounding_box()
-        length = float(_resolved(edge.length))
-        if (
-            edge.geom_type == GeomType.BSPLINE
-            and abs(length - 4.851046962108225) < 1.0e-6
-            and abs(bb.min.X - X_START) < 1.0e-5
-            and abs(bb.max.X - X_START) < 1.0e-5
-        ):
-            matches.append(edge)
+    diagnostics = []
+    for index, face in enumerate(solder.faces()):
+        bb = face.bounding_box()
+        area = float(_resolved(face.area))
+        diagnostics.append({"index": index, "area": area, "bbox": [bb.min.X, bb.max.X]})
+        if abs(area - REFERENCE_PROFILE_AREA) < 1.0e-6 and bb.max.X < 5.02:
+            matches.append(face)
     if len(matches) != 1:
-        raise RuntimeError(f"expected one exact start profile edge, got {len(matches)}")
+        raise RuntimeError(f"expected one exact start profile face, got {len(matches)}; {diagnostics}")
     return matches[0]
 
 
-def face_from_contour(contour: Edge) -> Face:
-    return Face(Wire([contour, Edge.make_line(contour.end_point(), contour.start_point())]))
+def find_profile_contour(profile: Face) -> Edge:
+    matches = [
+        edge
+        for edge in profile.edges()
+        if abs(float(_resolved(edge.length)) - REFERENCE_CONTOUR_LENGTH) < 1.0e-6
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            "expected one exact contour edge, got "
+            f"{len(matches)}; lengths={[float(_resolved(e.length)) for e in profile.edges()]}"
+        )
+    return matches[0]
 
 
 def main():
@@ -61,16 +69,16 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     reference = import_step("reference.step")
     ref_index, solder = isolate_right_solder(reference)
-    contour_start = find_profile_edge(solder)
-    profile = face_from_contour(contour_start)
-    raw = extrude(profile, UNFILLETED_END_X - X_START, dir=(1, 0, 0), clean=True)
-    contour_end = contour_start.moved(Location((UNFILLETED_END_X - X_START, 0, 0)))
+    profile = find_profile_face(solder)
+    contour_start = find_profile_contour(profile)
+
+    raw = extrude(profile, EXTRUSION_LENGTH, dir=(1, 0, 0), clean=True)
+    contour_end = contour_start.moved(Location((EXTRUSION_LENGTH, 0, 0)))
     cutter_face = corner_cutter_face(contour_end, MAIN_ROLL_RADIUS)
     cutter = sweep(
         sections=cutter_face,
         path=contour_end,
         is_frenet=True,
-        normal=(1, 0, 0),
         clean=True,
     )
     rolled = raw.cut(cutter).clean()
@@ -85,6 +93,7 @@ def main():
         "raw_volume": float(_resolved(raw.volume)),
         "cutter_valid": bool(_resolved(cutter.is_valid)),
         "cutter_volume": float(_resolved(cutter.volume)),
+        "cutter_area": float(_resolved(cutter.area)),
         "rolled_valid": bool(_resolved(rolled.is_valid)),
         "rolled_volume": float(_resolved(rolled.volume)),
         "rolled_area": float(_resolved(rolled.area)),
