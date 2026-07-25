@@ -29,14 +29,14 @@ jobs:
           mkdir -p draculad-ci/work
           base64 -d draculad-ci/input.zip.b64 > draculad-ci/input.zip
           unzip -q draculad-ci/input.zip -d draculad-ci/work
-          cp draculad-ci/experiment5.py draculad-ci/work/experiment5.py
-      - name: Run five-branch reference-topology fillet test
+          cp draculad-ci/experiment6.py draculad-ci/work/experiment6.py
+      - name: Run exact quarter-round sweep-removal test
         env:
           OCP_SHOW: '0'
         run: |
           set -o pipefail
           cd draculad-ci/work
-          python experiment5.py 2>&1 | tee output/results5.txt
+          python experiment6.py 2>&1 | tee output/results6.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
