@@ -12,6 +12,7 @@ from candidate_joint import (
     UNFILLETED_END_X,
     X_START,
     edge_record,
+    geom_type_name,
     profile_wire,
 )
 
@@ -21,11 +22,8 @@ def terminal_edges(raw):
     for edge in raw.edges():
         bb = edge.bounding_box()
         if abs(bb.min.X - UNFILLETED_END_X) < 1.0e-6 and abs(bb.max.X - UNFILLETED_END_X) < 1.0e-6:
-            if "line" not in str(edge.geom_type).lower():
+            if "line" not in geom_type_name(edge):
                 result.append(edge)
-    # Follow the authored profile order by nearest first-point matching. The
-    # edge list from OCC is already stable for this extrusion, but record the
-    # geometric center so the result is independently readable.
     return result
 
 
