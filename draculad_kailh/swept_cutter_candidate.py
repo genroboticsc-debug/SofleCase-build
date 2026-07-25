@@ -3,7 +3,7 @@ from __future__ import annotations
 """Kailh solder joint built with an analytical canal-fillet cutter.
 
 The main R0.375 terminal roll is produced by sweeping the standard engineering
-corner-removal section along the authored meniscus contour.  This is the
+corner-removal section along the authored meniscus contour. This is the
 constructive equivalent of a rolling-ball edge fillet and contains no reference
 B-Rep, pcurve, spline-pole, mesh, or sampled-section replay.
 """
@@ -12,7 +12,7 @@ import json
 from math import sqrt
 from pathlib import Path
 
-from build123d import Edge, Face, Part, Plane, Vector, Wire, export_step, export_stl, extrude, sweep
+from build123d import Edge, Face, Part, Plane, Vector, export_step, export_stl, extrude, sweep
 
 from candidate_joint import (
     MAIN_ROLL_RADIUS,
@@ -41,8 +41,8 @@ def corner_cutter_face(path_edge: Edge, radius: float) -> Face:
     tangent = Vector(path_edge.tangent_at(0)).normalized()
 
     # The authored contour runs from the right top corner toward the left top
-    # corner. With +X as the fixed binormal, plane +Y is the inward profile
-    # normal and plane -X points into the 2 mm extrusion.
+    # corner. Plane +Y is the inward profile normal and plane -X points into
+    # the two-millimetre extrusion.
     plane = Plane(origin=origin, x_dir=(1, 0, 0), z_dir=tangent)
 
     tangent_side = local_point(plane, -radius, 0)
@@ -53,13 +53,15 @@ def corner_cutter_face(path_edge: Edge, radius: float) -> Face:
         -radius + radius / sqrt(2.0),
         radius - radius / sqrt(2.0),
     )
-
-    edges = [
-        Edge.make_line(tangent_side, sharp_corner),
-        Edge.make_line(sharp_corner, tangent_end),
-        Edge.make_three_point_arc(tangent_end, arc_mid, tangent_side),
-    ]
-    return Face(closed_wire(edges))
+    return Face(
+        closed_wire(
+            [
+                Edge.make_line(tangent_side, sharp_corner),
+                Edge.make_line(sharp_corner, tangent_end),
+                Edge.make_three_point_arc(tangent_end, arc_mid, tangent_side),
+            ]
+        )
+    )
 
 
 def metric(value):
@@ -74,7 +76,6 @@ def build_joint() -> tuple[Part, dict]:
         clean=True,
     )
     profile_edges = authored_profile_edges(UNFILLETED_END_X)
-
     debug: dict = {
         "raw_valid": bool(metric(raw.is_valid)),
         "raw_volume": float(metric(raw.volume)),
@@ -91,7 +92,6 @@ def build_joint() -> tuple[Part, dict]:
                 sections=section,
                 path=path_edge,
                 is_frenet=True,
-                normal=(1, 0, 0),
                 clean=True,
             )
             row.update(
@@ -111,11 +111,13 @@ def build_joint() -> tuple[Part, dict]:
                     "rolled_solids": len(rolled.solids()),
                 }
             )
+            if not row["rolled_valid"] or row["rolled_solids"] != 1:
+                raise RuntimeError(f"invalid roll after cutter {index}")
         except Exception as exc:
             row.update(
                 {
                     "sweep_success": row.get("sweep_success", False),
-                    "cut_success": False,
+                    "cut_success": row.get("cut_success", False),
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
