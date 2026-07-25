@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  probe-canal-fillet:
+  validate-canal-fillet:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -29,46 +29,44 @@ jobs:
           curl --fail --location --retry 5 --output reference.step \
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
-      - name: Probe OCC sweep orientation modes
+      - name: Build full analytical canal-fillet candidate
         run: |
-          mkdir -p artifacts/sweep_modes
+          mkdir -p artifacts
           set +e
-          for edge in 0 5; do
-            for mode in frenet corrected binormal_pos_x binormal_neg_x; do
-              echo "--- edge $edge mode $mode ---"
-              timeout 30s env EDGE_INDEX="$edge" SWEEP_MODE="$mode" PYTHONPATH=draculad_kailh \
-                python draculad_kailh/sweep_mode_probe.py \
-                > "artifacts/sweep_modes/edge_${edge}_${mode}.log" 2>&1
-              echo "$?" > "artifacts/sweep_modes/edge_${edge}_${mode}.exit"
-              cat "artifacts/sweep_modes/edge_${edge}_${mode}.log"
-            done
-          done
+          timeout 240s env PYTHONPATH=draculad_kailh \
+            python draculad_kailh/swept_cutter_candidate.py \
+            > artifacts/swept_cutter_build.log 2>&1
+          echo "$?" > artifacts/swept_cutter_build.exit
+          cat artifacts/swept_cutter_build.log
+          if [ -f artifacts/swept_cutter/candidate_joint.step ]; then
+            cp artifacts/swept_cutter/candidate_joint.step artifacts/candidate_joint.step
+            cp artifacts/swept_cutter/candidate_joint.stl artifacts/candidate_joint.stl
+            cp artifacts/swept_cutter/candidate_build.json artifacts/candidate_build.json
+          fi
           exit 0
-      - name: Prove canal law with exact analysis contour
+      - name: Validate production candidate
         run: |
-          mkdir -p artifacts/reference_canal
-          set +e
-          timeout 120s env PYTHONPATH=draculad_kailh \
-            python draculad_kailh/reference_canal_probe.py \
-            > artifacts/reference_canal.log 2>&1
-          echo "$?" > artifacts/reference_canal.exit
-          cat artifacts/reference_canal.log
-          exit 0
-      - name: Validate analysis proof when produced
-        run: |
-          if [ -f artifacts/reference_canal/exact_profile_main_roll_with_pad.step ]; then
-            cp artifacts/reference_canal/exact_profile_main_roll_with_pad.step artifacts/candidate_joint.step
+          if [ -f artifacts/candidate_joint.step ]; then
             set +e
             python draculad_kailh/validate_joint.py > artifacts/validation.log 2>&1
             echo "$?" > artifacts/validation_exit_code.txt
             cat artifacts/validation.log
           else
-            echo 'reference canal proof was not produced' | tee artifacts/validation.log
+            echo 'full canal-fillet candidate was not produced' | tee artifacts/validation.log
           fi
+      - name: Prove canal law with exact analysis contour
+        run: |
+          mkdir -p artifacts/reference_canal
+          set +e
+          timeout 180s env PYTHONPATH=draculad_kailh \
+            python draculad_kailh/reference_canal_probe.py \
+            > artifacts/reference_canal.log 2>&1
+          echo "$?" > artifacts/reference_canal.exit
+          cat artifacts/reference_canal.log
+          exit 0
       - name: Package source and hashes
         if: always()
         run: |
-          cp draculad_kailh/sweep_mode_probe.py artifacts/ || true
           cp draculad_kailh/swept_cutter_candidate.py artifacts/ || true
           cp draculad_kailh/reference_canal_probe.py artifacts/ || true
           cp draculad_kailh/validate_joint.py artifacts/ || true
