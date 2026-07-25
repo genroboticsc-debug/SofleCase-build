@@ -1,0 +1,315 @@
+name: DracuLad Kailh complete offline package
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/draculad-kailh-complete-package.yml'
+      - 'packaging/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install pinned build and validation environment
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r packaging/requirements-top-level.txt
+          python -m pip check
+
+      - name: Create source, reference and environment layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE=/tmp/DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25
+          rm -rf "$BUNDLE"
+          mkdir -p "$BUNDLE"/{workspace,source_snapshot,reference,environment/wheelhouse/linux_cp313_x86_64,environment/wheelhouse/windows_cp312_amd64,runtime_results,documentation}
+
+          cp -a draculad_kailh "$BUNDLE/workspace/"
+          cp -a packaging/README_OFFLINE_ENVIRONMENT.md "$BUNDLE/README_FIRST.md"
+          cp -a packaging/setup_offline_windows.ps1 "$BUNDLE/environment/"
+          cp -a packaging/setup_offline_linux.sh "$BUNDLE/environment/"
+          cp -a packaging/requirements-top-level.txt "$BUNDLE/environment/"
+          find .github/workflows -maxdepth 1 -type f -name 'draculad-kailh-*.yml' -exec cp -a {} "$BUNDLE/workspace/" \;
+
+          git archive --format=zip --output="$BUNDLE/source_snapshot/SofleCase-build_draculad-kailh-fix-20260725_FULL_BRANCH.zip" HEAD
+          git rev-parse HEAD > "$BUNDLE/source_snapshot/HEAD_COMMIT.txt"
+          git log --decorate --oneline --all -n 100 > "$BUNDLE/source_snapshot/GIT_LOG.txt"
+          git status --short --branch > "$BUNDLE/source_snapshot/GIT_STATUS.txt"
+          git ls-tree -r --name-only HEAD > "$BUNDLE/source_snapshot/BRANCH_FILE_INVENTORY.txt"
+
+          curl --fail --location --retry 5 --output "$BUNDLE/reference/kailh_cherry_socket_soldered_REFERENCE.step" \
+            'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
+          echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  kailh_cherry_socket_soldered_REFERENCE.step' \
+            > "$BUNDLE/reference/REFERENCE_SHA256_EXPECTED.txt"
+          (cd "$BUNDLE/reference" && sha256sum --check REFERENCE_SHA256_EXPECTED.txt)
+          cp "$BUNDLE/reference/kailh_cherry_socket_soldered_REFERENCE.step" reference.step
+          printf '%s\n' \
+            'Repository: foostan/kbd' \
+            'Commit: 230c6d634a8d409cbd1c506ec0260420a08a1c83' \
+            'Path: kicad-packages3D/kbd.3dshapes/kailh cherry socket soldered.step' \
+            > "$BUNDLE/reference/REFERENCE_PROVENANCE.txt"
+
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+
+      - name: Download complete Linux and Windows offline dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          LINUX="$BUNDLE/environment/wheelhouse/linux_cp313_x86_64"
+          WINDOWS="$BUNDLE/environment/wheelhouse/windows_cp312_amd64"
+
+          python -m pip download --only-binary=:all: --dest "$LINUX" -r packaging/requirements-top-level.txt
+          python -m pip download --only-binary=:all: --dest "$LINUX" pip setuptools wheel
+
+          python -m pip download \
+            --only-binary=:all: \
+            --platform win_amd64 \
+            --implementation cp \
+            --python-version 312 \
+            --abi cp312 --abi abi3 --abi none \
+            --dest "$WINDOWS" \
+            -r packaging/requirements-top-level.txt
+          python -m pip download \
+            --only-binary=:all: \
+            --platform win_amd64 \
+            --implementation cp \
+            --python-version 312 \
+            --abi cp312 --abi abi3 --abi none \
+            --dest "$WINDOWS" \
+            pip setuptools wheel
+
+          python -m pip freeze --all > "$BUNDLE/environment/requirements-exact-linux-cp313.txt"
+          python -m pip inspect > "$BUNDLE/environment/pip-inspect-linux-cp313.json"
+          python -m pip list --format=json > "$BUNDLE/environment/pip-list-linux-cp313.json"
+          python -m pip show build123d cadquery-ocp trimesh manifold3d > "$BUNDLE/environment/KEY_PACKAGE_DETAILS.txt"
+
+          python - <<'PY'
+          from pathlib import Path
+          from packaging.utils import parse_wheel_filename
+          root = Path('/tmp/DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25/environment/wheelhouse/windows_cp312_amd64')
+          versions = {}
+          for wheel in root.glob('*.whl'):
+              name, version, build, tags = parse_wheel_filename(wheel.name)
+              versions[str(name)] = str(version)
+          out = root.parent.parent / 'requirements-exact-windows-cp312.txt'
+          out.write_text('\n'.join(f'{name}=={versions[name]}' for name in sorted(versions)) + '\n')
+          PY
+
+          mkdir -p "$BUNDLE/environment/portable_python"
+          curl --fail --location --retry 5 \
+            --output "$BUNDLE/environment/portable_python/python-3.12.10-embed-amd64.zip" \
+            'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
+          mkdir -p "$BUNDLE/environment/portable_python/python-3.12.10-embed-amd64"
+          unzip -q "$BUNDLE/environment/portable_python/python-3.12.10-embed-amd64.zip" \
+            -d "$BUNDLE/environment/portable_python/python-3.12.10-embed-amd64"
+          curl --fail --location --retry 5 \
+            --output "$BUNDLE/environment/portable_python/get-pip.py" \
+            'https://bootstrap.pypa.io/get-pip.py'
+          curl --fail --location --retry 5 \
+            --output "$BUNDLE/environment/VC_redist.x64.exe" \
+            'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+
+          python - <<'PY' > "$BUNDLE/environment/KERNEL_AND_RUNTIME_INVENTORY.txt"
+          import importlib.metadata as md
+          import platform, sys
+          print('Python:', sys.version)
+          print('Platform:', platform.platform())
+          for name in ['build123d', 'cadquery-ocp', 'trimesh', 'manifold3d', 'vtk']:
+              try:
+                  print(f'{name}: {md.version(name)}')
+              except md.PackageNotFoundError:
+                  print(f'{name}: NOT INSTALLED')
+          import OCP
+          print('OCP module:', OCP.__file__)
+          PY
+          uname -a > "$BUNDLE/environment/UNAME.txt"
+          python -VV > "$BUNDLE/environment/PYTHON_VERSION.txt" 2>&1
+          find "$BUNDLE/environment/wheelhouse" -type f -printf '%P\n' | sort > "$BUNDLE/environment/WHEEL_FILE_INVENTORY.txt"
+          find "$BUNDLE/environment/wheelhouse" -type f \( -iname '*cadquery*ocp*.whl' -o -iname '*vtk*.whl' -o -iname '*manifold*.whl' \) -printf '%P\n' | sort \
+            > "$BUNDLE/environment/CAD_KERNEL_NATIVE_WHEELS.txt"
+
+          test -s "$BUNDLE/environment/CAD_KERNEL_NATIVE_WHEELS.txt"
+          chmod +x "$BUNDLE/environment/setup_offline_linux.sh"
+
+      - name: Run fresh current reconstruction and validation campaigns
+        shell: bash
+        run: |
+          set -u
+          export PYTHONPATH="$GITHUB_WORKSPACE/draculad_kailh"
+
+          run_case() {
+            name="$1"
+            command="$2"
+            timeout_seconds="${3:-120}"
+            out="$BUNDLE/runtime_results/$name"
+            rm -rf artifacts
+            mkdir -p artifacts "$out"
+            set +e
+            timeout "${timeout_seconds}s" bash -lc "$command" > "$out/console.log" 2>&1
+            code=$?
+            set -e
+            echo "$code" > "$out/exit_code.txt"
+            cp -a artifacts "$out/artifacts" 2>/dev/null || true
+
+            candidate=$(find artifacts -type f -name 'candidate_joint.step' -print -quit 2>/dev/null || true)
+            if [ -n "$candidate" ]; then
+              cp "$candidate" artifacts/candidate_joint.step
+              set +e
+              timeout 180s python draculad_kailh/validate_joint.py > "$out/validation_console.log" 2>&1
+              vcode=$?
+              set -e
+              echo "$vcode" > "$out/validation_exit_code.txt"
+              cp -a artifacts/joint_validation.json "$out/" 2>/dev/null || true
+              cp -a artifacts/reference_joint.stl "$out/" 2>/dev/null || true
+              cp -a artifacts/generated_joint.stl "$out/" 2>/dev/null || true
+            else
+              echo 'No candidate_joint.step was produced.' > "$out/validation_console.log"
+            fi
+          }
+
+          set -e
+          run_case candidate_joint "python draculad_kailh/candidate_joint.py" 120
+          run_case single_spline_candidate "python draculad_kailh/single_spline_candidate.py" 120
+          run_case swept_cutter_candidate "python draculad_kailh/swept_cutter_candidate.py" 180
+          run_case compact_profile_campaign "python draculad_kailh/compact_profile_campaign.py" 180
+          run_case branch_datum_extract "python draculad_kailh/branch_datum_extract.py" 120
+          run_case profile_fit_analysis "python draculad_kailh/profile_fit_analysis.py" 180
+          run_case reference_canal_probe "python draculad_kailh/reference_canal_probe.py" 180
+          run_case fillet_probe "python draculad_kailh/fillet_probe.py" 180
+
+          for strategy in native_fillet wire_frenet wire_round wire_right individual_union; do
+            run_case "five_branch_${strategy}" \
+              "FIVE_BRANCH_STRATEGY=$strategy python draculad_kailh/five_branch_candidate.py" 180
+            run_case "five_branch_bezier_${strategy}" \
+              "BEZIER_STRATEGY=$strategy python draculad_kailh/five_branch_bezier_candidate.py" 180
+          done
+
+          rm -f reference.step
+
+      - name: Build master status and completeness manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          bundle = Path('/tmp/DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25')
+          runs = []
+          for run in sorted((bundle / 'runtime_results').iterdir()):
+              if not run.is_dir():
+                  continue
+              def read_int(name):
+                  p = run / name
+                  if not p.exists():
+                      return None
+                  try:
+                      return int(p.read_text().strip())
+                  except Exception:
+                      return None
+              validation = None
+              validation_file = run / 'joint_validation.json'
+              if validation_file.exists():
+                  try:
+                      validation = json.loads(validation_file.read_text())
+                  except Exception as exc:
+                      validation = {'parse_error': str(exc)}
+              runs.append({
+                  'name': run.name,
+                  'build_exit_code': read_int('exit_code.txt'),
+                  'validation_exit_code': read_int('validation_exit_code.txt'),
+                  'candidate_files': sorted(str(p.relative_to(run)) for p in run.rglob('candidate_joint.*')),
+                  'validation': validation,
+              })
+
+          source_files = sorted(str(p.relative_to(bundle / 'workspace')) for p in (bundle / 'workspace').rglob('*') if p.is_file())
+          status = {
+              'bundle_name': bundle.name,
+              'scope': 'Latest current DracuLad Kailh reverse-engineering workspace and exact evidence',
+              'reference_sha256': hashlib.sha256((bundle / 'reference/kailh_cherry_socket_soldered_REFERENCE.step').read_bytes()).hexdigest(),
+              'source_file_count': len(source_files),
+              'source_files': source_files,
+              'runtime_run_count': len(runs),
+              'runs': runs,
+              'claim': 'Failed or incomplete candidates are retained with exact logs. No failed run is represented as passing.',
+          }
+          (bundle / 'MASTER_STATUS.json').write_text(json.dumps(status, indent=2, allow_nan=True))
+          (bundle / 'workspace/TASK_FILE_INVENTORY.txt').write_text('\n'.join(source_files) + '\n')
+          PY
+
+          find "$BUNDLE" -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > "$BUNDLE/SHA256SUMS.txt"
+          find "$BUNDLE" -type f -printf '%P\n' | sort > "$BUNDLE/COMPLETE_FILE_INVENTORY.txt"
+
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          bundle = Path('/tmp/DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25')
+          required = [
+              bundle / 'README_FIRST.md',
+              bundle / 'MASTER_STATUS.json',
+              bundle / 'COMPLETE_FILE_INVENTORY.txt',
+              bundle / 'SHA256SUMS.txt',
+              bundle / 'source_snapshot/SofleCase-build_draculad-kailh-fix-20260725_FULL_BRANCH.zip',
+              bundle / 'reference/kailh_cherry_socket_soldered_REFERENCE.step',
+              bundle / 'workspace/draculad_kailh/validate_joint.py',
+              bundle / 'environment/setup_offline_windows.ps1',
+              bundle / 'environment/setup_offline_linux.sh',
+              bundle / 'environment/portable_python/python-3.12.10-embed-amd64.zip',
+              bundle / 'environment/portable_python/get-pip.py',
+              bundle / 'environment/VC_redist.x64.exe',
+              bundle / 'environment/requirements-exact-linux-cp313.txt',
+              bundle / 'environment/requirements-exact-windows-cp312.txt',
+          ]
+          missing = [str(path) for path in required if not path.is_file() or path.stat().st_size == 0]
+          for wheelhouse in [
+              bundle / 'environment/wheelhouse/linux_cp313_x86_64',
+              bundle / 'environment/wheelhouse/windows_cp312_amd64',
+          ]:
+              if not list(wheelhouse.glob('*.whl')):
+                  missing.append(f'empty wheelhouse: {wheelhouse}')
+              if not list(wheelhouse.glob('*cadquery*ocp*.whl')):
+                  missing.append(f'OpenCascade/OCP wheel missing: {wheelhouse}')
+          if len(list((bundle / 'workspace/draculad_kailh').glob('*.py'))) < 10:
+              missing.append('unexpectedly incomplete draculad_kailh script directory')
+          digest = hashlib.sha256((bundle / 'reference/kailh_cherry_socket_soldered_REFERENCE.step').read_bytes()).hexdigest()
+          if digest != '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56':
+              missing.append(f'reference SHA mismatch: {digest}')
+          if missing:
+              raise SystemExit('BUNDLE VERIFICATION FAILED:\n' + '\n'.join(missing))
+          (bundle / 'BUNDLE_VERIFICATION_PASS.txt').write_text('PASS: required source, reference, environment, kernel, package and evidence files are present.\n')
+          PY
+
+      - name: Create final ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp
+          zip -9 -r DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25.zip \
+            DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25
+          sha256sum DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25.zip \
+            > DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25.zip.sha256
+          ls -lh DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DracuLad-Kailh-LATEST-COMPLETE-HANDOFF
+          path: |
+            /tmp/DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25.zip
+            /tmp/DracuLad_Kailh_LATEST_COMPLETE_HANDOFF_2026-07-25.zip.sha256
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
