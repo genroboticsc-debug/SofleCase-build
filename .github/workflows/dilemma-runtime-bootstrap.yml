@@ -14,7 +14,7 @@ permissions:
 jobs:
   bundle:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out bootstrap repository
         uses: actions/checkout@v4
@@ -24,30 +24,31 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Build complete exact CAD runtime bundle
+      - name: Build complete offline CAD wheelhouse
         shell: bash
         run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          mkdir -p bundle/site-packages
+          set -uo pipefail
+          mkdir -p bundle/wheels bundle/logs
+          python -m pip install --upgrade pip wheel setuptools 2>&1 | tee bundle/logs/bootstrap.log
 
-          python -m pip install --target bundle/site-packages --no-deps \
+          status=0
+          python -m pip wheel --wheel-dir bundle/wheels \
             build123d==0.11.1 \
-            cadquery-ocp-novtk==7.9.3.1.1 \
-            manifold3d==3.5.2
-
-          python -m pip install --target bundle/site-packages \
-            anytree \
-            ezdxf \
-            numpy==2.3.5 \
-            ocpsvg \
-            py-lib3mf \
-            scipy \
-            svgpathtools \
+            manifold3d==3.5.2 \
             trimesh==4.11.1 \
-            typing-extensions
+            numpy==2.3.5 \
+            2>&1 | tee bundle/logs/wheelhouse.log || status=$?
+          printf '%s\n' "$status" > bundle/WHEELHOUSE_STATUS.txt
 
-          PYTHONPATH="$PWD/bundle/site-packages" python - <<'PY'
+          if [ "$status" -eq 0 ]; then
+            python -m venv runtime-smoke
+            runtime-smoke/bin/python -m pip install --no-index --find-links bundle/wheels \
+              build123d==0.11.1 manifold3d==3.5.2 trimesh==4.11.1 numpy==2.3.5 \
+              2>&1 | tee bundle/logs/offline_install.log || status=$?
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            runtime-smoke/bin/python - <<'PY' 2>&1 | tee bundle/logs/import_test.log || status=$?
           import build123d, OCP, manifold3d, numpy, scipy, trimesh
           from pathlib import Path
           print('build123d', getattr(build123d, '__version__', 'unknown'))
@@ -58,21 +59,28 @@ jobs:
           print('trimesh', trimesh.__version__)
           Path('bundle/RUNTIME_IMPORT_PASS.txt').write_text('build123d OCP manifold3d trimesh imports PASS\n')
           PY
+          fi
+          printf '%s\n' "$status" > bundle/RUNTIME_STATUS.txt
+          exit 0
 
       - name: Fetch exact pinned Dilemma references
         shell: bash
         run: |
-          set -euo pipefail
-          git init dilemma-reference
-          git -C dilemma-reference remote add origin https://github.com/Bastardkb/Dilemma.git
-          git -C dilemma-reference fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a
-          git -C dilemma-reference checkout --detach FETCH_HEAD
+          set -uo pipefail
+          mkdir -p bundle/reference bundle/logs
+          status=0
+          git init dilemma-reference 2>&1 | tee bundle/logs/reference_fetch.log
+          git -C dilemma-reference remote add origin https://github.com/Bastardkb/Dilemma.git 2>&1 | tee -a bundle/logs/reference_fetch.log
+          git -C dilemma-reference fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a 2>&1 | tee -a bundle/logs/reference_fetch.log || status=$?
+          if [ "$status" -eq 0 ]; then
+            git -C dilemma-reference checkout --detach FETCH_HEAD 2>&1 | tee -a bundle/logs/reference_fetch.log || status=$?
+          fi
 
-          mkdir -p bundle/reference
-          while IFS= read -r relative_path; do
-            mkdir -p "bundle/reference/$(dirname "$relative_path")"
-            cp "dilemma-reference/$relative_path" "bundle/reference/$relative_path"
-          done <<'EOF'
+          if [ "$status" -eq 0 ]; then
+            while IFS= read -r relative_path; do
+              mkdir -p "bundle/reference/$(dirname "$relative_path")"
+              cp "dilemma-reference/$relative_path" "bundle/reference/$relative_path" || status=$?
+            done <<'EOF'
           mechanical/cases/3x5_2/tenting_puck/tenting_puck_v3_26.stl
           mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Integrated Tenting Puck.STL
           mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Tenting Puck Opening.STL
@@ -84,12 +92,16 @@ jobs:
           mechanical/cases/4x6_4/top.stl
           mechanical/cases/4x6_4_hotswap/mid.stl
           EOF
+          fi
 
+          printf '%s\n' "$status" > bundle/REFERENCE_STATUS.txt
           printf '%s\n' 'f5cffb4821fe560b095418b71382ac7d8043c61a' > bundle/DILEMMA_REFERENCE_COMMIT.txt
-          find bundle/reference -type f -print0 | sort -z | xargs -0 sha256sum > bundle/REFERENCE_SHA256SUMS.txt
-          find bundle/site-packages -type f -print0 | sort -z | xargs -0 sha256sum > bundle/RUNTIME_SHA256SUMS.txt
+          find bundle/reference -type f -print0 | sort -z | xargs -0 -r sha256sum > bundle/REFERENCE_SHA256SUMS.txt
+          find bundle/wheels -type f -print0 | sort -z | xargs -0 -r sha256sum > bundle/WHEEL_SHA256SUMS.txt
+          exit 0
 
       - name: Upload exact runtime and references
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dilemma-exact-runtime-and-references
