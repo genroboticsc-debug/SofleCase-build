@@ -29,14 +29,14 @@ jobs:
           mkdir -p draculad-ci/work
           base64 -d draculad-ci/input.zip.b64 > draculad-ci/input.zip
           unzip -q draculad-ci/input.zip -d draculad-ci/work
-          cp draculad-ci/experiment4.py draculad-ci/work/experiment4.py
-      - name: Run exact ordered C0/C1 B-spline test
+          cp draculad-ci/experiment5.py draculad-ci/work/experiment5.py
+      - name: Run five-branch reference-topology fillet test
         env:
           OCP_SHOW: '0'
         run: |
           set -o pipefail
           cd draculad-ci/work
-          python experiment4.py 2>&1 | tee output/results4.txt
+          python experiment5.py 2>&1 | tee output/results5.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
