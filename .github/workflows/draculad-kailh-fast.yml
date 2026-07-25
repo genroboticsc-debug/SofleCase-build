@@ -29,18 +29,19 @@ jobs:
           curl --fail --location --retry 5 --output reference.step \
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
-      - name: Probe each authored contour span independently
+      - name: Probe OCC sweep orientation modes
         run: |
-          mkdir -p artifacts/sweep_probe
+          mkdir -p artifacts/sweep_modes
           set +e
-          for i in $(seq 0 9); do
-            echo "--- edge $i ---"
-            timeout 25s env EDGE_INDEX="$i" PYTHONPATH=draculad_kailh \
-              python draculad_kailh/sweep_probe.py \
-              > "artifacts/sweep_probe/edge_${i}.log" 2>&1
-            code=$?
-            echo "$code" > "artifacts/sweep_probe/edge_${i}.exit"
-            cat "artifacts/sweep_probe/edge_${i}.log"
+          for edge in 0 5; do
+            for mode in frenet corrected binormal_pos_x binormal_neg_x; do
+              echo "--- edge $edge mode $mode ---"
+              timeout 30s env EDGE_INDEX="$edge" SWEEP_MODE="$mode" PYTHONPATH=draculad_kailh \
+                python draculad_kailh/sweep_mode_probe.py \
+                > "artifacts/sweep_modes/edge_${edge}_${mode}.log" 2>&1
+              echo "$?" > "artifacts/sweep_modes/edge_${edge}_${mode}.exit"
+              cat "artifacts/sweep_modes/edge_${edge}_${mode}.log"
+            done
           done
           exit 0
       - name: Prove canal law with exact analysis contour
@@ -67,7 +68,7 @@ jobs:
       - name: Package source and hashes
         if: always()
         run: |
-          cp draculad_kailh/sweep_probe.py artifacts/ || true
+          cp draculad_kailh/sweep_mode_probe.py artifacts/ || true
           cp draculad_kailh/swept_cutter_candidate.py artifacts/ || true
           cp draculad_kailh/reference_canal_probe.py artifacts/ || true
           cp draculad_kailh/validate_joint.py artifacts/ || true
