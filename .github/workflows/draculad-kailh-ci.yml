@@ -14,7 +14,7 @@ permissions:
 jobs:
   build-and-validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +38,29 @@ jobs:
           curl --fail --location --retry 5 --output reference.step \
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
+
+      - name: Decode related native Fusion solder history
+        run: |
+          mkdir -p artifacts/fusion
+          set +e
+          curl --fail --location --retry 5 --output artifacts/fusion/d_sod_soldered.f3z \
+            'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/D_SOD-123%20Soldered.f3z'
+          unzip -o artifacts/fusion/d_sod_soldered.f3z -d artifacts/fusion/f3z > artifacts/fusion/unzip.log 2>&1
+          git clone --depth 1 https://github.com/cadmpeg/cadmpeg.git /tmp/cadmpeg > artifacts/fusion/cadmpeg_clone.log 2>&1
+          git -C /tmp/cadmpeg fetch --depth 1 origin 43ad613b416d96225fef501b08b0a29e6f982fbe >> artifacts/fusion/cadmpeg_clone.log 2>&1
+          git -C /tmp/cadmpeg checkout 43ad613b416d96225fef501b08b0a29e6f982fbe >> artifacts/fusion/cadmpeg_clone.log 2>&1
+          cargo build --release --manifest-path /tmp/cadmpeg/Cargo.toml -p cadmpeg > artifacts/fusion/cadmpeg_build.log 2>&1
+          exe=/tmp/cadmpeg/target/release/cadmpeg
+          "$exe" inspect artifacts/fusion/d_sod_soldered.f3z --json > artifacts/fusion/f3z_inspect.json 2> artifacts/fusion/f3z_inspect.err
+          find artifacts/fusion/f3z -type f -iname '*.f3d' -print > artifacts/fusion/f3d_files.txt
+          n=0
+          while IFS= read -r f; do
+            n=$((n+1))
+            "$exe" inspect "$f" --json > "artifacts/fusion/f3d_${n}_inspect.json" 2> "artifacts/fusion/f3d_${n}_inspect.err"
+            "$exe" decode "$f" -o "artifacts/fusion/f3d_${n}.cadir.json" --force > "artifacts/fusion/f3d_${n}_decode.out" 2> "artifacts/fusion/f3d_${n}_decode.err"
+          done < artifacts/fusion/f3d_files.txt
+          sha256sum artifacts/fusion/d_sod_soldered.f3z > artifacts/fusion/source_sha256.txt
+          exit 0
 
       - name: Probe R0.375 edge partitions
         run: |
@@ -78,7 +101,7 @@ jobs:
           cp draculad_kailh/candidate_joint.py artifacts/
           cp draculad_kailh/fillet_probe.py artifacts/
           cp draculad_kailh/validate_joint.py artifacts/
-          sha256sum reference.step artifacts/* > artifacts/SHA256SUMS.txt || true
+          sha256sum reference.step artifacts/* > artifacts/SHA256SUMS.txt 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
