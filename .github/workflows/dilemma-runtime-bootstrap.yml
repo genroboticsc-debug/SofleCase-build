@@ -1,10 +1,6 @@
 name: Temporary Dilemma exact-runtime bootstrap
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - .github/workflows/dilemma-runtime-bootstrap.yml
   pull_request:
     branches: [master]
     paths:
@@ -18,6 +14,7 @@ permissions:
 jobs:
   bundle:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Check out bootstrap repository
         uses: actions/checkout@v4
@@ -27,24 +24,44 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Download exact locked Python wheels
+      - name: Build complete exact CAD runtime bundle
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p bundle/wheels
-          python -m pip download --only-binary=:all: --no-deps \
-            build123d==0.11.1 manifold3d==3.5.2 \
-            --dest bundle/wheels
+          python -m pip install --upgrade pip
+          mkdir -p bundle/site-packages
 
-          BUILD123D_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'build123d-0.11.1-*.whl' -print -quit)"
-          MANIFOLD_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'manifold3d-3.5.2-*.whl' -print -quit)"
-          test -n "$BUILD123D_WHEEL"
-          test -n "$MANIFOLD_WHEEL"
+          # Main locked CAD and Boolean packages. The no-VTK OCP build provides
+          # the same OCP Python modules without the unnecessary visualization stack.
+          python -m pip install --target bundle/site-packages --no-deps \
+            build123d==0.11.1 \
+            cadquery-ocp-novtk==7.9.3.1.1 \
+            manifold3d==3.5.2
 
-          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  '"$BUILD123D_WHEEL" | sha256sum --check --strict
-          echo 'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45  '"$MANIFOLD_WHEEL" | sha256sum --check --strict
+          # Runtime dependencies declared by Build123d and its vector import/export stack.
+          python -m pip install --target bundle/site-packages \
+            anytree \
+            ezdxf \
+            numpy==2.3.5 \
+            ocpsvg \
+            py-lib3mf \
+            scipy \
+            svgpathtools \
+            typing-extensions
 
-      - name: Fetch pinned Dilemma reference commit
+          PYTHONPATH="$PWD/bundle/site-packages" python - <<'PY'
+          import build123d, OCP, manifold3d, numpy, scipy, trimesh
+          from pathlib import Path
+          print('build123d', getattr(build123d, '__version__', 'unknown'))
+          print('OCP import OK')
+          print('manifold3d', getattr(manifold3d, '__version__', 'unknown'))
+          print('numpy', numpy.__version__)
+          print('scipy', scipy.__version__)
+          print('trimesh', trimesh.__version__)
+          Path('bundle/RUNTIME_IMPORT_PASS.txt').write_text('build123d OCP manifold3d imports PASS\n')
+          PY
+
+      - name: Fetch exact pinned Dilemma references
         shell: bash
         run: |
           set -euo pipefail
@@ -59,16 +76,20 @@ jobs:
             cp "dilemma-reference/$relative_path" "bundle/reference/$relative_path"
           done <<'EOF'
           mechanical/cases/3x5_2/tenting_puck/tenting_puck_v3_26.stl
+          mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Integrated Tenting Puck.STL
+          mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Tenting Puck Opening.STL
           mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Integrated Tenting Puck.STEP
           mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Tenting Puck Opening.STEP
           mechanical/cases/3x5_2/thin/dilemma_nuts v27.step
+          mechanical/cases/3x5_2/thin/thin_v1_26.stl
           mechanical/cases/3x5_3_hotswap/mid.stl
           mechanical/cases/4x6_4/top.stl
           mechanical/cases/4x6_4_hotswap/mid.stl
           EOF
 
           printf '%s\n' 'f5cffb4821fe560b095418b71382ac7d8043c61a' > bundle/DILEMMA_REFERENCE_COMMIT.txt
-          find bundle -type f -print0 | sort -z | xargs -0 sha256sum > bundle/SHA256SUMS.txt
+          find bundle/reference -type f -print0 | sort -z | xargs -0 sha256sum > bundle/REFERENCE_SHA256SUMS.txt
+          find bundle/site-packages -type f -print0 | sort -z | xargs -0 sha256sum > bundle/RUNTIME_SHA256SUMS.txt
 
       - name: Upload exact runtime and references
         uses: actions/upload-artifact@v4
