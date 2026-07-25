@@ -29,7 +29,9 @@ def summary(name, shape):
 
 
 def curve_from_edge(edge: Edge):
-    curve, first, last = BRep_Tool.Curve_s(edge.wrapped)
+    first = edge.param_at(0.0)
+    last = edge.param_at(1.0)
+    curve = BRep_Tool.Curve_s(edge.wrapped, first, last)
     trimmed = Geom_TrimmedCurve(curve, first, last)
     if not edge.is_forward:
         trimmed.Reverse()
