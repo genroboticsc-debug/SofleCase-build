@@ -1,0 +1,65 @@
+name: DracuLad Kailh fast candidate validation
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'draculad_kailh/**'
+      - '.github/workflows/draculad-kailh-fast.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-single-spline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned CAD stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.9.1' 'trimesh>=4.4' 'manifold3d>=3.0'
+      - name: Download pinned reference
+        run: |
+          curl --fail --location --retry 5 --output reference.step \
+            'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
+          echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
+      - name: Build single-spline native candidate
+        run: |
+          mkdir -p artifacts
+          set +e
+          PYTHONPATH=draculad_kailh python draculad_kailh/single_spline_candidate.py > artifacts/single_spline_build.log 2>&1
+          echo "$?" > artifacts/single_spline_build_exit_code.txt
+          cat artifacts/single_spline_build.log
+          if [ -f artifacts/single_spline/candidate_joint.step ]; then
+            cp artifacts/single_spline/candidate_joint.step artifacts/candidate_joint.step
+            cp artifacts/single_spline/candidate_joint.stl artifacts/candidate_joint.stl
+            cp artifacts/single_spline/candidate_build.json artifacts/single_spline_candidate_build.json
+          fi
+      - name: Validate candidate
+        run: |
+          if [ -f artifacts/candidate_joint.step ]; then
+            set +e
+            python draculad_kailh/validate_joint.py > artifacts/validation.log 2>&1
+            echo "$?" > artifacts/validation_exit_code.txt
+            cat artifacts/validation.log
+          else
+            echo 'single-spline candidate was not produced' | tee artifacts/validation.log
+          fi
+      - name: Package source and hashes
+        if: always()
+        run: |
+          cp draculad_kailh/single_spline_candidate.py artifacts/ || true
+          cp draculad_kailh/validate_joint.py artifacts/ || true
+          sha256sum reference.step artifacts/* > artifacts/SHA256SUMS.txt 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: draculad-kailh-fast
+          path: artifacts/
+          retention-days: 7
