@@ -1,0 +1,76 @@
+name: DracuLad Kailh canal strategy matrix
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'draculad_kailh/**'
+      - '.github/workflows/draculad-kailh-strategy-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canal-strategy:
+    strategy:
+      fail-fast: false
+      matrix:
+        strategy: [wire_frenet, wire_corrected, wire_round, individual_union]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned Build123d
+        run: python -m pip install 'build123d==0.9.1'
+      - name: Run isolated canal strategy
+        run: |
+          mkdir -p artifacts/canal_strategy
+          set +e
+          timeout 75s env CANAL_STRATEGY='${{ matrix.strategy }}' PYTHONPATH=draculad_kailh \
+            python draculad_kailh/canal_strategy_probe.py \
+            > 'artifacts/canal_strategy/${{ matrix.strategy }}.log' 2>&1
+          echo "$?" > 'artifacts/canal_strategy/${{ matrix.strategy }}.exit'
+          cat 'artifacts/canal_strategy/${{ matrix.strategy }}.log'
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canal-${{ matrix.strategy }}
+          path: artifacts/
+          retention-days: 7
+
+  compact-profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned Build123d
+        run: python -m pip install 'build123d==0.9.1'
+      - name: Download pinned reference
+        run: |
+          curl --fail --location --retry 5 --output reference.step \
+            'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
+          echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
+      - name: Evaluate compact profile families
+        run: |
+          mkdir -p artifacts/profile_fit
+          set +e
+          timeout 120s env PYTHONPATH=draculad_kailh \
+            python draculad_kailh/profile_fit_analysis.py \
+            > artifacts/profile_fit.log 2>&1
+          echo "$?" > artifacts/profile_fit.exit
+          cat artifacts/profile_fit.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compact-profile
+          path: artifacts/
+          retention-days: 7
