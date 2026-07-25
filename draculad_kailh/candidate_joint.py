@@ -20,7 +20,6 @@ TOP_BLEND_RADIUS = 0.070
 TOP_Z = 1.750
 PAD_Z_MAX = 1.800
 
-# Exact engineering pad corners identified from the independent reference.
 PAD_XY = (
     (4.54488778941404, 3.76578476453536),
     (4.54488778941404, 6.41087029507891),
@@ -28,8 +27,6 @@ PAD_XY = (
     (7.210189558447279, 3.7479184533604792),
 )
 
-# Compact authored cubic design profile. These are the existing production
-# design spans, not STEP poles/knots or a dense section replay.
 PROFILE_SPANS_YZ = (
     ((6.26449438808344, 1.75), (6.037652643286782, 1.7464977207059593), (5.948216212731957, 1.1627540082312793), (5.931167511145697, 0.9908398685910332)),
     ((5.931167511145697, 0.9908398685910332), (5.927754127720061, 0.9564203046194658), (5.922888677847069, 0.7445394664677538), (5.9056168509451865, 0.7353586477870302)),
@@ -64,17 +61,18 @@ def profile_wire(x: float) -> Wire:
 
 def pad_face() -> Face:
     points = [(x, y, TOP_Z) for x, y in PAD_XY]
-    edges = [
-        Edge.make_line(points[i], points[(i + 1) % len(points)])
-        for i in range(len(points))
-    ]
+    edges = [Edge.make_line(points[i], points[(i + 1) % len(points)]) for i in range(len(points))]
     return Face(closed_wire(edges))
+
+
+def geom_type_name(edge: Edge) -> str:
+    return str(edge.geom_type()).lower()
 
 
 def edge_record(edge: Edge) -> dict:
     bb = edge.bounding_box()
     return {
-        "geom_type": str(edge.geom_type),
+        "geom_type": geom_type_name(edge),
         "length": edge.length,
         "bbox": [bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z],
     }
@@ -90,7 +88,7 @@ def build_joint() -> tuple[Solid, dict]:
         bb = edge.bounding_box()
         if abs(bb.min.X - UNFILLETED_END_X) < 1.0e-6 and abs(bb.max.X - UNFILLETED_END_X) < 1.0e-6:
             terminal_all.append(edge)
-            if str(edge.geom_type).lower().find("line") < 0:
+            if "line" not in geom_type_name(edge):
                 terminal_edges.append(edge)
 
     debug = {
@@ -110,9 +108,6 @@ def build_joint() -> tuple[Solid, dict]:
         "main_fillet_faces": len(rolled.faces()),
     })
 
-    # First campaign intentionally exports the exact main roll plus exact pad.
-    # The R0.07 terminal blend is applied after the correct post-fillet edge
-    # chain is identified from this fresh topology.
     pad = extrude(pad_face(), PAD_Z_MAX - TOP_Z, dir=(0, 0, 1))
     joint = rolled.fuse(pad).clean()
     debug.update({
