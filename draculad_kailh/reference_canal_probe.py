@@ -11,18 +11,11 @@ from pathlib import Path
 
 from build123d import Edge, Face, Location, export_step, extrude, import_step, sweep
 
-from candidate_joint import (
-    MAIN_ROLL_RADIUS,
-    PAD_Z_MAX,
-    TOP_Z,
-    _resolved,
-    pad_face,
-)
+from candidate_joint import MAIN_ROLL_RADIUS, PAD_Z_MAX, TOP_Z, _resolved, pad_face
 from swept_cutter_candidate import corner_cutter_face
 
 EXTRUSION_LENGTH = 2.0
 REFERENCE_PROFILE_AREA = 0.9075354150773971
-REFERENCE_CONTOUR_LENGTH = 4.851046962108225
 
 
 def isolate_right_solder(reference):
@@ -51,17 +44,13 @@ def find_profile_face(solder) -> Face:
 
 
 def find_profile_contour(profile: Face) -> Edge:
-    matches = [
-        edge
-        for edge in profile.edges()
-        if abs(float(_resolved(edge.length)) - REFERENCE_CONTOUR_LENGTH) < 1.0e-6
-    ]
-    if len(matches) != 1:
+    edges = list(profile.edges())
+    if len(edges) != 2:
         raise RuntimeError(
-            "expected one exact contour edge, got "
-            f"{len(matches)}; lengths={[float(_resolved(e.length)) for e in profile.edges()]}"
+            f"expected two profile edges, got {len(edges)}; "
+            f"lengths={[float(_resolved(e.length)) for e in edges]}"
         )
-    return matches[0]
+    return max(edges, key=lambda edge: float(_resolved(edge.length)))
 
 
 def main():
@@ -75,18 +64,14 @@ def main():
     raw = extrude(profile, EXTRUSION_LENGTH, dir=(1, 0, 0), clean=True)
     contour_end = contour_start.moved(Location((EXTRUSION_LENGTH, 0, 0)))
     cutter_face = corner_cutter_face(contour_end, MAIN_ROLL_RADIUS)
-    cutter = sweep(
-        sections=cutter_face,
-        path=contour_end,
-        is_frenet=True,
-        clean=True,
-    )
+    cutter = sweep(sections=cutter_face, path=contour_end, is_frenet=True, clean=True)
     rolled = raw.cut(cutter).clean()
     pad = extrude(pad_face(), PAD_Z_MAX - TOP_Z, dir=(0, 0, 1), clean=True)
     joint = rolled.fuse(pad).clean()
     report = {
         "analysis_only": True,
         "reference_solid_index": ref_index,
+        "profile_edge_lengths": [float(_resolved(e.length)) for e in profile.edges()],
         "contour_length": float(_resolved(contour_start.length)),
         "profile_area": float(_resolved(profile.area)),
         "raw_valid": bool(_resolved(raw.is_valid)),
