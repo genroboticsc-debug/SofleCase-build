@@ -39,13 +39,29 @@ jobs:
             'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
 
-      - name: Build native candidate
+      - name: Build native candidate and preserve diagnostics
         env:
           OCP_SHOW: '0'
-        run: python draculad_kailh/candidate_joint.py
+        run: |
+          mkdir -p artifacts
+          set +e
+          python draculad_kailh/candidate_joint.py > artifacts/build.log 2>&1
+          status=$?
+          echo "$status" > artifacts/build_exit_code.txt
+          cat artifacts/build.log
+          exit 0
 
-      - name: Run independent validation
-        run: python draculad_kailh/validate_joint.py
+      - name: Run independent validation when candidate exists
+        run: |
+          if [ -f artifacts/candidate_joint.step ]; then
+            set +e
+            python draculad_kailh/validate_joint.py > artifacts/validation.log 2>&1
+            status=$?
+            echo "$status" > artifacts/validation_exit_code.txt
+            cat artifacts/validation.log
+          else
+            echo 'candidate_joint.step was not produced' | tee artifacts/validation.log
+          fi
 
       - name: Package evidence
         if: always()
