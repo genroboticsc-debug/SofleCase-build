@@ -6,7 +6,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from build123d import Edge, Side, Wire, export_step, import_step
+from build123d import Compound, Edge, Side, Wire, export_step, import_step
 
 ROOT=Path(__file__).resolve().parent
 SCRIPT=ROOT/'scripts'/'components'/'kailh cherry socket soldered.py'
@@ -51,11 +51,12 @@ def main():
  ref_edges=[]
  for edge in ref.edges():
   bb=edge.bounding_box(optimal=True)
-  if abs(bb.min.X-xend)<5e-4 and abs(bb.max.X-xend)<5e-4 and bb.max.Z<1.76:
+  if bb.min.X>6.93 and bb.max.X<xend+8e-4 and bb.max.Z<1.76 and edge.length>1e-5:
    ref_edges.append(edge)
  print('REF_TERMINAL_EDGE_COUNT',len(ref_edges))
  for i,e in enumerate(ref_edges): edge_info(f'REF_{i}',e)
- if ref_edges: export_step(Wire.combine(ref_edges,tol=1e-4),OUT/'reference_terminal_edges.step')
+ if ref_edges:
+  export_step(Compound(children=ref_edges),OUT/'reference_terminal_edges.step')
 
  src=source_wire()
  print('SOURCE_LENGTH',src.length,'edges',len(src.edges()))
