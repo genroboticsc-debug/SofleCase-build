@@ -91,13 +91,13 @@ def main():
     spans = mod.SOLDER_PROFILE_BEZIER_SPANS_YZ
     span_edges = [Edge.make_bezier(*[(x, y, z) for y, z in span]) for span in spans]
     print("SPAN_LENGTH_SUM", sum(e.length for e in span_edges))
-    print("SPAN_ENDPOINTS", span_edges[0].start_point.to_tuple(), span_edges[-1].end_point.to_tuple())
+    print("SPAN_ENDPOINTS", span_edges[0].start_point().to_tuple(), span_edges[-1].end_point().to_tuple())
     composite = exact_composite_edge(span_edges)
     print("COMPOSITE_LENGTH", composite.length, "geom", composite.geom_type)
-    print("COMPOSITE_ENDPOINTS", composite.start_point.to_tuple(), composite.end_point.to_tuple())
+    print("COMPOSITE_ENDPOINTS", composite.start_point().to_tuple(), composite.end_point().to_tuple())
     print("LENGTH_DELTA", composite.length - sum(e.length for e in span_edges))
 
-    closure = Edge.make_line(composite.end_point, composite.start_point)
+    closure = Edge.make_line(composite.end_point(), composite.start_point())
     wires = Wire.combine([composite, closure], tol=mod.WIRE_JOIN_TOLERANCE_MM)
     print("WIRE_COMBINE_COUNT", len(wires))
     if len(wires) != 1:
@@ -111,7 +111,7 @@ def main():
     terminal = [edge for edge in raw.edges() if all(abs(v.X - xmax) < 1e-6 for v in edge.vertices())]
     print("TERMINAL_COUNT", len(terminal))
     for index, edge in enumerate(terminal):
-        print("TERMINAL", index, "type", edge.geom_type, "length", edge.length, "start", edge.start_point.to_tuple(), "end", edge.end_point.to_tuple())
+        print("TERMINAL", index, "type", edge.geom_type, "length", edge.length, "start", edge.start_point().to_tuple(), "end", edge.end_point().to_tuple())
 
     curved = [e for e in terminal if e.geom_type.name != "LINE"]
     print("CURVED_TERMINAL_COUNT", len(curved))
