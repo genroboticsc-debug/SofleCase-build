@@ -29,13 +29,14 @@ jobs:
           mkdir -p draculad-ci/work
           base64 -d draculad-ci/input.zip.b64 > draculad-ci/input.zip
           unzip -q draculad-ci/input.zip -d draculad-ci/work
-          cp draculad-ci/experiment2.py draculad-ci/work/experiment2.py
-      - name: Run exact composite-curve fillet test
+          cp draculad-ci/experiment3.py draculad-ci/work/experiment3.py
+      - name: Run shape-preserving C1 composite test
         env:
           OCP_SHOW: '0'
         run: |
+          set -o pipefail
           cd draculad-ci/work
-          python experiment2.py 2>&1 | tee output/results2.txt
+          python experiment3.py 2>&1 | tee output/results3.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
