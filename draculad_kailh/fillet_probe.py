@@ -11,6 +11,7 @@ from candidate_joint import (
     MAIN_ROLL_RADIUS,
     UNFILLETED_END_X,
     X_START,
+    _resolved,
     edge_record,
     geom_type_name,
     profile_wire,
@@ -32,8 +33,8 @@ def try_fillet(raw, edges, radius):
         shape = raw.fillet(radius, edges)
         return {
             "success": True,
-            "valid": shape.is_valid,
-            "volume": shape.volume,
+            "valid": bool(_resolved(shape.is_valid)),
+            "volume": float(_resolved(shape.volume)),
             "faces": len(shape.faces()),
             "solids": len(shape.solids()),
         }, shape
@@ -47,8 +48,8 @@ def main():
     raw = extrude(Face(profile_wire(X_START)), UNFILLETED_END_X - X_START, dir=(1, 0, 0))
     edges = terminal_edges(raw)
     report = {
-        "raw_valid": raw.is_valid,
-        "raw_volume": raw.volume,
+        "raw_valid": bool(_resolved(raw.is_valid)),
+        "raw_volume": float(_resolved(raw.volume)),
         "edge_count": len(edges),
         "edges": [edge_record(e) for e in edges],
         "individual": [],
