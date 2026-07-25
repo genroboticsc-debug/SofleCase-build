@@ -1,0 +1,65 @@
+name: DracuLad Kailh exact geometry campaign
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'draculad_kailh/**'
+      - '.github/workflows/draculad-kailh-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install pinned CAD and validation stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.9.1' 'trimesh>=4.4' 'manifold3d>=3.0'
+          python - <<'PY'
+          import sys, build123d, OCP
+          print(sys.version)
+          print('build123d', build123d.__version__)
+          print('OCP imported')
+          PY
+
+      - name: Download independent pinned reference
+        run: |
+          curl --fail --location --retry 5 --output reference.step \
+            'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
+          echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
+
+      - name: Build native candidate
+        env:
+          OCP_SHOW: '0'
+        run: python draculad_kailh/candidate_joint.py
+
+      - name: Run independent validation
+        run: python draculad_kailh/validate_joint.py
+
+      - name: Package evidence
+        if: always()
+        run: |
+          mkdir -p artifacts
+          cp draculad_kailh/candidate_joint.py artifacts/
+          cp draculad_kailh/validate_joint.py artifacts/
+          sha256sum reference.step artifacts/* > artifacts/SHA256SUMS.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: draculad-kailh-campaign
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
