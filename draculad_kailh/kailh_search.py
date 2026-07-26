@@ -4,7 +4,7 @@ import json
 import traceback
 from pathlib import Path
 
-from build123d import Edge, Face, Wire, export_step, export_stl, extrude, fillet, import_step
+from build123d import CenterOf, Edge, Face, Wire, export_step, export_stl, extrude, fillet, import_step
 
 ROOT = Path(__file__).resolve().parent
 REFERENCE = ROOT / "kailh_reference.step"
@@ -58,7 +58,7 @@ def shape_single(shape, label):
 
 def metrics(shape):
     b = shape.bounding_box()
-    c = shape.center_of_mass
+    c = shape.center(CenterOf.MASS)
     return {
         "valid": bool(shape.is_valid), "volume": float(shape.volume), "area": float(shape.area),
         "bbox": [b.min.X, b.min.Y, b.min.Z, b.max.X, b.max.Y, b.max.Z],
@@ -146,7 +146,7 @@ def candidate(selector, apply_junction):
 
 def main():
     ref_all = import_step(REFERENCE)
-    refs = [s for s in ref_all.solids() if 1.0 < s.volume < 3.0 and s.center_of_mass.X > 0]
+    refs = [s for s in ref_all.solids() if 1.0 < s.volume < 3.0 and s.center(CenterOf.MASS).X > 0]
     if len(refs) != 1:
         raise RuntimeError(f"right reference solder count={len(refs)}")
     ref = refs[0]
