@@ -1,0 +1,43 @@
+name: DracuLad historical source recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/draculad-foostan-history.yml
+      - .github/draculad-foostan-history-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact historical foostan/kbd source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/foostan/kbd.git historical-kbd
+          cd historical-kbd
+          git checkout 230c6d634a8d409cbd1c506ec0260420a08a1c83
+          git submodule update --init --recursive || true
+          find . -type f \( -iname '*.f3d' -o -iname '*.f3z' -o -iname '*.step' -o -iname '*.stp' -o -iname '*.smt' -o -iname '*.sat' \) -print | sort > ../historical-cad-inventory.txt
+          cd ..
+          tar --exclude='.git' -czf historical-kbd-230c6d.tar.gz historical-kbd historical-cad-inventory.txt
+          sha256sum historical-kbd-230c6d.tar.gz historical-cad-inventory.txt > SHA256SUMS
+          cat historical-cad-inventory.txt
+      - name: Upload exact historical source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: foostan-kbd-history-230c6d
+          path: |
+            historical-kbd-230c6d.tar.gz
+            historical-cad-inventory.txt
+            SHA256SUMS
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
