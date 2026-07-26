@@ -1,0 +1,37 @@
+name: SROT Pico WRL analysis
+on:
+  pull_request:
+    paths:
+      - 'srot_pico_wrl_marker.txt'
+permissions:
+  contents: read
+jobs:
+  convert:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install Assimp
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y assimp-utils
+      - name: Fetch pinned Pico WRL
+        run: |
+          curl -L --fail -o Pico.wrl 'https://raw.githubusercontent.com/gusmanb/logicanalyzer/4e8d9ec9fff592f7bb84490d8e301061a36e7f22/Electronics/LogicAnalyzer/LogicAnalyzer/Pico.wrl'
+          sha256sum Pico.wrl > SHA256.txt
+      - name: Inspect and convert
+        run: |
+          assimp info Pico.wrl > assimp_info.txt 2>&1
+          assimp export Pico.wrl Pico.glb -f glb2 > assimp_export_glb.txt 2>&1
+          assimp export Pico.wrl Pico.obj -f objnomtl > assimp_export_obj.txt 2>&1
+          ls -lh Pico.* >> assimp_info.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-pico-wrl-analysis
+          path: |
+            Pico.wrl
+            Pico.glb
+            Pico.obj
+            assimp_info.txt
+            assimp_export_glb.txt
+            assimp_export_obj.txt
+            SHA256.txt
+          retention-days: 1
