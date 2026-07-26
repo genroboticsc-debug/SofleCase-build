@@ -15,10 +15,15 @@ jobs:
   cache-wheelhouse:
     runs-on: ubuntu-latest
     steps:
+      - name: Use CPython 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
       - name: Download exact pinned runtime
         shell: bash
         run: |
           set -euo pipefail
+          python -VV
           cat > requirements.txt <<'REQ'
           build123d==0.11.1
           cadquery-ocp-novtk==7.9.3.1.1
@@ -36,7 +41,7 @@ jobs:
           REQ
           python -m pip download --dest wheelhouse -r requirements.txt
           echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  wheelhouse/build123d-0.11.1-py3-none-any.whl' | sha256sum --check --strict
-          sha256sum wheelhouse/* | sort -k2 > wheelhouse/SHA256SUMS
+          (cd wheelhouse && sha256sum * | sort -k2 > SHA256SUMS)
       - name: Upload verified wheelhouse
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
