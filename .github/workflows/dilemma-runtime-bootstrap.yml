@@ -1,4 +1,4 @@
-name: Temporary Build123d wheelhouse
+name: Temporary Build123d validation wheelhouse
 
 on:
   pull_request:
@@ -19,16 +19,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Download Linux CPython 3.13 wheelhouse
+      - name: Download Linux CPython 3.13 validation wheelhouse
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p wheelhouse
-          python -m pip download --only-binary=:all: --dest wheelhouse build123d==0.11.1
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            build123d==0.11.1 manifold3d==3.5.2 trimesh==4.11.1
           ls -lh wheelhouse
       - name: Upload wheelhouse
         uses: actions/upload-artifact@v4
         with:
-          name: build123d-0-11-1-linux-cp313-wheelhouse
+          name: build123d-manifold-trimesh-linux-cp313-wheelhouse
           path: wheelhouse
           retention-days: 1
