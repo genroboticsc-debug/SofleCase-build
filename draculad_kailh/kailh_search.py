@@ -1,191 +1,171 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 import traceback
 from pathlib import Path
 
 from build123d import Edge, Face, Wire, export_step, export_stl, extrude, fillet, import_step
 
 ROOT = Path(__file__).resolve().parent
-TARGET = ROOT / "kailh_socket.py"
 REFERENCE = ROOT / "kailh_reference.step"
 OUT = ROOT / "results"
 OUT.mkdir(exist_ok=True)
 
-spec = importlib.util.spec_from_file_location("kailh_socket", TARGET)
-mod = importlib.util.module_from_spec(spec)
-assert spec and spec.loader
-sys.modules[spec.name] = mod
-spec.loader.exec_module(mod)
+X0 = 5.010191487800
+X_RAW_END = X0 + 2.0
+X_ROLL_START = X_RAW_END - 0.375
+PROFILE_CENTER_Y = 5.085130767564
+TOP_Z = 1.75
+PAD_Z1 = 1.80
+PROFILE_SPANS = (
+    ((6.26449438808344, 1.75), (6.037652643286782, 1.7464977207059593), (5.948216212731957, 1.1627540082312793), (5.931167511145697, 0.9908398685910332)),
+    ((5.931167511145697, 0.9908398685910332), (5.927754127720061, 0.9564203046194658), (5.922888677847069, 0.7445394664677538), (5.9056168509451865, 0.7353586477870302)),
+    ((5.9056168509451865, 0.7353586477870302), (5.880620638817342, 0.7220719414904516), (5.853618519895407, 0.842675012490237), (5.847148297690575, 0.8600319632961385)),
+    ((5.847148297690575, 0.8600319632961385), (5.816949601881485, 0.9410426706516545), (5.774807438674499, 1.0176881094435422), (5.727176591347377, 1.0896800429967701)),
+    ((5.727176591347377, 1.0896800429967701), (5.581540119368333, 1.3098031733210076), (5.34929696093493, 1.5421574803805749), (5.070910946871318, 1.561888982007823)),
+    ((5.070910946871318, 1.561888982007823), (4.750995222704022, 1.5845640350388521), (4.5310337517931325, 1.291336161578472), (4.409299950016339, 1.0327790431952582)),
+    ((4.409299950016339, 1.0327790431952582), (4.390241682529478, 0.9923001404512655), (4.2790421668386305, 0.6963848252000207), (4.268512060541968, 0.6942119954420493)),
+    ((4.268512060541968, 0.6942119954420493), (4.2637523122493635, 0.6932298474523463), (4.259899087895539, 0.6960508690099316), (4.256802438167436, 0.6992378869858319)),
+    ((4.256802438167436, 0.6992378869858319), (4.235761897724996, 0.7208924448146236), (4.239333497876836, 0.9743776290012744), (4.234772130300953, 1.0251152351594182)),
+    ((4.234772130300953, 1.0251152351594182), (4.216801197009745, 1.2250118934432974), (4.175010164179821, 1.7476386118392202), (3.90576714704497, 1.75)),
+)
 
 
-def edge_record(index, edge):
-    b = edge.bounding_box()
-    try:
-        geom = str(edge.geom_type)
-    except Exception:
-        geom = "unknown"
-    return {
-        "index": index,
-        "geom_type": geom,
-        "length": edge.length,
-        "bbox": [b.min.X, b.min.Y, b.min.Z, b.max.X, b.max.Y, b.max.Z],
-        "center": [edge.center().X, edge.center().Y, edge.center().Z],
-        "start": list(edge.position_at(0)),
-        "end": list(edge.position_at(1)),
-    }
+def closed_wire(edges):
+    wires = Wire.combine(edges, tol=1e-7)
+    if len(wires) != 1:
+        raise RuntimeError(f"expected one wire, got {len(wires)}")
+    return wires[0]
 
 
-def metrics(shape):
-    b = shape.bounding_box()
-    c = shape.center_of_mass
-    return {
-        "valid": bool(shape.is_valid),
-        "volume": float(shape.volume),
-        "area": float(shape.area),
-        "bbox": [b.min.X, b.min.Y, b.min.Z, b.max.X, b.max.Y, b.max.Z],
-        "com": [c.X, c.Y, c.Z],
-        "solids": len(shape.solids()),
-        "faces": len(shape.faces()),
-        "edges": len(shape.edges()),
-    }
+def profile_wire(x):
+    def p(yz):
+        return (x, yz[0], yz[1])
+    edges = [Edge.make_bezier(*(p(point) for point in span)) for span in PROFILE_SPANS]
+    edges.append(Edge.make_line(p(PROFILE_SPANS[-1][-1]), p(PROFILE_SPANS[0][0])))
+    return closed_wire(edges)
 
 
 def shape_single(shape, label):
     solids = shape.solids()
     if len(solids) != 1:
         raise RuntimeError(f"{label}: expected one solid, got {len(solids)}")
-    result = solids[0]
-    if not result.is_valid:
+    solid = solids[0]
+    if not solid.is_valid:
         raise RuntimeError(f"{label}: invalid solid")
-    return result
+    return solid
+
+
+def metrics(shape):
+    b = shape.bounding_box()
+    c = shape.center_of_mass
+    return {
+        "valid": bool(shape.is_valid), "volume": float(shape.volume), "area": float(shape.area),
+        "bbox": [b.min.X, b.min.Y, b.min.Z, b.max.X, b.max.Y, b.max.Z],
+        "com": [c.X, c.Y, c.Z], "solids": len(shape.solids()),
+        "faces": len(shape.faces()), "edges": len(shape.edges()),
+    }
+
+
+def edge_record(i, edge):
+    b = edge.bounding_box()
+    return {
+        "index": i, "length": edge.length,
+        "bbox": [b.min.X, b.min.Y, b.min.Z, b.max.X, b.max.Y, b.max.Z],
+        "start": list(edge.position_at(0)), "end": list(edge.position_at(1)),
+    }
 
 
 def exact_xor(a, b):
     am = a.cut(b)
     bm = b.cut(a)
-    av = float(am.volume)
-    bv = float(bm.volume)
-    return {
-        "a_minus_b": av,
-        "b_minus_a": bv,
-        "xor_volume": av + bv,
-        "xor_pct": 100.0 * (av + bv) / float(a.volume),
-    }
+    av, bv = float(am.volume), float(bm.volume)
+    return {"a_minus_b": av, "b_minus_a": bv, "xor_volume": av + bv,
+            "xor_pct": 100.0 * (av + bv) / float(a.volume)}
 
 
-def pad():
-    z0 = mod.SOLDER_TOP_Z_MM
-    z1 = mod.SOLDER_PAD_Z_MAX_MM
+def wetting_pad():
     pts = [
-        (4.54488778941404, 3.76578476453536, z0),
-        (7.210189558447279, 3.7479184533604792, z0),
-        (7.21019340060459, 6.41087029507891, z0),
-        (4.54488778941404, 6.41087029507891, z0),
+        (4.54488778941404, 3.76578476453536, TOP_Z),
+        (7.210189558447279, 3.7479184533604792, TOP_Z),
+        (7.21019340060459, 6.41087029507891, TOP_Z),
+        (4.54488778941404, 6.41087029507891, TOP_Z),
     ]
-    edges = [Edge.make_line(pts[i], pts[(i + 1) % 4]) for i in range(4)]
-    wire = Wire.combine(edges, tol=1e-7)[0]
-    return shape_single(extrude(Face(wire), z1 - z0, dir=(0, 0, 1)), "pad")
+    wire = closed_wire([Edge.make_line(pts[i], pts[(i + 1) % 4]) for i in range(4)])
+    return shape_single(extrude(Face(wire), PAD_Z1 - TOP_Z, dir=(0, 0, 1)), "pad")
 
 
-def select_terminal_edges(raw):
-    x_end = mod.SOLDER_X_START_MM + 2.0
+def terminal_edges(raw):
+    result, top = [], []
     records = [edge_record(i, e) for i, e in enumerate(raw.edges())]
-    terminal = []
-    terminal_top = []
-    for i, e in enumerate(raw.edges()):
-        b = e.bounding_box()
-        on_end = abs(b.min.X - x_end) < 1e-5 and abs(b.max.X - x_end) < 1e-5
-        if not on_end:
+    for i, edge in enumerate(raw.edges()):
+        b = edge.bounding_box()
+        if abs(b.min.X - X_RAW_END) > 1e-5 or abs(b.max.X - X_RAW_END) > 1e-5:
             continue
-        if abs(e.length - 2.358727341038) < 1e-3:
-            terminal_top.append((i, e))
+        if abs(edge.length - 2.358727341038) < 1e-3:
+            top.append((i, edge))
         else:
-            terminal.append((i, e))
-    return records, terminal, terminal_top
+            result.append((i, edge))
+    return records, result, top
 
 
-def select_top_edges(rolled):
+def junction_edges(rolled):
     selected = []
-    records = []
-    for i, e in enumerate(rolled.edges()):
-        rec = edge_record(i, e)
-        b = e.bounding_box()
-        records.append(rec)
-        if (
-            abs(b.min.Z - mod.SOLDER_TOP_Z_MM) < 5e-5
-            and abs(b.max.Z - mod.SOLDER_TOP_Z_MM) < 5e-5
-            and b.max.X > mod.SOLDER_X_START_MM + 1.9
-            and b.min.X > mod.SOLDER_TAPER_START_X_MM - 2e-4
-        ):
-            selected.append((i, e))
+    records = [edge_record(i, e) for i, e in enumerate(rolled.edges())]
+    for i, edge in enumerate(rolled.edges()):
+        b = edge.bounding_box()
+        if (abs(b.min.Z - TOP_Z) < 5e-5 and abs(b.max.Z - TOP_Z) < 5e-5
+                and b.min.X > X_ROLL_START - 2e-4 and b.max.X > X_RAW_END - 0.1):
+            selected.append((i, edge))
     return records, selected
 
 
-def build_candidate(name, terminal_selector="all_profile", junction=True, fuse_pad=True):
-    base_profile = Face(mod._solder_profile_wire(mod.SOLDER_X_START_MM))
-    raw = shape_single(extrude(base_profile, 2.0, dir=(1, 0, 0)), "raw extrusion")
-    raw_records, terminal, terminal_top = select_terminal_edges(raw)
-    if terminal_selector == "all_profile":
-        chosen = terminal
-    elif terminal_selector == "lower_only":
-        chosen = [(i, e) for i, e in terminal if e.bounding_box().min.Z < 1.749]
-    elif terminal_selector == "single_longest":
-        chosen = [max(terminal, key=lambda pair: pair[1].length)]
+def candidate(selector, apply_junction):
+    raw = shape_single(extrude(Face(profile_wire(X0)), 2.0, dir=(1, 0, 0)), "raw")
+    raw_records, all_terminal, top_terminal = terminal_edges(raw)
+    if selector == "all":
+        selected = all_terminal
+    elif selector == "lower":
+        selected = [(i, e) for i, e in all_terminal if e.bounding_box().min.Z < TOP_Z - 1e-4]
+    elif selector == "longest":
+        selected = [max(all_terminal, key=lambda item: item[1].length)]
     else:
-        raise ValueError(terminal_selector)
-    rolled = shape_single(fillet([e for _, e in chosen], 0.375), "R0.375 terminal roll")
-    rolled_records, top_edges = select_top_edges(rolled)
-    formed = rolled
-    if junction:
-        formed = shape_single(fillet([e for _, e in top_edges], 0.07), "R0.07 junction round")
-    final = formed.fuse(pad()).clean() if fuse_pad else formed
-    final = shape_single(final, "final joint")
+        raise ValueError(selector)
+    rolled = shape_single(fillet([e for _, e in selected], 0.375), "terminal R0.375")
+    rolled_records, top_edges = junction_edges(rolled)
+    formed = shape_single(fillet([e for _, e in top_edges], 0.07), "junction R0.07") if apply_junction else rolled
+    final = shape_single(formed.fuse(wetting_pad()).clean(), "final")
     return final, {
-        "name": name,
-        "raw": metrics(raw),
-        "terminal_edge_indices": [i for i, _ in terminal],
-        "terminal_top_indices": [i for i, _ in terminal_top],
-        "chosen_terminal_indices": [i for i, _ in chosen],
-        "raw_edges": raw_records,
-        "rolled": metrics(rolled),
-        "rolled_edges": rolled_records,
-        "junction_edge_indices": [i for i, _ in top_edges],
-        "formed": metrics(formed),
-        "final": metrics(final),
+        "raw": metrics(raw), "raw_edges": raw_records,
+        "terminal_all": [i for i, _ in all_terminal], "terminal_top": [i for i, _ in top_terminal],
+        "terminal_selected": [i for i, _ in selected], "rolled": metrics(rolled),
+        "rolled_edges": rolled_records, "junction_selected": [i for i, _ in top_edges],
+        "formed": metrics(formed), "final": metrics(final),
     }
 
 
 def main():
-    reference_all = import_step(REFERENCE)
-    reference_candidates = [s for s in reference_all.solids() if 1.0 < s.volume < 3.0 and s.center_of_mass.X > 0]
-    if len(reference_candidates) != 1:
-        raise RuntimeError(f"reference right solder selection found {len(reference_candidates)}")
-    reference = reference_candidates[0]
-    report = {"reference": metrics(reference), "candidates": []}
-    variants = [
-        ("all_profile_roll_and_junction", "all_profile", True),
-        ("all_profile_roll_only", "all_profile", False),
-        ("lower_profile_roll_and_junction", "lower_only", True),
-        ("single_longest_roll_and_junction", "single_longest", True),
-    ]
-    for name, selector, junction in variants:
-        entry = {"name": name}
+    ref_all = import_step(REFERENCE)
+    refs = [s for s in ref_all.solids() if 1.0 < s.volume < 3.0 and s.center_of_mass.X > 0]
+    if len(refs) != 1:
+        raise RuntimeError(f"right reference solder count={len(refs)}")
+    ref = refs[0]
+    report = {"reference": metrics(ref), "candidates": []}
+    for name, selector, junction in [
+        ("all_roll_junction", "all", True), ("all_roll_only", "all", False),
+        ("lower_roll_junction", "lower", True), ("longest_roll_junction", "longest", True),
+    ]:
+        row = {"name": name}
         try:
-            candidate, details = build_candidate(name, selector, junction, True)
-            export_step(candidate, OUT / f"{name}.step")
-            export_stl(candidate, OUT / f"{name}.stl", tolerance=0.01, angular_tolerance=0.05, ascii_format=True)
-            entry.update(details)
-            try:
-                entry["exact_xor"] = exact_xor(reference, candidate)
-            except Exception as exc:
-                entry["exact_xor_error"] = f"{type(exc).__name__}: {exc}"
+            solid, details = candidate(selector, junction)
+            row.update(details)
+            row["exact_xor"] = exact_xor(ref, solid)
+            export_step(solid, OUT / f"{name}.step")
+            export_stl(solid, OUT / f"{name}.stl", tolerance=0.01, angular_tolerance=0.05, ascii_format=True)
         except Exception as exc:
-            entry["error"] = f"{type(exc).__name__}: {exc}"
-            entry["traceback"] = traceback.format_exc()
-        report["candidates"].append(entry)
+            row["error"] = f"{type(exc).__name__}: {exc}"
+            row["traceback"] = traceback.format_exc()
+        report["candidates"].append(row)
         (OUT / "search_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
 
