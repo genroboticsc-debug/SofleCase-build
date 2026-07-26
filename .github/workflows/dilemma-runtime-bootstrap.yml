@@ -32,7 +32,7 @@ jobs:
           python -m pip install --disable-pip-version-check build123d==0.9.1
           python - <<'PY'
           import build123d
-          print('build123d', build123d.__version__)
+          print('build123d import OK:', build123d.__file__)
           PY
 
       - name: Fetch pinned Kailh reference
@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p draculad_kailh/results
-          python draculad_kailh/kailh_search.py | tee draculad_kailh/results/search.log
+          python draculad_kailh/kailh_search.py 2>&1 | tee draculad_kailh/results/search.log
 
       - name: Upload exact search evidence
         if: always()
