@@ -31,7 +31,7 @@ jobs:
           cat > cadmpeg/crates/cadmpeg-codec-sldprt/examples/dump_ir.rs <<'RS'
           use std::{env, fs::File, fs};
           use cadmpeg_codec_sldprt::SldprtCodec;
-          use cadmpeg_ir::{Codec, DecodeOptions};
+          use cadmpeg_ir::{CodecEntry, DecodeOptions};
 
           fn main() -> Result<(), Box<dyn std::error::Error>> {
               let args: Vec<String> = env::args().collect();
