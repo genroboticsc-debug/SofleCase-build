@@ -1,1 +1,1 @@
-trigger pinned Pico WRL analysis 2026-07-27
+trigger pinned Pico WRL analysis 2026-07-27 diagnostics rerun
