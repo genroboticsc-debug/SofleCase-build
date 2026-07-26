@@ -35,33 +35,19 @@ jobs:
           print('build123d', importlib.metadata.version('build123d'), build123d.__file__)
           PY
 
-      - name: Fetch pinned Kailh reference
+      - name: Run open-curve offset analysis
         shell: bash
         run: |
           set -euo pipefail
-          git init /tmp/kbd-reference
-          git -C /tmp/kbd-reference remote add origin https://github.com/foostan/kbd.git
-          git -C /tmp/kbd-reference fetch --depth=1 origin 230c6d634a8d409cbd1c506ec0260420a08a1c83
-          git -C /tmp/kbd-reference checkout --detach FETCH_HEAD
-          cp '/tmp/kbd-reference/kicad-packages3D/kbd.3dshapes/kailh cherry socket soldered.step' draculad_kailh/kailh_reference.step
-          echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  draculad_kailh/kailh_reference.step' | sha256sum --check --strict
+          rm -rf draculad_kailh/results_open_offset
+          mkdir -p draculad_kailh/results_open_offset
+          python draculad_kailh/kailh_open_offset.py 2>&1 | tee draculad_kailh/results_open_offset/search.log
 
-      - name: Run current Build123d exact tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf draculad_kailh/results_offset draculad_kailh/results_subset
-          mkdir -p draculad_kailh/results_offset draculad_kailh/results_subset
-          python draculad_kailh/kailh_offset_search.py 2>&1 | tee draculad_kailh/results_offset/search.log
-          python draculad_kailh/kailh_subset_search.py 2>&1 | tee draculad_kailh/results_subset/search.log
-
-      - name: Upload current-runtime evidence
+      - name: Upload open-offset evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: draculad-kailh-build123d-0-11-1-tests
-          path: |
-            draculad_kailh/results_offset
-            draculad_kailh/results_subset
+          name: draculad-kailh-open-offset-analysis
+          path: draculad_kailh/results_open_offset
           if-no-files-found: warn
           retention-days: 1
