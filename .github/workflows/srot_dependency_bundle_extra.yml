@@ -1,0 +1,27 @@
+name: SROT dependency bundle extra
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  wheelhouse-extra:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download missing runtime wheel
+        run: |
+          python -m pip install --upgrade pip
+          mkdir wheelhouse
+          python -m pip download --no-deps --dest wheelhouse svgelements==1.9.6
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS_EXTRA.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-python313-wheelhouse-extra
+          path: wheelhouse/
+          retention-days: 1
