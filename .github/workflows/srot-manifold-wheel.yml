@@ -1,0 +1,25 @@
+name: SROT manifold wheel
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/srot-manifold-wheel.yml'
+      - '.srot-manifold-trigger'
+  workflow_dispatch:
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download pinned wheel
+        run: |
+          mkdir wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse manifold3d==3.5.2
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifold3d-3.5.2-cp313-linux-x86_64
+          path: wheelhouse/*
+          retention-days: 1
