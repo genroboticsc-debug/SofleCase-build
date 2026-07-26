@@ -1,0 +1,30 @@
+name: Cache build123d 0.11.1
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/cache-build123d-0.11.1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cache-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download exact official wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip download --no-deps --dest wheelhouse build123d==0.11.1
+          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  wheelhouse/build123d-0.11.1-py3-none-any.whl' | sha256sum --check --strict
+      - name: Upload verified wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: build123d-0.11.1-verified-wheel
+          path: wheelhouse/build123d-0.11.1-py3-none-any.whl
+          if-no-files-found: error
+          retention-days: 7
