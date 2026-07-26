@@ -46,18 +46,18 @@ jobs:
           cp '/tmp/kbd-reference/kicad-packages3D/kbd.3dshapes/kailh cherry socket soldered.step' draculad_kailh/kailh_reference.step
           echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  draculad_kailh/kailh_reference.step' | sha256sum --check --strict
 
-      - name: Run smoothed exact feature search
+      - name: Run compact exact feature search
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p draculad_kailh/results_approx
-          python draculad_kailh/kailh_approx_search.py 2>&1 | tee draculad_kailh/results_approx/search.log
+          mkdir -p draculad_kailh/results_compact
+          python draculad_kailh/kailh_compact_search.py 2>&1 | tee draculad_kailh/results_compact/search.log
 
       - name: Upload exact search evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: draculad-kailh-exact-approx-search
-          path: draculad_kailh/results_approx
+          name: draculad-kailh-exact-compact-search
+          path: draculad_kailh/results_compact
           if-no-files-found: warn
           retention-days: 1
