@@ -44,29 +44,41 @@ jobs:
               ir.finalize();
               fs::write(&args[2], ir.to_canonical_json()?)?;
               fs::write(&args[3], format!("{:#?}\n", decoded.report))?;
-              eprintln!("bodies={} faces={} features={} sketches={} sketch_entities={} parameters={} losses={}",
+              eprintln!("bodies={} faces={} features={} sketches={} sketch_entities={} parameters={}",
                   ir.model.bodies.len(), ir.model.faces.len(), ir.model.features.len(),
                   ir.model.sketches.len(), ir.model.sketch_entities.len(),
-                  ir.model.parameters.len(), decoded.report.losses.len());
+                  ir.model.parameters.len());
               Ok(())
           }
           RS
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.88.0
-      - name: Decode both native parts
+      - name: Decode both native parts and retain diagnostics
         working-directory: cadmpeg
         run: |
+          set +e
           cargo run --release -p cadmpeg-codec-sldprt --example dump_ir -- \
             ../native_cad/AnalyzerBoxMain_fork_PR100.SLDPRT \
             ../decoded/AnalyzerBoxMain_fork_IR.json \
-            ../decoded/AnalyzerBoxMain_fork_report.txt
+            ../decoded/AnalyzerBoxMain_fork_report.txt \
+            > ../decoded/AnalyzerBoxMain_fork_stdout.txt \
+            2> ../decoded/AnalyzerBoxMain_fork_stderr.txt
+          MAIN_RC=$?
+          echo "$MAIN_RC" > ../decoded/AnalyzerBoxMain_fork_exit_code.txt
+
           cargo run --release -p cadmpeg-codec-sldprt --example dump_ir -- \
             ../native_cad/AnalyzerBoxTop_fork_PR102.SLDPRT \
             ../decoded/AnalyzerBoxTop_fork_IR.json \
-            ../decoded/AnalyzerBoxTop_fork_report.txt
+            ../decoded/AnalyzerBoxTop_fork_report.txt \
+            > ../decoded/AnalyzerBoxTop_fork_stdout.txt \
+            2> ../decoded/AnalyzerBoxTop_fork_stderr.txt
+          TOP_RC=$?
+          echo "$TOP_RC" > ../decoded/AnalyzerBoxTop_fork_exit_code.txt
+
           sha256sum ../decoded/* > ../decoded/SHA256SUMS_IR.txt
           ls -lh ../decoded
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: emtid000034210-sldprt-ir
