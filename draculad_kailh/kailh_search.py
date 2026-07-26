@@ -146,7 +146,7 @@ def candidate(selector, apply_junction):
 
 def main():
     ref_all = import_step(REFERENCE)
-    refs = [s for s in ref_all.solids() if 1.0 < s.volume < 3.0 and s.center(CenterOf.MASS).X > 0]
+    refs = [s for s in ref_all.solids() if 1.7 < s.volume < 1.9 and s.center(CenterOf.MASS).X > 0]
     if len(refs) != 1:
         raise RuntimeError(f"right reference solder count={len(refs)}")
     ref = refs[0]
