@@ -1,53 +1,34 @@
-name: Temporary DracuLad Kailh exact search
+name: Temporary Build123d wheelhouse
 
 on:
   pull_request:
     branches: [master]
     paths:
       - .github/workflows/dilemma-runtime-bootstrap.yml
-      - .github/dilemma-runtime-bootstrap-trigger.txt
-      - draculad_kailh/**
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  search:
+  wheelhouse:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Check out temporary search branch
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-
-      - name: Install current exact CAD runtime
+      - name: Download Linux CPython 3.13 wheelhouse
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check build123d==0.11.1
-          python - <<'PY'
-          import importlib.metadata, build123d
-          print('build123d', importlib.metadata.version('build123d'), build123d.__file__)
-          PY
-
-      - name: Run open-curve offset analysis
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf draculad_kailh/results_open_offset
-          mkdir -p draculad_kailh/results_open_offset
-          python draculad_kailh/kailh_open_offset.py 2>&1 | tee draculad_kailh/results_open_offset/search.log
-
-      - name: Upload open-offset evidence
-        if: always()
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --dest wheelhouse build123d==0.11.1
+          ls -lh wheelhouse
+      - name: Upload wheelhouse
         uses: actions/upload-artifact@v4
         with:
-          name: draculad-kailh-open-offset-analysis
-          path: draculad_kailh/results_open_offset
-          if-no-files-found: warn
+          name: build123d-0-11-1-linux-cp313-wheelhouse
+          path: wheelhouse
           retention-days: 1
