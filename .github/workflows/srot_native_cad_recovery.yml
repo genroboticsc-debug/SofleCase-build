@@ -1,0 +1,29 @@
+name: SROT native CAD recovery
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  recover-native-cad:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Recover exact historical SolidWorks sources
+        run: |
+          mkdir native_cad
+          curl -fL --retry 3 \
+            'https://raw.githubusercontent.com/gusmanb/logicanalyzer/e9239a922c3e2c75fbd6ae0bd20aca5fe65bdddd/Enclosure/AnalyzerBoxMain_fork.SLDPRT' \
+            -o native_cad/AnalyzerBoxMain_fork_PR100.SLDPRT
+          curl -fL --retry 3 \
+            'https://raw.githubusercontent.com/gusmanb/logicanalyzer/dec289bb3c92ba27566a877f72d8a6fb7d056f8f/Enclosure/LogicAnalyzer_JasonYANG170/AnalyzerBoxTop_fork.SLDPRT' \
+            -o native_cad/AnalyzerBoxTop_fork_PR102.SLDPRT
+          sha256sum native_cad/* > native_cad/SHA256SUMS_NATIVE_CAD.txt
+          ls -lh native_cad
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emtid000034210-native-solidworks-sources
+          path: native_cad/
+          retention-days: 1
