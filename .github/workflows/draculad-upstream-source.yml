@@ -1,0 +1,44 @@
+name: DracuLad upstream source recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/draculad-upstream-source.yml
+      - .github/draculad-upstream-source-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact MangoIV/dracuLad source tree and history inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/MangoIV/dracuLad.git upstream-draculad
+          cd upstream-draculad
+          git checkout a5b47bacf454ea4cea270d48eba936626bf0d3e6
+          git submodule update --init --recursive || true
+          find . -type f -print | sort > ../upstream-file-inventory.txt
+          git log --all --format='COMMIT %H %cI %s' --name-only -- '*.dxf' '*.svg' '*.f3d' '*.f3z' '*.step' '*.stp' '*.fcstd' '*.sketch' > ../upstream-cad-history.txt
+          cd ..
+          tar --exclude='.git' -czf upstream-draculad-a5b47b.tar.gz upstream-draculad upstream-file-inventory.txt upstream-cad-history.txt
+          sha256sum upstream-draculad-a5b47b.tar.gz upstream-file-inventory.txt upstream-cad-history.txt > SHA256SUMS
+      - name: Upload exact upstream source
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-draculad-a5b47b
+          path: |
+            upstream-draculad-a5b47b.tar.gz
+            upstream-file-inventory.txt
+            upstream-cad-history.txt
+            SHA256SUMS
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
