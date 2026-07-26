@@ -1,0 +1,43 @@
+name: DracuLad CADMPEG binary
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/draculad-cadmpeg-binary.yml
+      - .github/draculad-cadmpeg-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify official CADMPEG v0.3.0 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://github.com/cadmpeg/cadmpeg/releases/download/v0.3.0'
+          curl --proto '=https' --tlsv1.2 -LfsS -o cadmpeg.tar.xz "$base/cadmpeg-x86_64-unknown-linux-gnu.tar.xz"
+          curl --proto '=https' --tlsv1.2 -LfsS -o cadmpeg.tar.xz.sha256 "$base/cadmpeg-x86_64-unknown-linux-gnu.tar.xz.sha256"
+          expected=$(awk '{print $1}' cadmpeg.tar.xz.sha256)
+          actual=$(sha256sum cadmpeg.tar.xz | awk '{print $1}')
+          test "$expected" = "$actual"
+          mkdir package
+          tar -xJf cadmpeg.tar.xz -C package
+          cp cadmpeg.tar.xz.sha256 package/
+          find package -maxdepth 3 -type f -print -exec sha256sum {} \;
+          candidate=$(find package -type f -name cadmpeg -perm -111 | head -1)
+          "$candidate" --version
+      - name: Upload verified CADMPEG binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: cadmpeg-v0.3.0-linux-x64
+          path: package/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
