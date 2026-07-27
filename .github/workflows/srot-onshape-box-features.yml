@@ -21,19 +21,20 @@ jobs:
             name=${item%%:*}; eid=${item##*:}
             base="https://cad.onshape.com/api/v10/partstudios/d/$DID/w/$WID/e/$eid"
             curl -L --fail --retry 5 -o "recovered/${name}_features.json" "$base/features"
-            curl -L --fail --retry 5 -o "recovered/${name}_bodydetails.json" "$base/bodydetails"
-            curl -L --fail --retry 5 -o "recovered/${name}_massproperties.json" "$base/massproperties"
-            curl -L --fail --retry 5 -o "recovered/${name}_shadedviews.json" "$base/shadedviews?viewMatrix=1,0,0,0,1,0,0,0,1&outputHeight=800&outputWidth=800&pixelSize=0.1"
+            for endpoint in bodydetails massproperties; do
+              curl -L --retry 2 -sS -o "recovered/${name}_${endpoint}.json" -w '%{http_code}\n' "$base/$endpoint" > "recovered/${name}_${endpoint}.status" || true
+            done
           done
           python - <<'PY'
           import json, pathlib
           out=[]
           for p in pathlib.Path('recovered').glob('*_features.json'):
               d=json.loads(p.read_text())
-              out.append({'file':p.name,'feature_count':len(d.get('features',[])),'serializationVersion':d.get('serializationVersion'),'sourceMicroversion':d.get('sourceMicroversion')})
+              out.append({'file':p.name,'bytes':p.stat().st_size,'feature_count':len(d.get('features',[])),'serializationVersion':d.get('serializationVersion'),'sourceMicroversion':d.get('sourceMicroversion')})
           pathlib.Path('recovered/summary.json').write_text(json.dumps(out,indent=2))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: srot-onshape-box-features
           path: recovered
