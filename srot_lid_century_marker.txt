@@ -1,1 +1,1 @@
-Sweep exact Windows GDI Century Gothic logical weights against the lid reference — run 3.
+Extract exact Windows GDI Century Gothic glyph outlines for local lid fit — run 4.
