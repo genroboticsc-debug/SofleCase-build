@@ -39,22 +39,35 @@ jobs:
           unzip -q /tmp/paperpilot-project.zip -d paperpilot-build
       - name: Compile debug APK
         working-directory: paperpilot-build
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../GRADLE_BUILD.log
+          echo "${PIPESTATUS[0]}" > ../GRADLE_BUILD.rc
+          exit 0
       - name: Verify APK signature and package
+        if: always()
+        shell: bash
         run: |
           set -euo pipefail
-          APK='paperpilot-build/app/build/outputs/apk/debug/app-debug.apk'
-          test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee APK_SIGNATURE_REPORT.txt
           mkdir -p artifact
-          cp "$APK" artifact/PaperPilotAI-NVIDIA-Demo.apk
-          sha256sum artifact/PaperPilotAI-NVIDIA-Demo.apk | tee artifact/PaperPilotAI-NVIDIA-Demo.apk.sha256
-          cp APK_SIGNATURE_REPORT.txt artifact/
+          cp GRADLE_BUILD.log GRADLE_BUILD.rc artifact/
           printf 'Paper-only autonomous trading demo. No live broker execution.\n' > artifact/BUILD_SCOPE.txt
-      - name: Upload installable APK
+          APK='paperpilot-build/app/build/outputs/apk/debug/app-debug.apk'
+          if [ -s "$APK" ]; then
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee artifact/APK_SIGNATURE_REPORT.txt
+            cp "$APK" artifact/PaperPilotAI-NVIDIA-Demo.apk
+            sha256sum artifact/PaperPilotAI-NVIDIA-Demo.apk | tee artifact/PaperPilotAI-NVIDIA-Demo.apk.sha256
+          fi
+      - name: Upload build artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: PaperPilotAI-NVIDIA-Android
           path: artifact/
           if-no-files-found: error
           retention-days: 1
+      - name: Enforce compile result
+        if: always()
+        run: test "$(cat GRADLE_BUILD.rc)" = '0'
