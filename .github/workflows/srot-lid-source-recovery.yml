@@ -1,0 +1,54 @@
+name: SROT lid source recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_lid_source_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Recover public Onshape and YouMagine source evidence
+        shell: bash
+        run: |
+          set -u
+          mkdir -p recovered
+          DID='85d09ede43b764d4b2e54127'
+          WID='f09e60fc7c65904ef0845270'
+          EID='6fe4eaa6672b5ede5df7a1ff'
+          : > recovered/attempts.tsv
+          fetch() {
+            name="$1"; url="$2"
+            code=$(curl -L --retry 3 --connect-timeout 20 --max-time 120 -sS -w '%{http_code}' -o "recovered/$name" "$url" || true)
+            size=$(wc -c < "recovered/$name" 2>/dev/null || echo 0)
+            printf '%s\t%s\t%s\t%s\n' "$name" "$code" "$size" "$url" >> recovered/attempts.tsv
+          }
+          fetch onshape_document.html "https://cad.onshape.com/documents/$DID/w/$WID/e/$EID"
+          for v in v10 v9 v8 v6 ''; do
+            prefix='https://cad.onshape.com/api'
+            [ -n "$v" ] && prefix="$prefix/$v"
+            tag=${v:-unversioned}
+            fetch "${tag}_elements.json" "$prefix/documents/d/$DID/w/$WID/elements"
+            fetch "${tag}_features.json" "$prefix/partstudios/d/$DID/w/$WID/e/$EID/features"
+            fetch "${tag}_bodydetails.json" "$prefix/partstudios/d/$DID/w/$WID/e/$EID/bodydetails"
+            fetch "${tag}_massproperties.json" "$prefix/partstudios/d/$DID/w/$WID/e/$EID/massproperties"
+            fetch "${tag}_metadata.json" "$prefix/metadata/d/$DID/w/$WID/e/$EID"
+          done
+          fetch youmagine_design.html 'https://youmagine.com/designs/pico-logic-analyzer-case'
+          fetch youmagine_files.html 'https://youmagine.com/designs/pico-logic-analyzer-case/files'
+          fetch youmagine_api_slug.json 'https://api.youmagine.com/designs/pico-logic-analyzer-case'
+          fetch youmagine_api_designs.json 'https://api.youmagine.com/designs?search=pico%20logic%20analyzer%20case'
+          grep -Eo 'https?[^"'"'"' <>)]+|[^"'"'"' <>]+\.(FCStd|svg|zip|stl|step|STEP)' recovered/youmagine_design.html recovered/youmagine_files.html 2>/dev/null | sort -u > recovered/youmagine_links.txt || true
+          git clone --filter=blob:none --no-checkout https://github.com/gusmanb/logicanalyzer.git recovered/logicanalyzer_git
+          cd recovered/logicanalyzer_git
+          git log --all --full-history --name-status -- Enclosure > ../enclosure_full_history.txt
+          git rev-list --all | while read c; do git ls-tree -r --name-only "$c"; done | sort -u | grep -Ei '(AnalyzerBox|Logic.?Analyzer).*(FCStd|svg|dxf|step|stp|sldprt|zip|scad)' > ../historical_source_paths.txt || true
+          cd ../..
+          find recovered -maxdepth 2 -type f -printf '%P\t%s\n' | sort > recovered/inventory.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-lid-source-recovery
+          path: recovered
+          retention-days: 1
