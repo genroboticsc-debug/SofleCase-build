@@ -50,6 +50,7 @@ jobs:
           REPO="$APP/src/main/java/com/genrobotics/paperpilot/data/TradingRepository.kt"
           SERVICE="$APP/src/main/java/com/genrobotics/paperpilot/AutonomousTradingService.kt"
           LIVE="$APP/src/main/java/com/genrobotics/paperpilot/network/LiveMarketDataClient.kt"
+          TERMINAL="$APP/src/main/java/com/genrobotics/paperpilot/ui/ProfessionalTerminal.kt"
           TERMINAL_DIR="$APP/src/main/assets/terminal"
 
           base64 --decode paperpilot-v31/LiveMarketDataClient.kt.b64 > "$LIVE"
@@ -58,7 +59,8 @@ jobs:
           rm -rf /tmp/paperpilot-v4-patch && mkdir -p /tmp/paperpilot-v4-patch
           unzip -qo /tmp/paperpilot-v4-patch.zip -d /tmp/paperpilot-v4-patch
 
-          cp /tmp/paperpilot-v4-patch/ProfessionalTerminal.kt "$APP/src/main/java/com/genrobotics/paperpilot/ui/ProfessionalTerminal.kt"
+          cp /tmp/paperpilot-v4-patch/ProfessionalTerminal.kt "$TERMINAL"
+          sed -i '/import androidx.compose.foundation.layout.weight/d' "$TERMINAL"
           mkdir -p "$TERMINAL_DIR"
           cp /tmp/paperpilot-v4-patch/terminal/index.html "$TERMINAL_DIR/index.html"
 
