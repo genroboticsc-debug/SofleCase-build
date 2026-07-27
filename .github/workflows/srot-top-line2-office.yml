@@ -1,0 +1,55 @@
+name: SROT top fork Office text geometry
+on:
+  pull_request:
+    paths:
+      - 'srot_top_line2_office_marker.txt'
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Office font resources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force odt | Out-Null
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
+          @'
+          <Configuration><Add OfficeClientEdition="64" Channel="Current"><Product ID="O365ProPlusRetail"><Language ID="en-us" /><ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" /><ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" /><ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" /><ExcludeApp ID="Word" /></Product></Add><Display Level="None" AcceptEULA="TRUE" /><Property Name="AUTOACTIVATE" Value="0" /></Configuration>
+          '@ | Set-Content -Encoding utf8 odt/config.xml
+          Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic unavailable' }
+      - name: Install CAD runtime
+        shell: pwsh
+        run: python -m pip install build123d==0.11.1
+      - name: Generate Century Gothic text variants
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force generated | Out-Null
+          @'
+          from pathlib import Path
+          from build123d import Align, FontStyle, Location, Matrix, Plane, Text, export_stl, extrude, mirror
+          out=Path('generated'); txt='1-12PIN GND EXT_1'; bounds=(4.943937301635742,2.590423345565796,50.723636627197266,7.054419994354248)
+          x0,y0,x1,y1=bounds;tw=x1-x0;th=y1-y0
+          for fontname in ('GOTHIC.TTF','GOTHICB.TTF'):
+            fp=Path(r'C:\Windows\Fonts')/fontname
+            for i in range(81):
+              size=4.5+i*.01
+              sk=Text(txt,size,font_path=str(fp),font_style=FontStyle.REGULAR)
+              for mode in ('natural','envelope'):
+                s=sk
+                if mode=='envelope':
+                  sx=tw/s.bounding_box().size.X;s=s.transform_geometry(Matrix([[sx,0,0,0],[0,1,0,0],[0,0,1,0]]))
+                s=mirror(s,about=Plane.YZ);bb=s.bounding_box();s=s.moved(Location(((x0+x1)/2-(bb.min.X+bb.max.X)/2,(y0+y1)/2-(bb.min.Y+bb.max.Y)/2,0)))
+                export_stl(extrude(s,.01),out/f'{fp.stem}_{size:.2f}_{mode}.stl',tolerance=.002,angular_tolerance=.05)
+          '@ | Set-Content -Encoding utf8 gen.py
+          python gen.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-top-line2-office-geometry
+          path: generated
+          retention-days: 1
