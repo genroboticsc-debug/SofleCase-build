@@ -1,0 +1,34 @@
+name: Fetch Build123d Offline Runtime
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download signed release and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --dest wheelhouse 'build123d==0.11.1'
+          sha256sum wheelhouse/* | sort > wheelhouse/SHA256SUMS.txt
+          grep 'build123d-0.11.1-py3-none-any.whl' wheelhouse/SHA256SUMS.txt
+
+      - name: Upload offline wheel bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: build123d-offline-runtime
+          path: wheelhouse/
+          retention-days: 1
