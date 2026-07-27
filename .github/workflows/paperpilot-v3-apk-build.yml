@@ -37,7 +37,14 @@ jobs:
           mkdir -p paperpilot-build
           cat paperpilot-android/paperpilot-project.zip.b64.part* | base64 --decode > /tmp/paperpilot-base.zip
           unzip -q /tmp/paperpilot-base.zip -d paperpilot-build
-          cat paperpilot-v3-overlay/overlay.zip.b64.part* | base64 --decode > /tmp/paperpilot-overlay.zip
+          cat \
+            paperpilot-v3-overlay/overlay.zip.b64.part00 \
+            paperpilot-v3-overlay/overlay.zip.b64.part01a \
+            paperpilot-v3-overlay/overlay.zip.b64.part01b \
+            paperpilot-v3-overlay/overlay.zip.b64.part02 \
+            paperpilot-v3-overlay/overlay.zip.b64.part03 \
+            | base64 --decode > /tmp/paperpilot-overlay.zip
+          echo '148b7c9e0f42a72b4c9a8d0b5f0145363f03204a74b86a4ffa03f21df915b7ea  /tmp/paperpilot-overlay.zip' | sha256sum -c -
           unzip -oq /tmp/paperpilot-overlay.zip -d paperpilot-build
           sed -i 's/material-icons-extended:1.8.2/material-icons-extended:1.7.8/' paperpilot-build/app/build.gradle.kts
       - name: Compile debug APK
