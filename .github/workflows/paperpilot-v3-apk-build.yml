@@ -1,0 +1,73 @@
+name: PaperPilot V3 Android APK
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'paperpilot-v3/**'
+      - '.github/workflows/paperpilot-v3-apk-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android 35 SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Expand source package
+        run: |
+          set -euo pipefail
+          mkdir -p paperpilot-build
+          cat paperpilot-v3/project.zip.b64.part* | base64 --decode > /tmp/paperpilot-v3.zip
+          unzip -q /tmp/paperpilot-v3.zip -d paperpilot-build
+      - name: Compile debug APK
+        working-directory: paperpilot-build
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../GRADLE_BUILD.log
+          echo "${PIPESTATUS[0]}" > ../GRADLE_BUILD.rc
+          exit 0
+      - name: Verify APK signature and package
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          cp GRADLE_BUILD.log GRADLE_BUILD.rc artifact/
+          printf 'Paper-only autonomous trading demo. No live-money broker route.\n' > artifact/BUILD_SCOPE.txt
+          APK='paperpilot-build/app/build/outputs/apk/debug/app-debug.apk'
+          if [ -s "$APK" ]; then
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee artifact/APK_SIGNATURE_REPORT.txt
+            cp "$APK" artifact/PaperPilotAI-V3-Live-Terminal.apk
+            sha256sum artifact/PaperPilotAI-V3-Live-Terminal.apk | tee artifact/PaperPilotAI-V3-Live-Terminal.apk.sha256
+          fi
+      - name: Upload build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPilotAI-V3-Android
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Enforce compile result
+        if: always()
+        run: test "$(cat GRADLE_BUILD.rc)" = '0'
