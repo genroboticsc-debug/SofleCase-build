@@ -1,1 +1,1 @@
-Recover exact native Onshape Box Part Studio features.
+Recover exact native Onshape Box Part Studio features — payload-preserving retry.
