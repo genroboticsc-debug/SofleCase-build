@@ -1,0 +1,1 @@
+Generate Century Gothic Bold text geometry for exact main-fork engraving validation.
