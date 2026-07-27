@@ -33,8 +33,10 @@ jobs:
           gradle-version: '8.11.1'
       - name: Expand source package
         run: |
+          set -euo pipefail
           mkdir -p paperpilot-build
-          unzip -q paperpilot-android/paperpilot-project.zip -d paperpilot-build
+          cat paperpilot-android/paperpilot-project.zip.b64.part* | base64 --decode > /tmp/paperpilot-project.zip
+          unzip -q /tmp/paperpilot-project.zip -d paperpilot-build
       - name: Compile debug APK
         working-directory: paperpilot-build
         run: gradle --no-daemon --stacktrace :app:assembleDebug
