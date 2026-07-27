@@ -1,10 +1,11 @@
-name: PaperPilot Android APK
+name: PaperPilot V3 Android APK
 
 on:
   pull_request:
     branches: [master]
     paths:
       - 'paperpilot-android/**'
+      - 'paperpilot-v3-overlay-small/**'
       - '.github/workflows/paperpilot-apk-build.yml'
 
 permissions:
@@ -31,13 +32,15 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Expand source package
+      - name: Expand and verify source package
         run: |
           set -euo pipefail
           mkdir -p paperpilot-build
           cat paperpilot-android/paperpilot-project.zip.b64.part* | base64 --decode > /tmp/paperpilot-project.zip
           unzip -q /tmp/paperpilot-project.zip -d paperpilot-build
-          sed -i 's/material-icons-extended:1.8.2/material-icons-extended:1.7.8/' paperpilot-build/app/build.gradle.kts
+          cat paperpilot-v3-overlay-small/chunk* | base64 --decode > /tmp/paperpilot-v3-overlay.zip
+          echo '148b7c9e0f42a72b4c9a8d0b5f0145363f03204a74b86a4ffa03f21df915b7ea  /tmp/paperpilot-v3-overlay.zip' | sha256sum -c -
+          unzip -qo /tmp/paperpilot-v3-overlay.zip -d paperpilot-build
       - name: Compile debug APK
         working-directory: paperpilot-build
         shell: bash
@@ -53,19 +56,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp GRADLE_BUILD.log GRADLE_BUILD.rc artifact/
-          printf 'Paper-only autonomous trading demo. No live broker execution.\n' > artifact/BUILD_SCOPE.txt
+          cp GRADLE_BUILD.log GRADLE_BUILD.rc artifact/ 2>/dev/null || true
+          printf 'Paper-only autonomous live-market trading terminal. No live-money broker route.\n' > artifact/BUILD_SCOPE.txt
           APK='paperpilot-build/app/build/outputs/apk/debug/app-debug.apk'
           if [ -s "$APK" ]; then
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee artifact/APK_SIGNATURE_REPORT.txt
-            cp "$APK" artifact/PaperPilotAI-NVIDIA-Demo.apk
-            sha256sum artifact/PaperPilotAI-NVIDIA-Demo.apk | tee artifact/PaperPilotAI-NVIDIA-Demo.apk.sha256
+            cp "$APK" artifact/PaperPilotAI-V3-Live-Terminal.apk
+            sha256sum artifact/PaperPilotAI-V3-Live-Terminal.apk | tee artifact/PaperPilotAI-V3-Live-Terminal.apk.sha256
           fi
       - name: Upload build artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PaperPilotAI-NVIDIA-Android
+          name: PaperPilotAI-V3-Android
           path: artifact/
           if-no-files-found: error
           retention-days: 1
