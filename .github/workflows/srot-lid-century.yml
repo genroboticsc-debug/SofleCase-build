@@ -1,0 +1,81 @@
+name: SROT lid Century Gothic geometry
+on:
+  pull_request:
+    paths:
+      - 'srot_lid_century_marker.txt'
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Microsoft 365 font resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force odt | Out-Null
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
+          @'
+          <Configuration>
+            <Add OfficeClientEdition="64" Channel="Current">
+              <Product ID="O365ProPlusRetail">
+                <Language ID="en-us" />
+                <ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" />
+                <ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" />
+                <ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" />
+                <ExcludeApp ID="Word" />
+              </Product>
+            </Add>
+            <Display Level="None" AcceptEULA="TRUE" />
+            <Property Name="AUTOACTIVATE" Value="0" />
+            <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+          </Configuration>
+          '@ | Set-Content -Encoding utf8 odt/config.xml
+          Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic Regular was not installed' }
+      - name: Install pinned CAD runtime
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build123d==0.11.1
+      - name: Generate Logic Analyzer engraving geometry only
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force generated_lid_text | Out-Null
+          @'
+          from pathlib import Path
+          from build123d import Align, Axis, FontStyle, Location, Matrix, Text, export_stl, extrude
+          out=Path('generated_lid_text')
+          font=Path(r'C:\Windows\Fonts\GOTHIC.TTF')
+          x0,x1=10.204837799072266,54.57022476196289
+          z0,z1=13.055909156799316,18.99821662902832
+          tw,th=x1-x0,z1-z0
+          probe=Text('Logic Analyzer',10.0,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
+          base_size=10.0*th/probe.bounding_box().size.Y
+          rows=[]
+          for i in range(81):
+              size=base_size-0.08+i*0.002
+              sketch=Text('Logic Analyzer',size,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
+              for mode in ('natural','envelope'):
+                  s=sketch
+                  if mode=='envelope':
+                      bb=s.bounding_box(); sx=tw/bb.size.X; sy=th/bb.size.Y
+                      s=s.transform_geometry(Matrix([[sx,0,0,0],[0,sy,0,0],[0,0,1,0]]))
+                  solid=extrude(s,1.0).rotate(Axis.X,-90)
+                  bb=solid.bounding_box()
+                  solid=solid.moved(Location((x0-bb.min.X,14.0-bb.min.Y,z0-bb.min.Z)))
+                  name=f'century_regular_{mode}_{size:.6f}.stl'
+                  export_stl(solid,out/name,tolerance=0.002,angular_tolerance=0.05)
+                  rows.append(f'{name},{solid.volume:.12f},{solid.bounding_box().size.X:.12f},{solid.bounding_box().size.Z:.12f}')
+          (out/'geometry_inventory.csv').write_text('file,volume,width,height\n'+'\n'.join(rows)+'\n',encoding='utf-8')
+          '@ | Set-Content -Encoding utf8 generate_lid_text.py
+          python generate_lid_text.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-lid-century-text-geometry
+          path: generated_lid_text
+          retention-days: 1
