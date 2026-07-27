@@ -1,4 +1,4 @@
-name: SROT lid GDI weight fit
+name: SROT lid GDI SVG extraction
 on:
   pull_request:
     paths:
@@ -6,9 +6,9 @@ on:
 permissions:
   contents: read
 jobs:
-  fit:
+  extract:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 35
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -24,26 +24,17 @@ jobs:
           '@ | Set-Content -Encoding utf8 odt/config.xml
           Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
           if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic unavailable' }
-      - name: Install pinned CAD and Boolean runtime
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install build123d==0.11.1 trimesh==4.11.1 manifold3d==3.5.2
-      - name: Fetch exact reference
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/gusmanb/logicanalyzer/4e8d9ec9fff592f7bb84490d8e301061a36e7f22/Enclosure/AnalyzerBox_Lid.STL' -OutFile 'AnalyzerBox_Lid.STL'
-      - name: Decode and run exact GDI outline sweep
+      - name: Extract exact GDI glyph outlines
         shell: pwsh
         run: |
           @'
-          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
-          '@ | Set-Content -NoNewline fit_lid_gdi.py.gz.b64
-          python -c "import base64,gzip,pathlib; pathlib.Path('fit_lid_gdi.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('fit_lid_gdi.py.gz.b64').read_text())))"
-          python fit_lid_gdi.py
+          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
+          '@ | Set-Content -NoNewline extract_lid_gdi_svgs.py.gz.b64
+          python -c "import base64,gzip,pathlib; pathlib.Path('extract_lid_gdi_svgs.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('extract_lid_gdi_svgs.py.gz.b64').read_text())))"
+          python extract_lid_gdi_svgs.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: srot-lid-gdi-weight-fit
-          path: lid_gdi_fit_results
+          name: srot-lid-gdi-svg-outlines
+          path: lid_gdi_svg_results
           retention-days: 1
