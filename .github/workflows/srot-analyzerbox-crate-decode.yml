@@ -54,7 +54,7 @@ jobs:
                   "input":PathBuf::from(&args[1]).file_name().unwrap().to_string_lossy(),
                   "bodies":decoded.ir.model.bodies.len(),
                   "faces":decoded.ir.model.faces.len(),
-                  "features":decoded.ir.features.len(),
+                  "features":decoded.ir.model.features.len(),
                   "losses":decoded.report.losses.len()
               });
               println!("{}",serde_json::to_string_pretty(&summary)?);
