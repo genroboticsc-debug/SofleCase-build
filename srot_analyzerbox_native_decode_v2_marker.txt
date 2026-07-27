@@ -1,0 +1,1 @@
+Decode the exact historical AnalyzerBox SolidWorks revisions to canonical feature IR.
