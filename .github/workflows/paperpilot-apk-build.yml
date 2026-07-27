@@ -1,4 +1,4 @@
-name: PaperPilot V3 Android APK
+name: PaperPilot V3.1 Android APK
 
 on:
   pull_request:
@@ -6,6 +6,7 @@ on:
     paths:
       - 'paperpilot-android/**'
       - 'paperpilot-v3-overlay-small/**'
+      - 'paperpilot-v31/**'
       - '.github/workflows/paperpilot-apk-build.yml'
 
 permissions:
@@ -32,7 +33,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Expand, verify and patch source package
+      - name: Expand, verify and patch V3.1 source
         run: |
           set -euo pipefail
           mkdir -p paperpilot-build
@@ -41,11 +42,29 @@ jobs:
           cat paperpilot-v3-overlay-small/chunk* | base64 --decode > /tmp/paperpilot-v3-overlay.zip
           echo '148b7c9e0f42a72b4c9a8d0b5f0145363f03204a74b86a4ffa03f21df915b7ea  /tmp/paperpilot-v3-overlay.zip' | sha256sum -c -
           unzip -qo /tmp/paperpilot-v3-overlay.zip -d paperpilot-build
-          sed -i 's/material-icons-extended:1.8.2/material-icons-extended:1.7.8/' paperpilot-build/app/build.gradle.kts
-          UI='paperpilot-build/app/src/main/java/com/genrobotics/paperpilot/ui/PaperPilotApp.kt'
+
+          APP='paperpilot-build/app'
+          UI="$APP/src/main/java/com/genrobotics/paperpilot/ui/PaperPilotApp.kt"
+          MODELS="$APP/src/main/java/com/genrobotics/paperpilot/core/TradingModels.kt"
+          REPO="$APP/src/main/java/com/genrobotics/paperpilot/data/TradingRepository.kt"
+          SERVICE="$APP/src/main/java/com/genrobotics/paperpilot/AutonomousTradingService.kt"
+          LIVE="$APP/src/main/java/com/genrobotics/paperpilot/network/LiveMarketDataClient.kt"
+
+          base64 --decode paperpilot-v31/LiveMarketDataClient.kt.b64 > "$LIVE"
+          sed -i 's/material-icons-extended:1.8.2/material-icons-extended:1.7.8/' "$APP/build.gradle.kts"
+          sed -i 's/versionCode = 4/versionCode = 5/' "$APP/build.gradle.kts"
+          sed -i 's/versionName = "3.0.0-live-terminal"/versionName = "3.1.0-live-quote"/' "$APP/build.gradle.kts"
           sed -i 's/import androidx.compose.foundation.layout.horizontalScroll/import androidx.compose.foundation.horizontalScroll/' "$UI"
           sed -i 's/import androidx.compose.ui.platform.LocalContentColor/import androidx.compose.material3.LocalContentColor/' "$UI"
-          grep -nE 'import androidx.compose.foundation.horizontalScroll|import androidx.compose.material3.LocalContentColor' "$UI"
+          sed -i 's/nvidia\/nemotron-3-nano-30b-a3b/nvidia\/nemotron-3.5-nano-30b-a3b/' "$MODELS"
+          sed -i 's/coerceIn(2, 900)/coerceIn(1, 900)/g' "$REPO" "$SERVICE"
+          sed -i 's/intervalSeconds = 2f; confidence = 0.56f;/intervalSeconds = 1f; confidence = 0.56f;/' "$UI"
+          sed -i 's/"Nano" to "nvidia\/nemotron-3-nano-30b-a3b",/"Nano 3.5" to "nvidia\/nemotron-3.5-nano-30b-a3b",\n                            "Nano 3" to "nvidia\/nemotron-3-nano-30b-a3b",/' "$UI"
+          sed -i 's/2-second foreground-service cycles. Designed for liquid Binance crypto pairs; highest turnover and risk./1-second foreground-service cycles using cached 1-minute candles plus live Binance bid\/ask midpoint updates. Highest turnover and risk./' "$UI"
+          sed -i 's/Binance Spot 1-minute candles for crypto; Yahoo 1-minute live\/near-live candles for equities. Synthetic fallback cannot execute./Binance 1-minute candles plus live bid\/ask midpoint for crypto; Yahoo 1-minute live\/near-live candles for equities. Synthetic fallback cannot execute./' "$UI"
+          sed -i 's/SettingSlider("Execution cycle", intervalSeconds, 2f..300f/SettingSlider("Execution cycle", intervalSeconds, 1f..300f/' "$UI"
+
+          grep -nE 'versionName|nemotron-3.5|1-second|bookTicker|coerceIn\(1, 900\)' "$APP/build.gradle.kts" "$MODELS" "$UI" "$LIVE" "$REPO" "$SERVICE"
       - name: Compile debug APK
         working-directory: paperpilot-build
         shell: bash
@@ -62,18 +81,18 @@ jobs:
           set -euo pipefail
           mkdir -p artifact
           cp GRADLE_BUILD.log GRADLE_BUILD.rc artifact/ 2>/dev/null || true
-          printf 'Paper-only autonomous live-market trading terminal. No live-money broker route.\n' > artifact/BUILD_SCOPE.txt
+          printf 'Paper-only V3.1 low-latency autonomous trading terminal. No live-money broker route.\n' > artifact/BUILD_SCOPE.txt
           APK='paperpilot-build/app/build/outputs/apk/debug/app-debug.apk'
           if [ -s "$APK" ]; then
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee artifact/APK_SIGNATURE_REPORT.txt
-            cp "$APK" artifact/PaperPilotAI-V3-Live-Terminal.apk
-            sha256sum artifact/PaperPilotAI-V3-Live-Terminal.apk | tee artifact/PaperPilotAI-V3-Live-Terminal.apk.sha256
+            cp "$APK" artifact/PaperPilotAI-V3.1-Live-Quote.apk
+            sha256sum artifact/PaperPilotAI-V3.1-Live-Quote.apk | tee artifact/PaperPilotAI-V3.1-Live-Quote.apk.sha256
           fi
       - name: Upload build artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PaperPilotAI-V3-Android
+          name: PaperPilotAI-V3.1-Android
           path: artifact/
           if-no-files-found: error
           retention-days: 1
