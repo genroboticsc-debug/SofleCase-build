@@ -1,4 +1,4 @@
-name: SROT lid Century Gothic Bold geometry
+name: SROT lid Century Gothic weight geometry
 on:
   pull_request:
     paths:
@@ -23,35 +23,72 @@ jobs:
           <Configuration><Add OfficeClientEdition="64" Channel="Current"><Product ID="O365ProPlusRetail"><Language ID="en-us" /><ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" /><ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" /><ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" /><ExcludeApp ID="Word" /></Product></Add><Display Level="None" AcceptEULA="TRUE" /><Property Name="AUTOACTIVATE" Value="0" /></Configuration>
           '@ | Set-Content -Encoding utf8 odt/config.xml
           Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
-          if (-not (Test-Path 'C:\Windows\Fonts\GOTHICB.TTF')) { throw 'Century Gothic Bold was not installed' }
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic Regular unavailable' }
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHICB.TTF')) { throw 'Century Gothic Bold unavailable' }
       - name: Install CAD runtime
         shell: pwsh
         run: python -m pip install build123d==0.11.1
-      - name: Generate exact bold engraving geometry only
+      - name: Generate intermediate weight geometry only
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force generated_lid_text_bold | Out-Null
+          New-Item -ItemType Directory -Force generated_lid_weight | Out-Null
           @'
+          from copy import deepcopy
           from pathlib import Path
+          from fontTools.ttLib import TTFont
           from build123d import Align, Axis, FontStyle, Location, Matrix, Text, export_stl, extrude
-          out=Path('generated_lid_text_bold');font=Path(r'C:\Windows\Fonts\GOTHICB.TTF')
-          x0,x1=10.204837799072266,54.57022476196289;z0,z1=13.055909156799316,18.99821662902832
+
+          out=Path('generated_lid_weight')
+          regular_path=Path(r'C:\Windows\Fonts\GOTHIC.TTF')
+          bold_path=Path(r'C:\Windows\Fonts\GOTHICB.TTF')
+          regular=TTFont(regular_path)
+          bold=TTFont(bold_path)
+          x0,x1=10.204837799072266,54.57022476196289
+          z0,z1=13.055909156799316,18.99821662902832
           tw,th=x1-x0,z1-z0
-          probe=Text('Logic Analyzer',10,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
-          base=10*th/probe.bounding_box().size.Y
-          for i in range(41):
-              size=base-0.04+i*0.002
-              sketch=Text('Logic Analyzer',size,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
-              for mode in ('natural','envelope'):
-                  s=sketch
-                  if mode=='envelope':
-                      bb=s.bounding_box();s=s.transform_geometry(Matrix([[tw/bb.size.X,0,0,0],[0,th/bb.size.Y,0,0],[0,0,1,0]]))
-                  solid=extrude(s,1).rotate(Axis.X,-90);bb=solid.bounding_box();solid=solid.moved(Location((x0-bb.min.X,14-bb.min.Y,z0-bb.min.Z)))
-                  export_stl(solid,out/f'century_bold_{mode}_{size:.6f}.stl',tolerance=.002,angular_tolerance=.05)
-          '@ | Set-Content -Encoding utf8 make.py
-          python make.py
+
+          def interpolate_font(t: float, target: Path) -> None:
+              f=deepcopy(regular)
+              g0=regular['glyf']; g1=bold['glyf']; go=f['glyf']
+              for name in f.getGlyphOrder():
+                  if name not in g1: continue
+                  a=g0[name]; b=g1[name]; c=go[name]
+                  if a.isComposite() or b.isComposite():
+                      continue
+                  ca, enda, flagsa = a.getCoordinates(g0)
+                  cb, endb, flagsb = b.getCoordinates(g1)
+                  if len(ca)!=len(cb) or list(enda)!=list(endb):
+                      continue
+                  coords=ca.copy()
+                  for i in range(len(coords)):
+                      coords[i]=(round(ca[i][0]*(1-t)+cb[i][0]*t), round(ca[i][1]*(1-t)+cb[i][1]*t))
+                  c.setCoordinates(coords,go)
+              for name,(aw0,lsb0) in regular['hmtx'].metrics.items():
+                  if name in bold['hmtx'].metrics:
+                      aw1,lsb1=bold['hmtx'].metrics[name]
+                      f['hmtx'].metrics[name]=(round(aw0*(1-t)+aw1*t),round(lsb0*(1-t)+lsb1*t))
+              f.save(target)
+
+          rows=[]
+          for idx in range(31):
+              t=0.10+idx*0.02
+              temp=Path(f'weight_{t:.2f}.ttf')
+              interpolate_font(t,temp)
+              sketch=Text('Logic Analyzer',10.0,font_path=str(temp),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
+              bb=sketch.bounding_box()
+              sx=tw/bb.size.X; sy=th/bb.size.Y
+              sketch=sketch.transform_geometry(Matrix([[sx,0,0,0],[0,sy,0,0],[0,0,1,0]]))
+              solid=extrude(sketch,1.0).rotate(Axis.X,-90)
+              bb=solid.bounding_box(); solid=solid.moved(Location((x0-bb.min.X,14.0-bb.min.Y,z0-bb.min.Z)))
+              name=f'century_weight_{t:.2f}_envelope.stl'
+              export_stl(solid,out/name,tolerance=0.002,angular_tolerance=0.05)
+              rows.append(f'{name},{solid.volume:.12f}')
+              temp.unlink(missing_ok=True)
+          (out/'inventory.csv').write_text('file,volume\n'+'\n'.join(rows)+'\n',encoding='utf-8')
+          '@ | Set-Content -Encoding utf8 make_weight.py
+          python make_weight.py
       - uses: actions/upload-artifact@v4
         with:
-          name: srot-lid-century-bold-text-geometry
-          path: generated_lid_text_bold
+          name: srot-lid-century-weight-geometry
+          path: generated_lid_weight
           retention-days: 1
