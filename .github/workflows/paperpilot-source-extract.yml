@@ -1,0 +1,49 @@
+name: PaperPilot Source Extract
+
+on:
+  pull_request:
+    branches: [paperpilot-build-base-20260728]
+    paths:
+      - '.github/workflows/paperpilot-source-extract.yml'
+      - 'paperpilot-v31-trigger/**'
+
+permissions:
+  contents: read
+
+jobs:
+  extract-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct source
+        run: |
+          set -euo pipefail
+          mkdir -p paperpilot-build
+          cat paperpilot-android/paperpilot-project.zip.b64.part* | base64 --decode > /tmp/paperpilot-project.zip
+          unzip -q /tmp/paperpilot-project.zip -d paperpilot-build
+          cat paperpilot-v3-overlay-small/chunk* | base64 --decode > /tmp/paperpilot-v3-overlay.zip
+          echo '148b7c9e0f42a72b4c9a8d0b5f0145363f03204a74b86a4ffa03f21df915b7ea  /tmp/paperpilot-v3-overlay.zip' | sha256sum -c -
+          unzip -qo /tmp/paperpilot-v3-overlay.zip -d paperpilot-build
+          UI='paperpilot-build/app/src/main/java/com/genrobotics/paperpilot/ui/PaperPilotApp.kt'
+          sed -i 's/import androidx.compose.foundation.layout.horizontalScroll/import androidx.compose.foundation.horizontalScroll/' "$UI"
+          sed -i 's/import androidx.compose.ui.platform.LocalContentColor/import androidx.compose.material3.LocalContentColor/' "$UI"
+      - name: Package relevant source
+        run: |
+          set -euo pipefail
+          mkdir -p source-artifact
+          cp -R paperpilot-build/app/src/main/java source-artifact/
+          cp -R paperpilot-build/app/src/main/assets source-artifact/ 2>/dev/null || true
+          cp -R paperpilot-build/app/src/main/res source-artifact/
+          cp paperpilot-build/app/src/main/AndroidManifest.xml source-artifact/
+          cp paperpilot-build/app/build.gradle.kts source-artifact/
+          cp paperpilot-build/settings.gradle.kts source-artifact/
+          cp paperpilot-build/build.gradle.kts source-artifact/
+          find source-artifact -type f | sort > source-artifact/FILE_LIST.txt
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperPilot-V3-Reconstructed-Source
+          path: source-artifact/
+          if-no-files-found: error
+          retention-days: 1
