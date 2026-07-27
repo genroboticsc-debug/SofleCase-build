@@ -10,16 +10,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
       - name: Recover historical native sources
         run: |
           set -euxo pipefail
           mkdir -p native decoded
-          for c in 89d95cb77371a08f5230f8783420540609b26c5d 12417cd94e414dad01321aaa2bcf99636b8bb644; do
-            git show "$c:Enclosure/AnalyzerBox.SLDPRT" > "native/AnalyzerBox_${c}.SLDPRT"
-          done
+          git clone https://github.com/gusmanb/logicanalyzer.git public_repo
+          cd public_repo
+          commits=$(git log --all --format='%H' -- 'Enclosure/AnalyzerBox.SLDPRT')
+          test -n "$commits"
+          n=0
+          while read -r c; do
+            n=$((n+1))
+            git show "$c:Enclosure/AnalyzerBox.SLDPRT" > "../native/AnalyzerBox_${n}_${c}.SLDPRT"
+          done <<< "$commits"
+          cd ..
           sha256sum native/* > decoded/native_sha256.txt
       - name: Build clean-room cadmpeg decoder
         run: |
@@ -33,7 +37,6 @@ jobs:
           [dependencies]
           cadmpeg-codec-sldprt = "0.3.0"
           cadmpeg-ir = "0.3.0"
-          serde_json = "1"
           EOF
           cat > decoder/src/main.rs <<'EOF'
           use std::{env,fs::File,path::Path};
@@ -60,9 +63,9 @@ jobs:
           done
           grep -RniaE 'font|text|Logic|Analyzer|sketch|extrude|cut|fillet|draft|dimension|feature|Resolved' decoded > decoded/feature_strings.txt || true
           wc -c decoded/*
-          sed -n '1,300p' decoded/feature_strings.txt || true
-          zip -j decoded/native_sources_internal.zip native/*.SLDPRT
+          sed -n '1,400p' decoded/feature_strings.txt || true
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: srot-analyzerbox-native-decoded-v2
           path: decoded
