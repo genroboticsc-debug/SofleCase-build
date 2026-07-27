@@ -1,4 +1,4 @@
-name: SROT lid Century Gothic geometry
+name: SROT lid exact text fit
 on:
   pull_request:
     paths:
@@ -6,9 +6,9 @@ on:
 permissions:
   contents: read
 jobs:
-  generate:
+  fit:
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -37,45 +37,147 @@ jobs:
           '@ | Set-Content -Encoding utf8 odt/config.xml
           Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
           if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic Regular was not installed' }
-      - name: Install pinned CAD runtime
+      - name: Install pinned CAD and Boolean runtime
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build123d==0.11.1
-      - name: Generate Logic Analyzer engraving geometry only
+          python -m pip install build123d==0.11.1 trimesh==4.11.1 manifold3d==3.5.2
+      - name: Fetch exact reference
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force generated_lid_text | Out-Null
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/gusmanb/logicanalyzer/4e8d9ec9fff592f7bb84490d8e301061a36e7f22/Enclosure/AnalyzerBox_Lid.STL' -OutFile 'AnalyzerBox_Lid.STL'
+      - name: Fit exact parametric text feature
+        shell: pwsh
+        run: |
           @'
+          from __future__ import annotations
           from pathlib import Path
-          from build123d import Align, Axis, FontStyle, Location, Matrix, Text, export_stl, extrude
-          out=Path('generated_lid_text')
-          font=Path(r'C:\Windows\Fonts\GOTHIC.TTF')
-          x0,x1=10.204837799072266,54.57022476196289
-          z0,z1=13.055909156799316,18.99821662902832
-          tw,th=x1-x0,z1-z0
-          probe=Text('Logic Analyzer',10.0,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
-          base_size=10.0*th/probe.bounding_box().size.Y
+          import json, math
+          import trimesh
+          from build123d import (
+              Align, Axis, Box, Cone, Cylinder, Face, FontStyle, Kind, Location,
+              Matrix, Plane, Rectangle, RectangleRounded, Text, Vector, Wire,
+              export_stl, extrude, loft, offset,
+          )
+
+          OUT = Path('lid_fit_results')
+          OUT.mkdir(exist_ok=True)
+          REF = Path('AnalyzerBox_Lid.STL')
+          FONT = Path(r'C:\Windows\Fonts\GOTHIC.TTF')
+          X0, X1 = 10.204837799072266, 54.57022476196289
+          Z0, Z1 = 13.055909156799316, 18.99821662902832
+          TW, TH = X1-X0, Z1-Z0
+
+          def xz_rect(x0,x1,z0,z1,y):
+              return (Plane.XZ * Rectangle(x1-x0,z1-z0).face()).moved(Location(((x0+x1)/2,y,(z0+z1)/2)))
+          def xz_round(x0,x1,z0,z1,y,r):
+              return (Plane.XZ * RectangleRounded(x1-x0,z1-z0,r).face()).moved(Location(((x0+x1)/2,y,(z0+z1)/2)))
+          def prism(face, depth):
+              return extrude(face, -depth)
+
+          def build_mechanical():
+              panel = prism(xz_round(0,64,0,62,13,1),2)
+              rear_edges=[]
+              for edge in panel.edges():
+                  bb=edge.bounding_box()
+                  if abs(bb.min.Y-15.0)<1e-7 and abs(bb.max.Y-15.0)<1e-7:
+                      rear_edges.append(edge)
+              panel=panel.fillet(1.0,rear_edges)
+              outer_lip=prism(xz_round(0,64,0,62,10,1),2)
+              inset0=1.0
+              inset1=1.0+2.0*math.tan(math.radians(3.0))
+              inner_draft=loft([
+                  xz_rect(inset0,64-inset0,inset0,62-inset0,9.99),
+                  xz_rect(inset1,64-inset1,inset1,62-inset1,12.01),
+              ],ruled=True)
+              lip=outer_lip-inner_draft
+              wall=prism(xz_round(0,64,0,62,12,1),1)-prism(xz_rect(2,62,2,60,11.99),1.02)
+              part=panel+lip+wall
+              part-=Box(2.1,3.05,40.0,align=(Align.MIN,Align.MIN,Align.MIN)).moved(Location((-0.05,9.95,11.5)))
+              part-=Box(11.0,3.05,2.1,align=(Align.MIN,Align.MIN,Align.MIN)).moved(Location((36.4,9.95,-0.05)))
+              for x,z in ((7.7,7.3),(6.9,55.0),(56.9,8.2),(56.9,54.9)):
+                  boss=Cylinder(2.5,7,align=(Align.CENTER,Align.CENTER,Align.MIN)).rotate(Axis.X,-90).moved(Location((x,6,z)))
+                  bore=Cylinder(1.25,6.02,align=(Align.CENTER,Align.CENTER,Align.MIN)).rotate(Axis.X,-90).moved(Location((x,5.99,z)))
+                  tip=Cone(1.25,0,0.75,align=(Align.CENTER,Align.CENTER,Align.MIN)).rotate(Axis.X,-90).moved(Location((x,12,z)))
+                  part=part+boss-bore-tip
+              for z0,xstart in ((6.0,17.75),(8.0,16.25),(10.0,14.75)):
+                  for j in range(6):
+                      x=xstart+5.5*j
+                      wire=Wire.make_polygon([
+                          Vector(x+1,z0,0),Vector(x+4,z0,0),
+                          Vector(x+3,z0+1,0),Vector(x,z0+1,0),
+                      ],close=True)
+                      tool=extrude(Face(wire),5.2).rotate(Axis.X,90).moved(Location((0,15.1,0)))
+                      part-=tool
+              part=part.clean()
+              if not part.is_valid:
+                  raise RuntimeError('invalid mechanical lid body')
+              return part
+
+          probe=Text('Logic Analyzer',10.0,font_path=str(FONT),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
+          base_size=10.0*TH/probe.bounding_box().size.Y
+
+          def text_tool(weight_offset: float, kind: Kind):
+              s=Text('Logic Analyzer',base_size,font_path=str(FONT),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
+              bb=s.bounding_box()
+              target_w=TW-2.0*weight_offset
+              target_h=TH-2.0*weight_offset
+              s=s.transform_geometry(Matrix([
+                  [target_w/bb.size.X,0,0,0],
+                  [0,target_h/bb.size.Y,0,0],
+                  [0,0,1,0],
+              ]))
+              if weight_offset>0:
+                  s=offset(s,amount=weight_offset,kind=kind)
+              solid=extrude(s,1.0).rotate(Axis.X,-90)
+              bb=solid.bounding_box()
+              return solid.moved(Location((X0-bb.min.X,14.0-bb.min.Y,Z0-bb.min.Z)))
+
+          mechanical=build_mechanical()
+          export_stl(mechanical,OUT/'mechanical.stl',tolerance=1.0,angular_tolerance=0.35)
+          mech_mesh=trimesh.load_mesh(OUT/'mechanical.stl',process=True)
+          reference=trimesh.load_mesh(REF,process=True)
           rows=[]
-          for i in range(81):
-              size=base_size-0.08+i*0.002
-              sketch=Text('Logic Analyzer',size,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
-              for mode in ('natural','envelope'):
-                  s=sketch
-                  if mode=='envelope':
-                      bb=s.bounding_box(); sx=tw/bb.size.X; sy=th/bb.size.Y
-                      s=s.transform_geometry(Matrix([[sx,0,0,0],[0,sy,0,0],[0,0,1,0]]))
-                  solid=extrude(s,1.0).rotate(Axis.X,-90)
-                  bb=solid.bounding_box()
-                  solid=solid.moved(Location((x0-bb.min.X,14.0-bb.min.Y,z0-bb.min.Z)))
-                  name=f'century_regular_{mode}_{size:.6f}.stl'
-                  export_stl(solid,out/name,tolerance=0.002,angular_tolerance=0.05)
-                  rows.append(f'{name},{solid.volume:.12f},{solid.bounding_box().size.X:.12f},{solid.bounding_box().size.Z:.12f}')
-          (out/'geometry_inventory.csv').write_text('file,volume,width,height\n'+'\n'.join(rows)+'\n',encoding='utf-8')
-          '@ | Set-Content -Encoding utf8 generate_lid_text.py
-          python generate_lid_text.py
+          kinds=(Kind.ARC,Kind.INTERSECTION)
+          for kind in kinds:
+              for i in range(71):
+                  amount=i*0.002
+                  text=text_tool(amount,kind)
+                  text_path=OUT/'candidate_text.stl'
+                  export_stl(text,text_path,tolerance=0.002,angular_tolerance=0.05)
+                  text_mesh=trimesh.load_mesh(text_path,process=True)
+                  final=trimesh.boolean.difference([mech_mesh,text_mesh],engine='manifold',check_volume=False)
+                  missing_mesh=trimesh.boolean.difference([reference,final],engine='manifold',check_volume=False)
+                  extra_mesh=trimesh.boolean.difference([final,reference],engine='manifold',check_volume=False)
+                  missing=abs(missing_mesh.volume) if missing_mesh is not None else 0.0
+                  extra=abs(extra_mesh.volume) if extra_mesh is not None else 0.0
+                  pct=(missing+extra)/abs(reference.volume)*100.0
+                  row={
+                      'offset_mm':amount,
+                      'kind':kind.name,
+                      'text_volume_mm3':text_mesh.volume,
+                      'generated_volume_mm3':final.volume,
+                      'missing_mm3':missing,
+                      'extra_mm3':extra,
+                      'symmetric_difference_percent':pct,
+                      'watertight':bool(final.is_watertight),
+                  }
+                  rows.append(row)
+                  print(json.dumps(row),flush=True)
+          rows.sort(key=lambda r:r['symmetric_difference_percent'])
+          best=rows[0]
+          best_text=text_tool(best['offset_mm'],Kind[best['kind']])
+          export_stl(best_text,OUT/'BEST_text.stl',tolerance=0.002,angular_tolerance=0.05)
+          best_text_mesh=trimesh.load_mesh(OUT/'BEST_text.stl',process=True)
+          best_final=trimesh.boolean.difference([mech_mesh,best_text_mesh],engine='manifold',check_volume=False)
+          best_final.export(OUT/'BEST_full.stl')
+          (OUT/'results.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+          (OUT/'BEST.json').write_text(json.dumps(best,indent=2),encoding='utf-8')
+          print('BEST',json.dumps(best),flush=True)
+          '@ | Set-Content -Encoding utf8 fit_lid.py
+          python fit_lid.py
       - uses: actions/upload-artifact@v4
         with:
-          name: srot-lid-century-text-geometry
-          path: generated_lid_text
+          name: srot-lid-exact-text-fit
+          path: lid_fit_results
           retention-days: 1
