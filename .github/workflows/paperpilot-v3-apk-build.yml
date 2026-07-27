@@ -31,7 +31,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Reconstruct V3 source
+      - name: Reconstruct and patch V3 source
         run: |
           set -euo pipefail
           mkdir -p paperpilot-build
@@ -47,6 +47,9 @@ jobs:
           echo '148b7c9e0f42a72b4c9a8d0b5f0145363f03204a74b86a4ffa03f21df915b7ea  /tmp/paperpilot-overlay.zip' | sha256sum -c -
           unzip -oq /tmp/paperpilot-overlay.zip -d paperpilot-build
           sed -i 's/material-icons-extended:1.8.2/material-icons-extended:1.7.8/' paperpilot-build/app/build.gradle.kts
+          UI='paperpilot-build/app/src/main/java/com/genrobotics/paperpilot/ui/PaperPilotApp.kt'
+          sed -i 's/import androidx.compose.foundation.layout.horizontalScroll/import androidx.compose.foundation.horizontalScroll/' "$UI"
+          sed -i 's/import androidx.compose.ui.platform.LocalContentColor/import androidx.compose.material3.LocalContentColor/' "$UI"
       - name: Compile debug APK
         working-directory: paperpilot-build
         shell: bash
