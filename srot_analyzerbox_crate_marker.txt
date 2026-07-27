@@ -1,1 +1,1 @@
-Decode historical AnalyzerBox SLDPRT revisions using the published cadmpeg crate — IR path fix.
+Decode every historical AnalyzerBox.SLDPRT revision and recover exact lid text parameters — final submission run.
