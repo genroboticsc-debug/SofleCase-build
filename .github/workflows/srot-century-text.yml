@@ -17,7 +17,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install build123d==0.11.1
-      - name: Generate exact system-font engraving geometry
+      - name: Generate exact named-font engraving geometry
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force generated_text | Out-Null
@@ -25,22 +25,18 @@ jobs:
           from pathlib import Path
           from build123d import Align, FontStyle, Location, Plane, Text, export_stl, extrude
           out = Path('generated_text')
-          font = Path(r'C:\Windows\Fonts\GOTHICB.TTF')
-          status = [f'font_exists={font.exists()}', f'font_path={font}']
-          (out / 'font_status.txt').write_text('\n'.join(status) + '\n')
-          if not font.exists():
-              raise SystemExit('Century Gothic Bold system font is unavailable')
           text = '5V 3V3 GND 13-24PIN'
           x_min = 5.705127716064453
           y_max = 48.0382080078125
-          for i in range(41):
-              size = 4.34 + i * 0.0015
-              face = Text(text, size, font_path=str(font), font_style=FontStyle.REGULAR, align=(Align.MIN, Align.MIN))
-              face = face.mirror(Plane.XZ)
-              bb = face.bounding_box()
-              face = face.moved(Location((x_min - bb.min.X, y_max - bb.max.Y, 0)))
-              solid = extrude(face, 0.01)
-              export_stl(solid, out / f'century_gothic_bold_{size:.4f}.stl', tolerance=0.002, angular_tolerance=0.08)
+          for style in (FontStyle.BOLD, FontStyle.REGULAR):
+              for i in range(41):
+                  size = 4.34 + i * 0.0015
+                  face = Text(text, size, font='Century Gothic', font_style=style, align=(Align.MIN, Align.MIN))
+                  face = face.mirror(Plane.XZ)
+                  bb = face.bounding_box()
+                  face = face.moved(Location((x_min - bb.min.X, y_max - bb.max.Y, 0)))
+                  solid = extrude(face, 0.01)
+                  export_stl(solid, out / f'century_gothic_{style.name.lower()}_{size:.4f}.stl', tolerance=0.002, angular_tolerance=0.08)
           '@ | Set-Content -Encoding utf8 generate_text.py
           python generate_text.py
       - uses: actions/upload-artifact@v4
