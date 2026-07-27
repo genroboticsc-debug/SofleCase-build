@@ -1,0 +1,40 @@
+name: SROT isolated lid GDI SVG extraction
+on:
+  pull_request:
+    paths:
+      - 'srot_lid_gdi_isolated_marker.txt'
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Microsoft 365 font resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force odt | Out-Null
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
+          @'
+          <Configuration><Add OfficeClientEdition="64" Channel="Current"><Product ID="O365ProPlusRetail"><Language ID="en-us" /><ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" /><ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" /><ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" /><ExcludeApp ID="Word" /></Product></Add><Display Level="None" AcceptEULA="TRUE" /><Property Name="AUTOACTIVATE" Value="0" /></Configuration>
+          '@ | Set-Content -Encoding utf8 odt/config.xml
+          Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic unavailable' }
+      - name: Extract exact GDI glyph outlines
+        shell: pwsh
+        run: |
+          @'
+          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
+          '@ | Set-Content -NoNewline extract_lid_gdi_svgs.py.gz.b64
+          python -c "import base64,gzip,pathlib; pathlib.Path('extract_lid_gdi_svgs.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('extract_lid_gdi_svgs.py.gz.b64').read_text())))"
+          python extract_lid_gdi_svgs.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: srot-lid-gdi-svg-outlines
+          path: lid_gdi_svg_results
+          retention-days: 1
