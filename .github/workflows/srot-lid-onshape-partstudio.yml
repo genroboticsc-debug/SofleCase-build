@@ -1,0 +1,33 @@
+name: SROT exact lid Part Studio recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_lid_onshape_partstudio_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Fetch exact public LogicAnalyzer Part Studio data
+        run: |
+          set -euxo pipefail
+          mkdir -p recovered
+          base='https://cad.onshape.com/api/v10'
+          doc='85d09ede43b764d4b2e54127'
+          ws='f09e60fc7c65904ef0845270'
+          elem='77c1e0c4757f6c54272b072f'
+          for ep in features bodydetails massproperties metadata tessellatedfaces; do
+            url="$base/partstudios/d/$doc/w/$ws/e/$elem/$ep"
+            code=$(curl -L -sS -w '%{http_code}' -o "recovered/${ep}.json" "$url" || true)
+            printf '%s\t%s\t%s\n' "$ep" "$code" "$url" >> recovered/status.tsv
+          done
+          curl -L -sS -w '%{http_code}' -o recovered/partstudio_metadata.json "$base/metadata/d/$doc/w/$ws/e/$elem" >> recovered/metadata_code.txt || true
+          curl -L -sS -w '%{http_code}' -o recovered/shadedviews.json "$base/partstudios/d/$doc/w/$ws/e/$elem/shadedviews?outputHeight=1000&outputWidth=1000&viewMatrix=1,0,0,0,0,1,0,0,0,0,1,0" >> recovered/shadedviews_code.txt || true
+          grep -RniE 'font|text|Analyzer|Logic|sketch|extrude|draft|fillet|pattern|dimension|value|expression' recovered > recovered/feature_strings.txt || true
+          cat recovered/status.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-exact-lid-partstudio
+          path: recovered
+          retention-days: 1
