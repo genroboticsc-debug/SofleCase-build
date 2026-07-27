@@ -2,7 +2,7 @@ name: PaperPilot V3 Android APK
 
 on:
   pull_request:
-    branches: [master]
+    branches: [paperpilot-build-base-20260728]
     paths:
       - 'paperpilot-android/**'
       - 'paperpilot-v3-overlay-small/**'
