@@ -1,4 +1,4 @@
-name: SROT lid exact text fit
+name: SROT lid GDI weight fit
 on:
   pull_request:
     paths:
@@ -8,7 +8,7 @@ permissions:
 jobs:
   fit:
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -20,23 +20,10 @@ jobs:
           New-Item -ItemType Directory -Force odt | Out-Null
           Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
           @'
-          <Configuration>
-            <Add OfficeClientEdition="64" Channel="Current">
-              <Product ID="O365ProPlusRetail">
-                <Language ID="en-us" />
-                <ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" />
-                <ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" />
-                <ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" />
-                <ExcludeApp ID="Word" />
-              </Product>
-            </Add>
-            <Display Level="None" AcceptEULA="TRUE" />
-            <Property Name="AUTOACTIVATE" Value="0" />
-            <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
-          </Configuration>
+          <Configuration><Add OfficeClientEdition="64" Channel="Current"><Product ID="O365ProPlusRetail"><Language ID="en-us" /><ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" /><ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" /><ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" /><ExcludeApp ID="Word" /></Product></Add><Display Level="None" AcceptEULA="TRUE" /><Property Name="AUTOACTIVATE" Value="0" /></Configuration>
           '@ | Set-Content -Encoding utf8 odt/config.xml
           Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
-          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic Regular was not installed' }
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic unavailable' }
       - name: Install pinned CAD and Boolean runtime
         shell: pwsh
         run: |
@@ -46,138 +33,17 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/gusmanb/logicanalyzer/4e8d9ec9fff592f7bb84490d8e301061a36e7f22/Enclosure/AnalyzerBox_Lid.STL' -OutFile 'AnalyzerBox_Lid.STL'
-      - name: Fit exact parametric text feature
+      - name: Decode and run exact GDI outline sweep
         shell: pwsh
         run: |
           @'
-          from __future__ import annotations
-          from pathlib import Path
-          import json, math
-          import trimesh
-          from build123d import (
-              Align, Axis, Box, Cone, Cylinder, Face, FontStyle, Kind, Location,
-              Matrix, Plane, Rectangle, RectangleRounded, Text, Vector, Wire,
-              export_stl, extrude, loft, offset,
-          )
-
-          OUT = Path('lid_fit_results')
-          OUT.mkdir(exist_ok=True)
-          REF = Path('AnalyzerBox_Lid.STL')
-          FONT = Path(r'C:\Windows\Fonts\GOTHIC.TTF')
-          X0, X1 = 10.204837799072266, 54.57022476196289
-          Z0, Z1 = 13.055909156799316, 18.99821662902832
-          TW, TH = X1-X0, Z1-Z0
-
-          def xz_rect(x0,x1,z0,z1,y):
-              return (Plane.XZ * Rectangle(x1-x0,z1-z0).face()).moved(Location(((x0+x1)/2,y,(z0+z1)/2)))
-          def xz_round(x0,x1,z0,z1,y,r):
-              return (Plane.XZ * RectangleRounded(x1-x0,z1-z0,r).face()).moved(Location(((x0+x1)/2,y,(z0+z1)/2)))
-          def prism(face, depth):
-              return extrude(face, -depth)
-
-          def build_mechanical():
-              panel = prism(xz_round(0,64,0,62,13,1),2)
-              rear_edges=[]
-              for edge in panel.edges():
-                  bb=edge.bounding_box()
-                  if abs(bb.min.Y-15.0)<1e-7 and abs(bb.max.Y-15.0)<1e-7:
-                      rear_edges.append(edge)
-              panel=panel.fillet(1.0,rear_edges)
-              outer_lip=prism(xz_round(0,64,0,62,10,1),2)
-              inset0=1.0
-              inset1=1.0+2.0*math.tan(math.radians(3.0))
-              inner_draft=loft([
-                  xz_rect(inset0,64-inset0,inset0,62-inset0,9.99),
-                  xz_rect(inset1,64-inset1,inset1,62-inset1,12.01),
-              ],ruled=True)
-              lip=outer_lip-inner_draft
-              wall=prism(xz_round(0,64,0,62,12,1),1)-prism(xz_rect(2,62,2,60,11.99),1.02)
-              part=panel+lip+wall
-              part-=Box(2.1,3.05,40.0,align=(Align.MIN,Align.MIN,Align.MIN)).moved(Location((-0.05,9.95,11.5)))
-              part-=Box(11.0,3.05,2.1,align=(Align.MIN,Align.MIN,Align.MIN)).moved(Location((36.4,9.95,-0.05)))
-              for x,z in ((7.7,7.3),(6.9,55.0),(56.9,8.2),(56.9,54.9)):
-                  boss=Cylinder(2.5,7,align=(Align.CENTER,Align.CENTER,Align.MIN)).rotate(Axis.X,-90).moved(Location((x,6,z)))
-                  bore=Cylinder(1.25,6.02,align=(Align.CENTER,Align.CENTER,Align.MIN)).rotate(Axis.X,-90).moved(Location((x,5.99,z)))
-                  tip=Cone(1.25,0,0.75,align=(Align.CENTER,Align.CENTER,Align.MIN)).rotate(Axis.X,-90).moved(Location((x,12,z)))
-                  part=part+boss-bore-tip
-              for z0,xstart in ((6.0,17.75),(8.0,16.25),(10.0,14.75)):
-                  for j in range(6):
-                      x=xstart+5.5*j
-                      wire=Wire.make_polygon([
-                          Vector(x+1,z0,0),Vector(x+4,z0,0),
-                          Vector(x+3,z0+1,0),Vector(x,z0+1,0),
-                      ],close=True)
-                      tool=extrude(Face(wire),5.2).rotate(Axis.X,90).moved(Location((0,15.1,0)))
-                      part-=tool
-              part=part.clean()
-              if not part.is_valid:
-                  raise RuntimeError('invalid mechanical lid body')
-              return part
-
-          probe=Text('Logic Analyzer',10.0,font_path=str(FONT),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
-          base_size=10.0*TH/probe.bounding_box().size.Y
-
-          def text_tool(weight_offset: float, kind: Kind):
-              s=Text('Logic Analyzer',base_size,font_path=str(FONT),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
-              bb=s.bounding_box()
-              target_w=TW-2.0*weight_offset
-              target_h=TH-2.0*weight_offset
-              s=s.transform_geometry(Matrix([
-                  [target_w/bb.size.X,0,0,0],
-                  [0,target_h/bb.size.Y,0,0],
-                  [0,0,1,0],
-              ]))
-              if weight_offset>0:
-                  s=offset(s,amount=weight_offset,kind=kind)
-              solid=extrude(s,1.0).rotate(Axis.X,-90)
-              bb=solid.bounding_box()
-              return solid.moved(Location((X0-bb.min.X,14.0-bb.min.Y,Z0-bb.min.Z)))
-
-          mechanical=build_mechanical()
-          export_stl(mechanical,OUT/'mechanical.stl',tolerance=1.0,angular_tolerance=0.35)
-          mech_mesh=trimesh.load_mesh(OUT/'mechanical.stl',process=True)
-          reference=trimesh.load_mesh(REF,process=True)
-          rows=[]
-          kinds=(Kind.ARC,Kind.INTERSECTION)
-          for kind in kinds:
-              for i in range(71):
-                  amount=i*0.002
-                  text=text_tool(amount,kind)
-                  text_path=OUT/'candidate_text.stl'
-                  export_stl(text,text_path,tolerance=0.002,angular_tolerance=0.05)
-                  text_mesh=trimesh.load_mesh(text_path,process=True)
-                  final=trimesh.boolean.difference([mech_mesh,text_mesh],engine='manifold',check_volume=False)
-                  missing_mesh=trimesh.boolean.difference([reference,final],engine='manifold',check_volume=False)
-                  extra_mesh=trimesh.boolean.difference([final,reference],engine='manifold',check_volume=False)
-                  missing=abs(missing_mesh.volume) if missing_mesh is not None else 0.0
-                  extra=abs(extra_mesh.volume) if extra_mesh is not None else 0.0
-                  pct=(missing+extra)/abs(reference.volume)*100.0
-                  row={
-                      'offset_mm':amount,
-                      'kind':kind.name,
-                      'text_volume_mm3':text_mesh.volume,
-                      'generated_volume_mm3':final.volume,
-                      'missing_mm3':missing,
-                      'extra_mm3':extra,
-                      'symmetric_difference_percent':pct,
-                      'watertight':bool(final.is_watertight),
-                  }
-                  rows.append(row)
-                  print(json.dumps(row),flush=True)
-          rows.sort(key=lambda r:r['symmetric_difference_percent'])
-          best=rows[0]
-          best_text=text_tool(best['offset_mm'],Kind[best['kind']])
-          export_stl(best_text,OUT/'BEST_text.stl',tolerance=0.002,angular_tolerance=0.05)
-          best_text_mesh=trimesh.load_mesh(OUT/'BEST_text.stl',process=True)
-          best_final=trimesh.boolean.difference([mech_mesh,best_text_mesh],engine='manifold',check_volume=False)
-          best_final.export(OUT/'BEST_full.stl')
-          (OUT/'results.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
-          (OUT/'BEST.json').write_text(json.dumps(best,indent=2),encoding='utf-8')
-          print('BEST',json.dumps(best),flush=True)
-          '@ | Set-Content -Encoding utf8 fit_lid.py
-          python fit_lid.py
+          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
+          '@ | Set-Content -NoNewline fit_lid_gdi.py.gz.b64
+          python -c "import base64,gzip,pathlib; pathlib.Path('fit_lid_gdi.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('fit_lid_gdi.py.gz.b64').read_text())))"
+          python fit_lid_gdi.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: srot-lid-exact-text-fit
-          path: lid_fit_results
+          name: srot-lid-gdi-weight-fit
+          path: lid_gdi_fit_results
           retention-days: 1
