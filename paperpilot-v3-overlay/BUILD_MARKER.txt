@@ -1,0 +1,2 @@
+PaperPilot V3 live-market paper-trading Android build payload.
+No live-money broker execution route.
