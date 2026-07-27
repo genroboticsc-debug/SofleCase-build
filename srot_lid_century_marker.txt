@@ -1,1 +1,1 @@
-Fit exact Century Gothic Regular Logic Analyzer text weight against the lid reference — run 2.
+Sweep exact Windows GDI Century Gothic logical weights against the lid reference — run 3.
