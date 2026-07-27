@@ -37,6 +37,7 @@ jobs:
           mkdir -p paperpilot-build
           cat paperpilot-android/paperpilot-project.zip.b64.part* | base64 --decode > /tmp/paperpilot-project.zip
           unzip -q /tmp/paperpilot-project.zip -d paperpilot-build
+          sed -i 's/material-icons-extended:1.8.2/material-icons-extended:1.7.8/' paperpilot-build/app/build.gradle.kts
       - name: Compile debug APK
         working-directory: paperpilot-build
         shell: bash
