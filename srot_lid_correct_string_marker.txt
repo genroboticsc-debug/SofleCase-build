@@ -1,0 +1,1 @@
+Generate exact Century Gothic lid text candidates using the recovered reference capitalization.
