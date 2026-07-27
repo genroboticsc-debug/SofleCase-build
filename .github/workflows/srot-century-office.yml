@@ -1,0 +1,80 @@
+name: SROT Century Gothic Office geometry
+on:
+  pull_request:
+    paths:
+      - 'srot_century_office_marker.txt'
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Microsoft 365 PowerPoint font resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force odt | Out-Null
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
+          @'
+          <Configuration>
+            <Add OfficeClientEdition="64" Channel="Current">
+              <Product ID="O365ProPlusRetail">
+                <Language ID="en-us" />
+                <ExcludeApp ID="Access" />
+                <ExcludeApp ID="Excel" />
+                <ExcludeApp ID="Groove" />
+                <ExcludeApp ID="Lync" />
+                <ExcludeApp ID="OneDrive" />
+                <ExcludeApp ID="OneNote" />
+                <ExcludeApp ID="Outlook" />
+                <ExcludeApp ID="Publisher" />
+                <ExcludeApp ID="Teams" />
+                <ExcludeApp ID="Word" />
+              </Product>
+            </Add>
+            <Display Level="None" AcceptEULA="TRUE" />
+            <Property Name="AUTOACTIVATE" Value="0" />
+            <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+          </Configuration>
+          '@ | Set-Content -Encoding utf8 odt/config.xml
+          Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
+          Get-ChildItem 'C:\Windows\Fonts' | Where-Object { $_.Name -match 'GOTHIC' } | Select-Object Name,Length | Format-Table | Out-String | Set-Content odt/font_inventory.txt
+          Get-Content odt/font_inventory.txt
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHICB.TTF')) { throw 'Century Gothic Bold font was not installed' }
+      - name: Install CAD runtime
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build123d==0.11.1
+      - name: Generate exact Century Gothic Bold engraving geometry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force generated_text | Out-Null
+          Copy-Item odt/font_inventory.txt generated_text/font_inventory.txt
+          @'
+          from pathlib import Path
+          from build123d import Align, FontStyle, Location, Plane, Text, export_stl, extrude
+          out = Path('generated_text')
+          font = Path(r'C:\Windows\Fonts\GOTHICB.TTF')
+          text = '5V 3V3 GND 13-24PIN'
+          x_min = 5.705127716064453
+          y_max = 48.0382080078125
+          for i in range(161):
+              size = 4.20 + i * 0.002
+              face = Text(text, size, font_path=str(font), font_style=FontStyle.REGULAR, align=(Align.MIN, Align.MIN))
+              face = face.mirror(Plane.XZ)
+              bb = face.bounding_box()
+              face = face.moved(Location((x_min - bb.min.X, y_max - bb.max.Y, 0)))
+              solid = extrude(face, 0.01)
+              export_stl(solid, out / f'century_gothic_bold_{size:.3f}.stl', tolerance=0.002, angular_tolerance=0.08)
+          '@ | Set-Content -Encoding utf8 generate_text.py
+          python generate_text.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-century-gothic-office-text-geometry
+          path: generated_text
+          retention-days: 1
