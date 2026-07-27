@@ -29,7 +29,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install build123d==0.11.1
-      - name: Generate correct text geometry
+      - name: Generate uniquely named text geometry
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force output | Out-Null
@@ -37,18 +37,18 @@ jobs:
           from pathlib import Path
           from build123d import Align, FontStyle, Text, export_stl, extrude
           out=Path('output')
-          fonts={'regular':Path(r'C:\Windows\Fonts\GOTHIC.TTF'),'bold':Path(r'C:\Windows\Fonts\GOTHICB.TTF')}
-          strings=['Logic AnalyZer','Logic Analyzer','logicAnalyzer','LogicAnalyzer']
+          fonts=[('regular',Path(r'C:\Windows\Fonts\GOTHIC.TTF')),('bold',Path(r'C:\Windows\Fonts\GOTHICB.TTF'))]
+          strings=[('capital_z','Logic AnalyZer'),('lower_z','Logic Analyzer'),('camel','logicAnalyzer'),('no_space','LogicAnalyzer')]
           rows=[]
-          for style,font in fonts.items():
-              for text in strings:
+          for style,font in fonts:
+              for key,text in strings:
                   face=Text(text,10.0,font_path=str(font),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
                   solid=extrude(face,1.0)
-                  name=f'{style}__{text.replace(" ","_")}.stl'
+                  name=f'{style}__{key}.stl'
                   export_stl(solid,out/name,tolerance=0.002,angular_tolerance=0.04)
                   bb=solid.bounding_box()
-                  rows.append(f'{name},{solid.volume:.12f},{bb.min.X:.12f},{bb.min.Y:.12f},{bb.max.X:.12f},{bb.max.Y:.12f}')
-          (out/'inventory.csv').write_text('file,volume,xmin,ymin,xmax,ymax\n'+'\n'.join(rows)+'\n',encoding='utf-8')
+                  rows.append(f'{name},{text},{solid.volume:.12f},{bb.min.X:.12f},{bb.min.Y:.12f},{bb.max.X:.12f},{bb.max.Y:.12f}')
+          (out/'inventory.csv').write_text('file,text,volume,xmin,ymin,xmax,ymax\n'+'\n'.join(rows)+'\n',encoding='utf-8')
           '@ | Set-Content -Encoding utf8 generate.py
           python generate.py
       - uses: actions/upload-artifact@v4
