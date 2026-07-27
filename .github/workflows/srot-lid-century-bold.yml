@@ -62,7 +62,8 @@ jobs:
                   coords=ca.copy()
                   for i in range(len(coords)):
                       coords[i]=(round(ca[i][0]*(1-t)+cb[i][0]*t), round(ca[i][1]*(1-t)+cb[i][1]*t))
-                  c.setCoordinates(coords,go)
+                  c.coordinates=coords
+                  c.recalcBounds(go)
               for name,(aw0,lsb0) in regular['hmtx'].metrics.items():
                   if name in bold['hmtx'].metrics:
                       aw1,lsb1=bold['hmtx'].metrics[name]
