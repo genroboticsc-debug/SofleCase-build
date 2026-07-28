@@ -1,0 +1,2 @@
+Isolated dependency artifact trigger for Dilemma SROT workspace.
+No CAD source or default-branch content is intended for merge.
