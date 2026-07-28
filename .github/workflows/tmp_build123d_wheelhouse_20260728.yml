@@ -1,4 +1,4 @@
-name: Temporary build123d missing runtime deps
+name: Temporary Dilemma Python 3.13 exact wheelhouse
 
 on:
   pull_request:
@@ -17,28 +17,31 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Download missing runtime dependencies
+      - name: Download complete CAD and Boolean runtime
         shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           mkdir -p wheelhouse
           python -m pip download --only-binary=:all: --dest wheelhouse \
-            'requests>=2,<3' \
-            'scikit-learn>=1,<2'
+            'build123d==0.11.1' \
+            'manifold3d==3.5.2' \
+            'trimesh==4.11.1'
           python - <<'PY'
           import hashlib, pathlib
           root = pathlib.Path('wheelhouse')
           lines = []
-          for path in sorted(root.iterdir()):
-              if path.is_file():
-                  lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+          for path in sorted(root.glob('*.whl')):
+              lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
           (root / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n')
           print('\n'.join(lines))
           PY
+          grep 'build123d-0.11.1-py3-none-any.whl' wheelhouse/SHA256SUMS.txt
+          grep 'manifold3d-3.5.2-cp313' wheelhouse/SHA256SUMS.txt
       - name: Upload wheelhouse
         uses: actions/upload-artifact@v4
         with:
-          name: build123d-0.11.1-missing-runtime-deps
+          name: dilemma-build123d-0.11.1-python313-wheelhouse
           path: wheelhouse/
           if-no-files-found: error
           retention-days: 7
