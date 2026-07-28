@@ -1,9 +1,6 @@
 name: Temporary build123d wheelhouse
 
 on:
-  push:
-    branches:
-      - tmp-build123d-wheelhouse-20260728
   pull_request:
     branches:
       - master
