@@ -46,6 +46,15 @@ text = text.replace(
                     "Malayalam VITS ONNX model (114 MB)",
                     mirrors = emptyList(),'''
 )
+# Kotlin's try-expression inferred Any here because the success path returned from an infinite loop.
+text = text.replace(
+    '        return try {\n            var currentUrl = initialUrl',
+    '        try {\n            var currentUrl = initialUrl'
+)
+text = text.replace(
+    '        } catch (t: Throwable) {\n            DownloadResult(false, t.message ?: t::class.java.simpleName)\n        } finally {',
+    '        } catch (t: Throwable) {\n            return DownloadResult(false, t.message ?: t::class.java.simpleName)\n        } finally {'
+)
 models.write_text(text)
 
 # More useful model download errors.
