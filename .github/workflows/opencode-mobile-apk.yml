@@ -77,7 +77,7 @@ jobs:
           test -s "$RELEASE_APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$DEBUG_APK"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$DEBUG_APK" | tee OpenCodeMobile/APK_BADGING.txt
-          grep -q "package: name='com.genrobotics.opencodemobile'" OpenCodeMobile/APK_BADGING.txt
+          grep -q "package: name='com.genrobotics.opencodemobile.debug'" OpenCodeMobile/APK_BADGING.txt
           grep -q "targetSdkVersion:'36'" OpenCodeMobile/APK_BADGING.txt
           (
             cd OpenCodeMobile
