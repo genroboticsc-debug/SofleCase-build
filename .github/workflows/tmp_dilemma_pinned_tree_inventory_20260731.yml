@@ -1,0 +1,55 @@
+name: Temporary Dilemma pinned source-tree inventory
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  inventory-pinned-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact upstream commit
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout --detach f5cffb4821fe560b095418b71382ac7d8043c61a
+          test "$(git rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+
+      - name: Inventory and collect authored sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/authored_sources artifact/evidence
+          cd upstream
+          git ls-tree -r --long HEAD > ../artifact/evidence/full_git_tree.txt
+          find mechanical -type f -printf '%s\t%p\n' | sort -k2 > ../artifact/evidence/mechanical_files.txt
+          find . -type f \( \
+            -iname '*.scad' -o -iname '*.py' -o -iname '*.fcstd' -o \
+            -iname '*.f3d' -o -iname '*.f3z' -o -iname '*.ipt' -o \
+            -iname '*.sldprt' -o -iname '*.sldasm' -o -iname '*.blend' -o \
+            -iname '*.json' -o -iname '*.yaml' -o -iname '*.yml' -o \
+            -iname '*.md' -o -iname '*.txt' -o -iname '*.csv' -o \
+            -iname '*.toml' -o -iname '*.ini' -o -iname '*.cfg' -o \
+            -iname '*.sh' -o -iname '*.bat' -o -iname '*.ps1' \
+          \) -print0 | while IFS= read -r -d '' file; do
+            mkdir -p "../artifact/authored_sources/$(dirname "$file")"
+            cp -- "$file" "../artifact/authored_sources/$file"
+          done
+          printf '%s\n' f5cffb4821fe560b095418b71382ac7d8043c61a > ../artifact/evidence/upstream_commit.txt
+          cd ..
+          find artifact -type f -printf '%s\t%P\n' | sort -k2 > artifact/evidence/artifact_files.txt
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/evidence/SHA256SUMS.txt
+
+      - name: Upload pinned source inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-source-tree-inventory-20260731
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 7
