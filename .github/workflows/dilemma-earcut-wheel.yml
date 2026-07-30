@@ -1,0 +1,30 @@
+name: Dilemma earcut wheel
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-earcut-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-earcut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir wheelhouse
+          python -m pip download --only-binary=:all: --no-deps -d wheelhouse mapbox-earcut
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-mapbox-earcut-cp313
+          path: wheelhouse/
+          retention-days: 1
