@@ -1,0 +1,74 @@
+name: Temporary Dilemma pinned KiCad reference recovery
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  export-pinned-references:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Install KiCad 9
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo add-apt-repository -y ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad
+          kicad-cli --version
+
+      - name: Check out pinned Dilemma source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout --detach f5cffb4821fe560b095418b71382ac7d8043c61a
+          test "$(git rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+
+      - name: Export authoritative board-only STEP references
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/board_step artifact/original_3d artifact/evidence
+          kicad-cli pcb export step --help > artifact/evidence/kicad_step_help.txt
+          kicad-cli --version > artifact/evidence/kicad_version.txt
+          printf '%s\n' f5cffb4821fe560b095418b71382ac7d8043c61a > artifact/evidence/upstream_commit.txt
+
+          export_board() {
+            local source="$1"
+            local output="$2"
+            test -f "upstream/$source"
+            kicad-cli pcb export step \
+              --force \
+              --board-only \
+              --cut-vias-in-body \
+              --grid-origin \
+              --no-optimize-step \
+              --output "artifact/board_step/$output" \
+              "upstream/$source"
+          }
+
+          export_board '3x5_2/dilemma.kicad_pcb' 'P001__3x5_2_native_board_only.step'
+          export_board '3x5_3/dilemma.kicad_pcb' 'P002_P003__3x5_3_native_board_only.step'
+          export_board '3x5_3_procyon/dilemma.kicad_pcb' 'P004_P005__3x5_3_procyon_native_board_only.step'
+          export_board '4x6_4/dilemma.kicad_pcb' 'P006_P007__4x6_4_native_board_only.step'
+
+          cp 'upstream/mechanical/trackpad/40mm/top.stl' 'artifact/original_3d/P045__trackpad_40mm_top.stl'
+          cp 'upstream/mechanical/trackpad/35mm/top.stl' 'artifact/original_3d/P042__trackpad_35mm_top.stl'
+          cp 'upstream/mechanical/community mods/40mm_flat_overlay/STEP/Cirque TM040040-2024-302 Holder Top.STEP' 'artifact/original_3d/P033__Cirque_TM040040_holder_top.STEP'
+
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/evidence/SHA256SUMS.txt
+          find artifact -type f -printf '%P\n' | sort > artifact/evidence/FILES.txt
+
+      - name: Upload pinned reference artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-kicad-and-3d-references-20260730
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 7
