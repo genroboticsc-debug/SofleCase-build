@@ -1,0 +1,99 @@
+name: Build OpenCode Mobile APK
+
+on:
+  push:
+    branches: [opencode-android-build]
+    paths:
+      - 'opencode-mobile-source/**'
+      - '.github/workflows/opencode-mobile-apk.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'opencode-mobile-source/**'
+      - '.github/workflows/opencode-mobile-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify source archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat opencode-mobile-source/source.part* > OpenCodeMobile-source.tar.gz.b64
+          test "$(wc -c < OpenCodeMobile-source.tar.gz.b64)" = "27480"
+          printf '%s  %s\n' 'b88a8e76862ba6e155bdff71d50b7c52d6075a45409e139deb3817927caff77d' 'OpenCodeMobile-source.tar.gz.b64' | sha256sum -c -
+          base64 --decode OpenCodeMobile-source.tar.gz.b64 > OpenCodeMobile-source.tar.gz
+          printf '%s  %s\n' '57e3155f564c85b143fb36a4acbfa51abd7b81b019bce4173423369e36899229' 'OpenCodeMobile-source.tar.gz' | sha256sum -c -
+          tar -xzf OpenCodeMobile-source.tar.gz
+          test -f OpenCodeMobile/app/src/main/java/com/genrobotics/opencodemobile/MainActivity.java
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36 toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Compile debug and release APKs
+        working-directory: OpenCodeMobile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gradle --stacktrace --no-daemon clean :app:assembleDebug :app:assembleRelease
+
+      - name: Verify APKs and package source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DEBUG_APK='OpenCodeMobile/app/build/outputs/apk/debug/app-debug.apk'
+          RELEASE_APK='OpenCodeMobile/app/build/outputs/apk/release/app-release-unsigned.apk'
+          test -s "$DEBUG_APK"
+          test -s "$RELEASE_APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$DEBUG_APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$DEBUG_APK" | tee OpenCodeMobile/APK_BADGING.txt
+          grep -q "package: name='com.genrobotics.opencodemobile'" OpenCodeMobile/APK_BADGING.txt
+          grep -q "targetSdkVersion:'36'" OpenCodeMobile/APK_BADGING.txt
+          (
+            cd OpenCodeMobile
+            zip -qr ../OpenCode-Mobile-Android-Source.zip . -x '.gradle/*' 'app/build/*' '.git/*'
+          )
+          sha256sum "$DEBUG_APK" "$RELEASE_APK" OpenCode-Mobile-Android-Source.zip > SHA256SUMS.txt
+
+      - name: Upload installable APK and source
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenCode-Mobile-Pixel9a-APK
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            OpenCodeMobile/app/build/outputs/apk/debug/app-debug.apk
+            OpenCodeMobile/app/build/outputs/apk/release/app-release-unsigned.apk
+            OpenCode-Mobile-Android-Source.zip
+            OpenCodeMobile/APK_BADGING.txt
+            SHA256SUMS.txt
