@@ -21,7 +21,32 @@ if 'applicationIdSuffix = ".studio"' not in text:
         'buildTypes {\n        release {',
         'buildTypes {\n        debug {\n            applicationIdSuffix = ".studio"\n            versionNameSuffix = "-pixel9a"\n            isDebuggable = true\n        }\n        release {'
     )
+if 'material-icons-extended' not in text:
+    text = text.replace(
+        'implementation("androidx.compose.material3:material3")',
+        'implementation("androidx.compose.material3:material3")\n    implementation("androidx.compose.material:material-icons-extended")'
+    )
 gradle.write_text(text)
+
+# Use the exact current Malayalam ONNX file rather than probing nonexistent quantized paths.
+models = src / "app/src/main/java/com/nekospeak/tts/data/ModelRepository.kt"
+text = models.read_text()
+text = text.replace('Offline Malayalam neural voice. Quantized ONNX model optimized for local Android inference.',
+                    'Offline Malayalam neural voice using a compact 114 MB ONNX model for local Android inference.')
+text = text.replace(
+'''                    "$MAL_BASE/onnx/model_quantized.onnx?download=true",
+                    "Malayalam VITS quantized model",
+                    mirrors = listOf(
+                        "$MAL_BASE/onnx/model_int8.onnx?download=true",
+                        "$MAL_BASE/onnx/model_uint8.onnx?download=true",
+                        "$MAL_BASE/onnx/model.onnx?download=true",
+                        "$MAL_BASE/model.onnx?download=true"
+                    ),''',
+'''                    "$MAL_BASE/model.onnx?download=true",
+                    "Malayalam VITS ONNX model (114 MB)",
+                    mirrors = emptyList(),'''
+)
+models.write_text(text)
 
 # More useful model download errors.
 manager = src / "app/src/main/java/com/nekospeak/tts/ui/screens/ModelManagerScreen.kt"
