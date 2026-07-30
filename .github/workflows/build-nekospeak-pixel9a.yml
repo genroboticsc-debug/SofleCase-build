@@ -8,6 +8,12 @@ on:
       - '.github/workflows/build-nekospeak-pixel9a.yml'
       - 'app/**'
       - 'scripts/**'
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/build-nekospeak-pixel9a.yml'
+      - 'app/**'
+      - 'scripts/**'
 
 permissions:
   contents: read
@@ -25,7 +31,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
