@@ -1,0 +1,96 @@
+name: Temporary OCCT exact offset STEP matrix
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-offset-roundtrip:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ocp:
+          - "7.9.3.1.1"
+          - "7.9.3.1"
+          - "7.9.3.0"
+          - "7.8.1.1.post1"
+          - "7.8.1.1"
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Build123d and selected OCCT
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.11.1'
+          python -m pip install --force-reinstall --no-deps "cadquery-ocp-novtk==${{ matrix.ocp }}"
+      - name: Exact offset-curve STEP round trip
+        shell: bash
+        run: |
+          mkdir -p "results/${{ matrix.ocp }}"
+          python - <<'PY' | tee "results/${{ matrix.ocp }}/result.txt"
+          import json
+          from pathlib import Path
+          from build123d import Edge, Wire, Face, Vector, Solid, export_step, import_step
+          from OCP.BRepAdaptor import BRepAdaptor_Curve
+          from OCP.GeomAbs import GeomAbs_OffsetCurve
+          from OCP.Standard import Standard_Version
+
+          edges = [
+              Edge.make_bezier(Vector(0, 0), Vector(5, -4), Vector(15, -4), Vector(20, 0)),
+              Edge.make_line(Vector(20, 0), Vector(20, 20)),
+              Edge.make_line(Vector(20, 20), Vector(0, 20)),
+              Edge.make_line(Vector(0, 20), Vector(0, 0)),
+          ]
+          source_wire = Wire(edges)
+          offset_wire = source_wire.offset_2d(2.0)
+          if isinstance(offset_wire, list):
+              offset_wire = offset_wire[0]
+          curve_types = [str(BRepAdaptor_Curve(e.wrapped).GetType()) for e in offset_wire.edges()]
+          body = Solid.extrude(Face(offset_wire), Vector(0, 0, 5))
+          path = Path('results/${{ matrix.ocp }}/offset_prism.step')
+          export_step(body, path)
+          imported = import_step(path)
+          data = {
+              'matrix_ocp': '${{ matrix.ocp }}',
+              'occt_version': Standard_Version(),
+              'source': {
+                  'valid': bool(body.is_valid),
+                  'solids': len(body.solids()),
+                  'shells': len(body.shells()),
+                  'faces': len(body.faces()),
+                  'volume': body.volume,
+                  'area': body.area,
+                  'offset_curve_edges': sum('OffsetCurve' in t for t in curve_types),
+                  'curve_types': curve_types,
+              },
+              'roundtrip': {
+                  'valid': bool(imported.is_valid),
+                  'solids': len(imported.solids()),
+                  'shells': len(imported.shells()),
+                  'faces': len(imported.faces()),
+                  'volume': imported.volume,
+                  'area': imported.area,
+              },
+          }
+          data['exact_roundtrip_pass'] = (
+              data['roundtrip']['solids'] == 1
+              and data['roundtrip']['shells'] == 1
+              and data['roundtrip']['faces'] == data['source']['faces']
+              and abs(data['roundtrip']['volume'] - data['source']['volume']) <= 1e-9
+              and abs(data['roundtrip']['area'] - data['source']['area']) <= 1e-9
+          )
+          Path('results/${{ matrix.ocp }}/result.json').write_text(json.dumps(data, indent=2))
+          print(json.dumps(data, indent=2))
+          PY
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: occt-offset-step-${{ matrix.ocp }}
+          path: results/${{ matrix.ocp }}/
+          retention-days: 7
