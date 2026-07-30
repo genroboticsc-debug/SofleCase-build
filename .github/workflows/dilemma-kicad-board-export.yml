@@ -13,10 +13,13 @@ jobs:
   export-board-only-step:
     runs-on: ubuntu-latest
     steps:
-      - name: Install KiCad CLI
+      - name: Install KiCad 9 CLI
         shell: bash
         run: |
           set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:kicad/kicad-9.0-releases
           sudo apt-get update
           sudo apt-get install -y kicad
           kicad-cli --version
@@ -42,7 +45,7 @@ jobs:
             pcb="upstream/${family}/dilemma.kicad_pcb"
             test -f "$pcb"
             printf '%s  %s\n' "${EXPECTED[$family]}" "$pcb" | sha256sum -c -
-            kicad-cli pcb export step --board-only --drill-origin --force -o "exports/${family}.step" "$pcb"
+            kicad-cli pcb export step --board-only --force -o "exports/${family}.step" "$pcb"
           done
           sha256sum exports/*.step > exports/STEP_SHA256SUMS.txt
       - name: Upload native board-only STEP files
