@@ -1,0 +1,47 @@
+name: Dilemma runtime wheel fetch
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-runtime-wheel-fetch.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact official wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse \
+            build123d==0.11.1 \
+            cadquery-ocp==7.9.3.1.1 \
+            manifold3d==3.5.2
+          cd wheelhouse
+          printf '%s  %s\n' \
+            '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10' \
+            'build123d-0.11.1-py3-none-any.whl' > SHA256SUMS
+          printf '%s  %s\n' \
+            '0e70ab790910b6d81080a6d0df26a0cd0f1fd08984c447585c74be9b6d58c6c8' \
+            'cadquery_ocp-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl' >> SHA256SUMS
+          printf '%s  %s\n' \
+            'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45' \
+            'manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl' >> SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Upload verified wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-runtime-wheels-cp313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
