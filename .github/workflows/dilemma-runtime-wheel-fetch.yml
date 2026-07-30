@@ -5,6 +5,10 @@ on:
     branches: [master]
     paths:
       - .github/workflows/dilemma-runtime-wheel-fetch.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-runtime-trigger.txt
 
 permissions:
   contents: read
@@ -17,13 +21,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Download exact official wheels
+      - name: Download exact official wheels and dependencies
         shell: bash
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip
           mkdir -p wheelhouse
-          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse \
+          python -m pip download --only-binary=:all: --dest wheelhouse \
             build123d==0.11.1 \
             cadquery-ocp==7.9.3.1.1 \
             manifold3d==3.5.2
