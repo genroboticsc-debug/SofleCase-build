@@ -1,0 +1,75 @@
+name: Build NekoSpeak Studio Pixel 9a
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [nekospeak-pixel9a-build]
+    paths:
+      - '.github/workflows/build-nekospeak-pixel9a.yml'
+      - 'app/**'
+      - 'scripts/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build overlay
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Fetch verified upstream source
+        shell: bash
+        run: |
+          git clone https://github.com/siva-sub/NekoSpeak.git NekoSpeak
+          cd NekoSpeak
+          git checkout c482aa9c6b063eff044bbb5c8409f61ab994f046
+
+      - name: Apply Pixel 9a Studio changes
+        run: python3 scripts/apply_patch.py
+
+      - name: Build ARM64 debug APK
+        working-directory: NekoSpeak
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Collect ARM64 APK
+        shell: bash
+        run: |
+          mkdir -p output
+          APK=$(find NekoSpeak/app/build/outputs/apk -type f -name '*arm64-v8a*debug*.apk' | head -n 1)
+          if [ -z "$APK" ]; then
+            APK=$(find NekoSpeak/app/build/outputs/apk -type f -name '*debug*.apk' | head -n 1)
+          fi
+          test -n "$APK"
+          cp "$APK" output/NekoSpeak-Studio-Pixel9a-arm64-v1.5.0.apk
+          sha256sum output/*.apk | tee output/SHA256SUMS.txt
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NekoSpeak-Studio-Pixel9a-arm64-v1.5.0
+          path: output/*
+          if-no-files-found: error
+          retention-days: 14
