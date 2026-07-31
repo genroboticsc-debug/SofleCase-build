@@ -1,1 +1,1 @@
-Temporary trigger for pinned KiCad Edge.Cuts centerline export.
+Temporary trigger for normalized KiCad board polygon export, revision 2.
