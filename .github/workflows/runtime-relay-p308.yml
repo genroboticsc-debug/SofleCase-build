@@ -1,0 +1,73 @@
+name: Runtime Relay P308
+
+on:
+  push:
+    branches:
+      - runtime-relay-p308
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download exact runtime wheels and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse \
+            build123d==0.11.1 \
+            cadquery-ocp==7.9.3.1.1 \
+            manifold3d==3.5.2 \
+            trimesh==4.11.1 \
+            numpy==2.3.5
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            anytree ezdxf ipython lib3mf ocp-gordon ocpsvg py-lib3mf requests \
+            scikit-learn scipy svgpathtools sympy trianglesolver typing-extensions webcolors
+
+      - name: Verify locked wheel hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+
+          root = Path('wheelhouse')
+          expected = {
+              'build123d-0.11.1': '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10',
+              'cadquery_ocp-7.9.3.1.1': '0e70ab790910b6d81080a6d0df26a0cd0f1fd08984c447585c74be9b6d58c6c8',
+              'manifold3d-3.5.2': 'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45',
+          }
+          records = []
+          for path in sorted(root.glob('*')):
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              records.append({'file': path.name, 'bytes': path.stat().st_size, 'sha256': digest})
+          for prefix, digest in expected.items():
+              matches = [r for r in records if r['file'].lower().replace('-', '_').startswith(prefix.lower().replace('-', '_'))]
+              if len(matches) != 1:
+                  raise SystemExit(f'Expected one wheel for {prefix}, found {matches}')
+              if matches[0]['sha256'] != digest:
+                  raise SystemExit(f"Hash mismatch for {matches[0]['file']}: {matches[0]['sha256']} != {digest}")
+          Path('wheelhouse/SHA256_INVENTORY.json').write_text(json.dumps(records, indent=2) + '\n')
+          print(json.dumps(records, indent=2))
+          PY
+
+      - name: Upload verified runtime wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-p308-runtime-wheelhouse
+          path: wheelhouse
+          compression-level: 6
+          if-no-files-found: error
+          retention-days: 3
