@@ -33,7 +33,7 @@ jobs:
           cmake --build occt-build --parallel 4
           cmake --install occt-build
 
-      - name: Build deterministic BREP-to-STEP CLI
+      - name: Build deterministic topology-only BREP-to-STEP CLI
         shell: bash
         run: |
           set -euxo pipefail
@@ -41,8 +41,6 @@ jobs:
           #include <BRep_Builder.hxx>
           #include <BRepTools.hxx>
           #include <BRepCheck_Analyzer.hxx>
-          #include <BRepGProp.hxx>
-          #include <GProp_GProps.hxx>
           #include <IFSelect_ReturnStatus.hxx>
           #include <Message_ProgressRange.hxx>
           #include <STEPControl_Reader.hxx>
@@ -50,7 +48,6 @@ jobs:
           #include <TopAbs_ShapeEnum.hxx>
           #include <TopExp_Explorer.hxx>
           #include <TopoDS_Shape.hxx>
-          #include <cmath>
           #include <fstream>
           #include <iomanip>
           #include <iostream>
@@ -60,14 +57,6 @@ jobs:
             int n = 0;
             for (TopExp_Explorer ex(shape, kind); ex.More(); ex.Next()) ++n;
             return n;
-          }
-
-          static void properties(const TopoDS_Shape& shape, double& volume, double& area) {
-            GProp_GProps vp, ap;
-            BRepGProp::VolumeProperties(shape, vp);
-            BRepGProp::SurfaceProperties(shape, ap);
-            volume = vp.Mass();
-            area = ap.Mass();
           }
 
           int main(int argc, char** argv) {
@@ -81,14 +70,13 @@ jobs:
 
             BRep_Builder builder;
             TopoDS_Shape source;
-            std::ifstream in(input, std::ios::in);
-            if (!in) return 10;
-            BRepTools::Read(source, in, builder, Message_ProgressRange());
+            if (!BRepTools::Read(source, input.c_str(), builder, Message_ProgressRange())) return 10;
             if (source.IsNull()) return 10;
 
             const bool sourceValid = BRepCheck_Analyzer(source).IsValid();
-            double sourceVolume = 0.0, sourceArea = 0.0;
-            properties(source, sourceVolume, sourceArea);
+            const int sourceSolids = count(source, TopAbs_SOLID);
+            const int sourceShells = count(source, TopAbs_SHELL);
+            const int sourceFaces = count(source, TopAbs_FACE);
 
             STEPControl_Writer writer;
             const auto transferStatus = writer.Transfer(source, STEPControl_ManifoldSolidBrep);
@@ -96,18 +84,13 @@ jobs:
             if (writeStatus != IFSelect_RetDone) return 11;
 
             STEPControl_Reader reader;
-            if (reader.ReadFile(output.c_str()) != IFSelect_RetDone) return 12;
+            const auto readStatus = reader.ReadFile(output.c_str());
+            if (readStatus != IFSelect_RetDone) return 12;
             reader.TransferRoots();
             TopoDS_Shape roundtrip = reader.OneShape();
             if (roundtrip.IsNull()) return 13;
 
             const bool roundtripValid = BRepCheck_Analyzer(roundtrip).IsValid();
-            double roundtripVolume = 0.0, roundtripArea = 0.0;
-            properties(roundtrip, roundtripVolume, roundtripArea);
-
-            const int sourceSolids = count(source, TopAbs_SOLID);
-            const int sourceShells = count(source, TopAbs_SHELL);
-            const int sourceFaces = count(source, TopAbs_FACE);
             const int roundtripSolids = count(roundtrip, TopAbs_SOLID);
             const int roundtripShells = count(roundtrip, TopAbs_SHELL);
             const int roundtripFaces = count(roundtrip, TopAbs_FACE);
@@ -124,22 +107,16 @@ jobs:
                 << "  \"source_solids\": " << sourceSolids << ",\n"
                 << "  \"source_shells\": " << sourceShells << ",\n"
                 << "  \"source_faces\": " << sourceFaces << ",\n"
-                << "  \"source_volume\": " << sourceVolume << ",\n"
-                << "  \"source_area\": " << sourceArea << ",\n"
                 << "  \"transfer_status\": " << static_cast<int>(transferStatus) << ",\n"
                 << "  \"write_status\": " << static_cast<int>(writeStatus) << ",\n"
+                << "  \"read_status\": " << static_cast<int>(readStatus) << ",\n"
                 << "  \"roundtrip_valid\": " << (roundtripValid ? "true" : "false") << ",\n"
                 << "  \"roundtrip_solids\": " << roundtripSolids << ",\n"
                 << "  \"roundtrip_shells\": " << roundtripShells << ",\n"
                 << "  \"roundtrip_faces\": " << roundtripFaces << ",\n"
-                << "  \"roundtrip_volume\": " << roundtripVolume << ",\n"
-                << "  \"roundtrip_area\": " << roundtripArea << ",\n"
-                << "  \"volume_delta\": " << (roundtripVolume - sourceVolume) << ",\n"
-                << "  \"area_delta\": " << (roundtripArea - sourceArea) << ",\n"
                 << "  \"topology_pass\": " << (topologyPass ? "true" : "false") << "\n"
                 << "}\n";
             out.close();
-            std::cout << std::ifstream(report).rdbuf();
             return topologyPass ? 0 : 14;
           }
           CPP
@@ -155,7 +132,7 @@ jobs:
         run: |
           set -euxo pipefail
           python3 -m pip install 'build123d==0.11.1'
-          mkdir -p smoke
+          mkdir -p smoke/results
           python3 - <<'PY'
           from build123d import Edge, Face, Solid, Vector, Wire
           from OCP.BRepTools import BRepTools
@@ -168,12 +145,12 @@ jobs:
           offset = Wire(edges).offset_2d(2.0)
           if isinstance(offset, list): offset = offset[0]
           body = Solid.extrude(Face(offset), Vector(0,0,5))
-          assert body.is_valid and len(body.solids()) == 1
+          assert body.is_valid and len(body.solids()) == 1 and len(body.shells()) == 1
           assert BRepTools.Write_s(body.wrapped, 'smoke/offset_prism.brep')
           PY
-          mkdir -p smoke/results
           LD_LIBRARY_PATH="$PWD/occt-install/lib" ./occt8_brep_to_step \
             smoke/offset_prism.brep smoke/results/offset_prism.step smoke/results/report.json
+          cat smoke/results/report.json
 
       - name: Package pinned helper and evidence
         shell: bash
