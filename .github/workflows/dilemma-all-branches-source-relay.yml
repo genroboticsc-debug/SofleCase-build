@@ -1,0 +1,52 @@
+name: Dilemma all branches CAD source relay
+
+on:
+  push:
+    branches: [runtime-relay-p308]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Clone all Dilemma branches and LFS assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-single-branch https://github.com/Bastardkb/Dilemma.git source
+          cd source
+          git lfs install --local
+          git fetch --all --tags
+          mkdir -p ../evidence/trees
+          git branch -r > ../evidence/branches.txt
+          git log --all --date=iso-strict --pretty='%H %ad %s' --name-status > ../evidence/all_history.txt
+          for ref in origin/main origin/3.1 origin/features/dilemma_3x0; do
+            safe=$(echo "$ref" | tr '/.' '__')
+            git ls-tree -r --name-only "$ref" > "../evidence/trees/${safe}_files.txt"
+            mkdir -p "../evidence/${safe}"
+            while IFS= read -r path; do
+              case "$path" in
+                *.FCStd|*.fcstd|*.f3d|*.F3D|*.step|*.STEP|*.stp|*.STP|*.3mf|*.scad|*.SCAD|*.py|*.json|*.yaml|*.yml|*.md|*.txt)
+                  case "$path" in
+                    mechanical/*|case/*|cases/*|cad/*|src/*|scripts/*)
+                      mkdir -p "../evidence/${safe}/$(dirname "$path")"
+                      git show "$ref:$path" > "../evidence/${safe}/$path" || true
+                      ;;
+                  esac
+                  ;;
+              esac
+            done < "../evidence/trees/${safe}_files.txt"
+          done
+          cd ..
+          find evidence -type f -print0 | sort -z | xargs -0 sha256sum > evidence/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-all-branches-cad-source
+          path: evidence
+          retention-days: 3
+          compression-level: 9
