@@ -1,0 +1,168 @@
+name: Temporary OCCT 7.9.3 fast exact offset STEP helper
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  build-fast-helper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install prerequisites and make exact fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ninja-build cmake g++ git
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.11.1'
+          mkdir -p input results
+          python - <<'PY'
+          from build123d import Edge, Face, Solid, Vector, Wire
+          from OCP.BRepTools import BRepTools
+          source = Wire([
+              Edge.make_bezier(Vector(0, 0), Vector(5, -4), Vector(15, -4), Vector(20, 0)),
+              Edge.make_line(Vector(20, 0), Vector(20, 20)),
+              Edge.make_line(Vector(20, 20), Vector(0, 20)),
+              Edge.make_line(Vector(0, 20), Vector(0, 0)),
+          ])
+          offset = source.offset_2d(2.0)
+          if isinstance(offset, list): offset = offset[0]
+          body = Solid.extrude(Face(offset), Vector(0, 0, 5))
+          assert body.is_valid and len(body.solids()) == 1 and len(body.shells()) == 1
+          assert BRepTools.Write_s(body.wrapped, 'input/exact_offset_prism.brep')
+          PY
+
+      - name: Patch official OCCT V7_9_3 writer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch V7_9_3 https://github.com/Open-Cascade-SAS/OCCT.git occt
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('occt/src/GeomToStep/GeomToStep_MakeCurve.cxx')
+          text = path.read_text()
+          text = text.replace('#include <Geom_Line.hxx>\n', '#include <Geom_Line.hxx>\n#include <Geom_OffsetCurve.hxx>\n', 1)
+          text = text.replace('#include <GeomToStep_MakeLine.hxx>\n', '#include <GeomToStep_MakeLine.hxx>\n#include <GeomToStep_MakeDirection.hxx>\n', 1)
+          text = text.replace('#include <StepGeom_Line.hxx>\n', '#include <StepGeom_Line.hxx>\n#include <StepGeom_OffsetCurve3d.hxx>\n#include <StepData_Logical.hxx>\n#include <TCollection_HAsciiString.hxx>\n', 1)
+          anchor = '''  else if (C->IsKind(STANDARD_TYPE(Geom_BoundedCurve)))\n  {\n    Handle(Geom_BoundedCurve)   L = Handle(Geom_BoundedCurve)::DownCast(C);\n    GeomToStep_MakeBoundedCurve MkBoundedC(L, theLocalFactors);\n    theCurve = MkBoundedC.Value();\n  }\n'''
+          patch = '''  else if (C->IsKind(STANDARD_TYPE(Geom_OffsetCurve)))\n  {\n    Handle(Geom_OffsetCurve) OC = Handle(Geom_OffsetCurve)::DownCast(C);\n    GeomToStep_MakeCurve     MkBasis(OC->BasisCurve(), theLocalFactors);\n    GeomToStep_MakeDirection MkDirection(OC->Direction());\n    Handle(StepGeom_OffsetCurve3d) aStepOffset = new StepGeom_OffsetCurve3d;\n    aStepOffset->Init(new TCollection_HAsciiString(""),\n                      MkBasis.Value(),\n                      -OC->Offset() / theLocalFactors.LengthFactor(),\n                      StepData_LFalse,\n                      MkDirection.Value());\n    theCurve = aStepOffset;\n  }\n''' + anchor
+          assert anchor in text
+          text = text.replace(anchor, patch, 1)
+          path.write_text(text)
+          PY
+          git -C occt diff -- src/GeomToStep/GeomToStep_MakeCurve.cxx | tee results/occt793_offsetcurve_writer.patch
+
+      - name: Build only patched STEP toolkit and dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S occt -B occt-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_MODULE_Visualization=OFF \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_MODULE_ApplicationFramework=OFF \
+            -DUSE_FREETYPE=OFF -DUSE_TCL=OFF -DUSE_TK=OFF
+          cmake --build occt-build --target TKDESTEP --parallel 4
+          HEADER="$(find "$PWD/occt-build" "$PWD/occt" -type f -name BRepTools.hxx -print -quit)"
+          STEP_LIB="$(find "$PWD/occt-build" -type f -name 'libTKDESTEP.so*' -print -quit)"
+          test -n "$HEADER" && test -n "$STEP_LIB"
+          INCDIR="$(dirname "$HEADER")"
+          LIBDIR="$(dirname "$STEP_LIB")"
+          printf '%s\n' "$INCDIR" > occt_include_dir.txt
+          printf '%s\n' "$LIBDIR" > occt_library_dir.txt
+          echo "include=$INCDIR"
+          echo "lib=$LIBDIR"
+
+      - name: Build generic exact BREP-to-STEP helper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          INCDIR="$(cat occt_include_dir.txt)"
+          LIBDIR="$(cat occt_library_dir.txt)"
+          cat > exact_brep_to_step.cpp <<'CPP'
+          #include <BRepAlgoAPI_Cut.hxx>
+          #include <BRep_Builder.hxx>
+          #include <BRepCheck_Analyzer.hxx>
+          #include <BRepGProp.hxx>
+          #include <BRepTools.hxx>
+          #include <GProp_GProps.hxx>
+          #include <IFSelect_ReturnStatus.hxx>
+          #include <Interface_Static.hxx>
+          #include <STEPControl_Controller.hxx>
+          #include <STEPControl_Reader.hxx>
+          #include <STEPControl_Writer.hxx>
+          #include <TopAbs_ShapeEnum.hxx>
+          #include <TopExp_Explorer.hxx>
+          #include <TopoDS_Shape.hxx>
+          #include <cmath>
+          #include <fstream>
+          #include <iomanip>
+          #include <iostream>
+          #include <string>
+
+          static int count(const TopoDS_Shape& s, TopAbs_ShapeEnum kind) {
+            int n = 0; for (TopExp_Explorer ex(s, kind); ex.More(); ex.Next()) ++n; return n;
+          }
+          static double volume(const TopoDS_Shape& s) { GProp_GProps p; BRepGProp::VolumeProperties(s,p); return p.Mass(); }
+          static double area(const TopoDS_Shape& s) { GProp_GProps p; BRepGProp::SurfaceProperties(s,p); return p.Mass(); }
+
+          int main(int argc, char** argv) {
+            if (argc != 4) { std::cerr << "usage: exact_brep_to_step input.brep output.step report.json\n"; return 2; }
+            BRep_Builder builder; TopoDS_Shape source;
+            std::ifstream in(argv[1]); if (!BRepTools::Read(source,in,builder)) return 10;
+            STEPControl_Controller::Init();
+            Interface_Static::SetIVal("write.surfacecurve.mode",0);
+            Interface_Static::SetIVal("write.step.surfacecurve.mode",0);
+            const bool sv=BRepCheck_Analyzer(source).IsValid(); const double v0=volume(source), a0=area(source);
+            STEPControl_Writer writer; const auto ts=writer.Transfer(source,STEPControl_ManifoldSolidBrep); const auto ws=writer.Write(argv[2]);
+            STEPControl_Reader reader; const auto rs=reader.ReadFile(argv[2]); if(rs!=IFSelect_RetDone) return 11; reader.TransferRoots(); TopoDS_Shape rt=reader.OneShape();
+            const bool rv=BRepCheck_Analyzer(rt).IsValid(); const double v1=volume(rt), a1=area(rt);
+            BRepAlgoAPI_Cut ab(source,rt); ab.Build(); BRepAlgoAPI_Cut ba(rt,source); ba.Build();
+            const double rab=ab.IsDone()?volume(ab.Shape()):-1.0; const double rba=ba.IsDone()?volume(ba.Shape()):-1.0;
+            std::ifstream sf(argv[2]); std::string st((std::istreambuf_iterator<char>(sf)),{}); std::size_t oc=0,p=0; while((p=st.find("OFFSET_CURVE_3D",p))!=std::string::npos){++oc;p+=15;}
+            const bool pass=sv&&rv&&count(source,TopAbs_SOLID)==1&&count(source,TopAbs_SHELL)==1&&count(rt,TopAbs_SOLID)==1&&count(rt,TopAbs_SHELL)==1&&count(source,TopAbs_FACE)==count(rt,TopAbs_FACE)&&std::abs(v1-v0)<=1e-8&&std::abs(a1-a0)<=1e-8&&ab.IsDone()&&ba.IsDone()&&std::abs(rab)<=1e-8&&std::abs(rba)<=1e-8&&oc>0;
+            std::ofstream out(argv[3]); out<<std::setprecision(17)<<"{\n"
+              <<"  \"source_valid\": "<<(sv?"true":"false")<<",\n  \"source_solids\": "<<count(source,TopAbs_SOLID)<<",\n  \"source_shells\": "<<count(source,TopAbs_SHELL)<<",\n  \"source_faces\": "<<count(source,TopAbs_FACE)<<",\n  \"source_volume\": "<<v0<<",\n  \"source_area\": "<<a0<<",\n"
+              <<"  \"transfer_status\": "<<(int)ts<<",\n  \"write_status\": "<<(int)ws<<",\n  \"read_status\": "<<(int)rs<<",\n  \"roundtrip_valid\": "<<(rv?"true":"false")<<",\n  \"roundtrip_solids\": "<<count(rt,TopAbs_SOLID)<<",\n  \"roundtrip_shells\": "<<count(rt,TopAbs_SHELL)<<",\n  \"roundtrip_faces\": "<<count(rt,TopAbs_FACE)<<",\n  \"roundtrip_volume\": "<<v1<<",\n  \"roundtrip_area\": "<<a1<<",\n  \"volume_delta\": "<<std::abs(v1-v0)<<",\n  \"area_delta\": "<<std::abs(a1-a0)<<",\n  \"source_minus_roundtrip\": "<<rab<<",\n  \"roundtrip_minus_source\": "<<rba<<",\n  \"offset_curve_3d_entities\": "<<oc<<",\n  \"exact_roundtrip_pass\": "<<(pass?"true":"false")<<"\n}\n";
+            std::cout<<std::ifstream(argv[3]).rdbuf(); return pass?0:12;
+          }
+          CPP
+          c++ -std=c++17 -O2 exact_brep_to_step.cpp -o exact_brep_to_step -I"$INCDIR" -L"$LIBDIR" -Wl,-rpath,"$LIBDIR" \
+            -lTKDESTEP -lTKDE -lTKXSBase -lTKShHealing -lTKBO -lTKBool -lTKTopAlgo -lTKBRep -lTKGeomAlgo -lTKGeomBase -lTKG3d -lTKG2d -lTKMath -lTKernel
+          LD_LIBRARY_PATH="$LIBDIR" ./exact_brep_to_step input/exact_offset_prism.brep results/exact_offset_prism.step results/result.json
+
+      - name: Package helper and patched libraries
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/bin artifact/lib artifact/evidence artifact/smoke
+          cp exact_brep_to_step artifact/bin/ 2>/dev/null || true
+          if test -f occt_library_dir.txt; then LIBDIR="$(cat occt_library_dir.txt)"; cp -a "$LIBDIR"/*.so* artifact/lib/ || true; fi
+          cp results/result.json results/exact_offset_prism.step artifact/smoke/ 2>/dev/null || true
+          cp results/occt793_offsetcurve_writer.patch artifact/evidence/
+          git -C occt rev-parse HEAD > artifact/evidence/OCCT_COMMIT.txt
+          printf '%s\n' V7_9_3 > artifact/evidence/OCCT_TAG.txt
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/evidence/SHA256SUMS.txt
+          tar -C artifact -czf occt793-patched-exact-step-helper.tar.gz .
+          sha256sum occt793-patched-exact-step-helper.tar.gz > occt793-patched-exact-step-helper.tar.gz.sha256
+
+      - name: Upload exact helper
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: occt793-patched-exact-step-helper
+          path: |
+            occt793-patched-exact-step-helper.tar.gz
+            occt793-patched-exact-step-helper.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
