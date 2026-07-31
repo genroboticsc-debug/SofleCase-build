@@ -1,0 +1,40 @@
+name: Temporary Dilemma pinned 3x5_2 canonical STL recovery
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  recover-pinned-stls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out pinned upstream source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout --detach f5cffb4821fe560b095418b71382ac7d8043c61a
+          test "$(git rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+      - name: Collect exact canonical meshes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact
+          cp 'upstream/mechanical/cases/3x5_2/tenting_puck/tenting_puck_v3_26.stl' 'artifact/P009__tenting_puck_v3_26.stl'
+          cp 'upstream/mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Integrated Tenting Puck.STL' 'artifact/P010__Dilemma_Case_Integrated_Tenting_Puck.STL'
+          cp 'upstream/mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Tenting Puck Opening.STL' 'artifact/P011__Dilemma_Case_Tenting_Puck_Opening.STL'
+          cp 'upstream/mechanical/cases/3x5_2/thin/thin_v1_26.stl' 'artifact/P012__thin_v1_26.stl'
+          printf '%s\n' f5cffb4821fe560b095418b71382ac7d8043c61a > artifact/upstream_commit.txt
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/SHA256SUMS.txt
+      - name: Upload exact pinned STL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-3x5-2-canonical-stls-20260731
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 7
