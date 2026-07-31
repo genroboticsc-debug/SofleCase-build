@@ -10,14 +10,17 @@ permissions:
 jobs:
   build-helper:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Fetch official OCCT 8.0.0 tag
         shell: bash
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build cmake g++ git
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ninja-build cmake g++ git \
+            libfreetype-dev tcl-dev tk-dev \
+            libx11-dev libxmu-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev
           git init occt
           git -C occt remote add origin https://github.com/Open-Cascade-SAS/OCCT.git
           git -C occt fetch --depth 1 origin refs/tags/V8_0_0:refs/tags/V8_0_0
@@ -33,8 +36,8 @@ jobs:
             -DBUILD_MODULE_Visualization=OFF \
             -DBUILD_MODULE_Draw=OFF \
             -DBUILD_MODULE_ApplicationFramework=OFF \
-            -DUSE_FREETYPE=OFF -DUSE_TCL=OFF -DUSE_TK=OFF
-          cmake --build occt-build --parallel 4
+            -DUSE_FREETYPE=ON -DUSE_TCL=OFF -DUSE_TK=OFF
+          cmake --build occt-build --parallel 3
           cmake --install occt-build
       - name: Build deterministic BREP-to-STEP helper
         shell: bash
@@ -52,16 +55,16 @@ jobs:
           #include <IFSelect_ReturnStatus.hxx>
           #include <BRepGProp.hxx>
           #include <GProp_GProps.hxx>
-          #include <Bnd_Box.hxx>
-          #include <BRepBndLib.hxx>
           #include <fstream>
           #include <iomanip>
           #include <iostream>
           static int count(const TopoDS_Shape& s, TopAbs_ShapeEnum k){int n=0;for(TopExp_Explorer e(s,k);e.More();e.Next())++n;return n;}
           static void props(const TopoDS_Shape& s,double& v,double& a){GProp_GProps pv,pa;BRepGProp::VolumeProperties(s,pv);BRepGProp::SurfaceProperties(s,pa);v=pv.Mass();a=pa.Mass();}
           int main(int argc,char**argv){
-            if(argc!=4)return 2; BRep_Builder b;TopoDS_Shape s;std::ifstream in(argv[1]);if(!in||!BRepTools::Read(s,in,b))return 10;
-            double sv,sa;props(s,sv,sa);STEPControl_Writer w;auto ts=w.Transfer(s,STEPControl_ManifoldSolidBrep);auto ws=w.Write(argv[2]);if(ws!=IFSelect_RetDone)return 11;
+            if(argc!=4)return 2;
+            BRep_Builder b;TopoDS_Shape s;std::ifstream in(argv[1]);if(!in||!BRepTools::Read(s,in,b))return 10;
+            double sv,sa;props(s,sv,sa);
+            STEPControl_Writer w;auto ts=w.Transfer(s,STEPControl_ManifoldSolidBrep);auto ws=w.Write(argv[2]);if(ws!=IFSelect_RetDone)return 11;
             STEPControl_Reader r;if(r.ReadFile(argv[2])!=IFSelect_RetDone)return 12;r.TransferRoots();TopoDS_Shape q=r.OneShape();double rv,ra;props(q,rv,ra);
             std::ofstream o(argv[3]);o<<std::setprecision(17)<<"{\n  \"occt_tag\": \"V8_0_0\",\n  \"source_valid\": "<<(BRepCheck_Analyzer(s).IsValid()?"true":"false")<<",\n  \"source_solids\": "<<count(s,TopAbs_SOLID)<<",\n  \"source_shells\": "<<count(s,TopAbs_SHELL)<<",\n  \"source_faces\": "<<count(s,TopAbs_FACE)<<",\n  \"source_volume\": "<<sv<<",\n  \"source_area\": "<<sa<<",\n  \"transfer_status\": "<<(int)ts<<",\n  \"write_status\": "<<(int)ws<<",\n  \"roundtrip_valid\": "<<(BRepCheck_Analyzer(q).IsValid()?"true":"false")<<",\n  \"roundtrip_solids\": "<<count(q,TopAbs_SOLID)<<",\n  \"roundtrip_shells\": "<<count(q,TopAbs_SHELL)<<",\n  \"roundtrip_faces\": "<<count(q,TopAbs_FACE)<<",\n  \"roundtrip_volume\": "<<rv<<",\n  \"roundtrip_area\": "<<ra<<",\n  \"volume_delta\": "<<(rv-sv)<<",\n  \"area_delta\": "<<(ra-sa)<<"\n}\n";return 0;}
           CPP
