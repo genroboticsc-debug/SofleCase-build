@@ -1,0 +1,51 @@
+name: Dilemma upstream CAD relay
+
+on:
+  push:
+    branches:
+      - runtime-relay-p308
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout upstream Dilemma with history and LFS
+        uses: actions/checkout@v4
+        with:
+          repository: Bastardkb/Dilemma
+          ref: main
+          path: upstream
+          fetch-depth: 0
+          lfs: true
+
+      - name: Inventory exact MAX case assets and history
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p relay/history
+          git -C upstream lfs pull
+          git -C upstream log --all --name-status --follow -- 'mechanical/cases/4x6_4' > relay/history/4x6_4_history.txt || true
+          git -C upstream log --all --name-status --follow -- 'mechanical/cases/4x6_4_hotswap' > relay/history/4x6_4_hotswap_history.txt || true
+          git -C upstream log --all --format='%H %cI %s' > relay/history/all_commits.txt
+          find upstream/mechanical/cases/4x6_4 upstream/mechanical/cases/4x6_4_hotswap -type f -print0 | sort -z | xargs -0 sha256sum > relay/SHA256SUMS.txt
+          cp -a upstream/mechanical/cases/4x6_4 relay/
+          cp -a upstream/mechanical/cases/4x6_4_hotswap relay/
+          find relay -type f -printf '%P\t%s bytes\n' | sort > relay/INVENTORY.txt
+          cat relay/INVENTORY.txt
+
+      - name: Upload upstream exact CAD assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-upstream-4x6_4-cad-history
+          path: relay
+          compression-level: 6
+          if-no-files-found: error
+          retention-days: 3
