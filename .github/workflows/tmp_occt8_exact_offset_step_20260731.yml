@@ -17,7 +17,8 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build cmake g++ git
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake g++ git libx11-dev libxmu-dev libxi-dev
           git clone --depth 1 --branch V8_0_0 https://github.com/Open-Cascade-SAS/OCCT.git occt
           test "$(git -C occt describe --tags --exact-match)" = "V8_0_0"
           cmake -S occt -B occt-build -G Ninja \
@@ -48,8 +49,6 @@ jobs:
           #include <IFSelect_ReturnStatus.hxx>
           #include <BRepGProp.hxx>
           #include <GProp_GProps.hxx>
-          #include <Bnd_Box.hxx>
-          #include <BRepBndLib.hxx>
           #include <fstream>
           #include <iomanip>
           #include <iostream>
@@ -64,10 +63,8 @@ jobs:
             GProp_GProps v, a;
             BRepGProp::VolumeProperties(s, v);
             BRepGProp::SurfaceProperties(s, a);
-            volume = v.Mass(); area = a.Mass();
-          }
-          static void bbox(const TopoDS_Shape& s, double out[6]) {
-            Bnd_Box b; BRepBndLib::Add(s, b, false); b.Get(out[0],out[1],out[2],out[3],out[4],out[5]);
+            volume = v.Mass();
+            area = a.Mass();
           }
           int main(int argc, char** argv) {
             if (argc != 4) {
@@ -75,11 +72,13 @@ jobs:
               return 2;
             }
             const std::string input = argv[1], output = argv[2], report = argv[3];
-            BRep_Builder builder; TopoDS_Shape source;
+            BRep_Builder builder;
+            TopoDS_Shape source;
             std::ifstream in(input);
             if (!in || !BRepTools::Read(source, in, builder)) return 10;
             BRepCheck_Analyzer sourceCheck(source);
-            double sv=0, sa=0, sb[6]; props(source,sv,sa); bbox(source,sb);
+            double sv = 0.0, sa = 0.0;
+            props(source, sv, sa);
 
             STEPControl_Writer writer;
             const auto ts = writer.Transfer(source, STEPControl_ManifoldSolidBrep);
@@ -92,31 +91,31 @@ jobs:
             reader.TransferRoots();
             TopoDS_Shape roundtrip = reader.OneShape();
             BRepCheck_Analyzer roundCheck(roundtrip);
-            double rv=0, ra=0, rb[6]; props(roundtrip,rv,ra); bbox(roundtrip,rb);
+            double rv = 0.0, ra = 0.0;
+            props(roundtrip, rv, ra);
 
             std::ofstream out(report);
             out << std::setprecision(17)
                 << "{\n"
                 << "  \"occt_tag\": \"V8_0_0\",\n"
-                << "  \"source_valid\": " << (sourceCheck.IsValid()?"true":"false") << ",\n"
-                << "  \"source_solids\": " << count(source,TopAbs_SOLID) << ",\n"
-                << "  \"source_shells\": " << count(source,TopAbs_SHELL) << ",\n"
-                << "  \"source_faces\": " << count(source,TopAbs_FACE) << ",\n"
+                << "  \"source_valid\": " << (sourceCheck.IsValid() ? "true" : "false") << ",\n"
+                << "  \"source_solids\": " << count(source, TopAbs_SOLID) << ",\n"
+                << "  \"source_shells\": " << count(source, TopAbs_SHELL) << ",\n"
+                << "  \"source_faces\": " << count(source, TopAbs_FACE) << ",\n"
                 << "  \"source_volume\": " << sv << ",\n"
                 << "  \"source_area\": " << sa << ",\n"
-                << "  \"source_bbox\": [" << sb[0] << ',' << sb[1] << ',' << sb[2] << ',' << sb[3] << ',' << sb[4] << ',' << sb[5] << "],\n"
                 << "  \"transfer_status\": " << static_cast<int>(ts) << ",\n"
                 << "  \"write_status\": " << static_cast<int>(ws) << ",\n"
-                << "  \"roundtrip_valid\": " << (roundCheck.IsValid()?"true":"false") << ",\n"
-                << "  \"roundtrip_solids\": " << count(roundtrip,TopAbs_SOLID) << ",\n"
-                << "  \"roundtrip_shells\": " << count(roundtrip,TopAbs_SHELL) << ",\n"
-                << "  \"roundtrip_faces\": " << count(roundtrip,TopAbs_FACE) << ",\n"
+                << "  \"roundtrip_valid\": " << (roundCheck.IsValid() ? "true" : "false") << ",\n"
+                << "  \"roundtrip_solids\": " << count(roundtrip, TopAbs_SOLID) << ",\n"
+                << "  \"roundtrip_shells\": " << count(roundtrip, TopAbs_SHELL) << ",\n"
+                << "  \"roundtrip_faces\": " << count(roundtrip, TopAbs_FACE) << ",\n"
                 << "  \"roundtrip_volume\": " << rv << ",\n"
                 << "  \"roundtrip_area\": " << ra << ",\n"
-                << "  \"roundtrip_bbox\": [" << rb[0] << ',' << rb[1] << ',' << rb[2] << ',' << rb[3] << ',' << rb[4] << ',' << rb[5] << "],\n"
-                << "  \"volume_delta\": " << (rv-sv) << ",\n"
-                << "  \"area_delta\": " << (ra-sa) << "\n"
+                << "  \"volume_delta\": " << (rv - sv) << ",\n"
+                << "  \"area_delta\": " << (ra - sa) << "\n"
                 << "}\n";
+            out.close();
             std::cout << std::ifstream(report).rdbuf();
             return 0;
           }
