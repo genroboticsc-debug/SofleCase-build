@@ -1,0 +1,68 @@
+name: Dilemma historical CAD relay
+
+on:
+  push:
+    branches:
+      - runtime-relay-p308
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout full upstream history
+        uses: actions/checkout@v4
+        with:
+          repository: Bastardkb/Dilemma
+          ref: main
+          path: upstream
+          fetch-depth: 0
+          lfs: true
+
+      - name: Export exact historical CAD blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p relay/P025 relay/P029
+          export_blob() {
+            local commit="$1" path="$2" output="$3"
+            git -C upstream show "${commit}:${path}" | git -C upstream lfs smudge > "$output"
+          }
+
+          export_blob 497edaf5dbe083b964ded8d5ced169a8eda95bed mechanical/cases/4x6_4/top.stl relay/P025/2023-08-23_initial_top.stl
+          export_blob 3dbd0fc6d59d5f2d3f1401f10325593e831a8cf0 mechanical/cases/4x6_4/top.3mf relay/P025/2023-08-30_top.3mf
+          export_blob 3d50241d6600f8db21700d18204d945fe37980b2 mechanical/cases/4x6_4/top.3mf relay/P025/2023-09-14_led_update_top.3mf
+          export_blob 43692c3ca228ba502cf28f32edee908be5dd2a5a mechanical/cases/4x6_4/top.stl relay/P025/2024-09-27_current_top.stl
+
+          export_blob 2fe79c47b6870790165a1583c90bcb0ec1a246c3 mechanical/cases/4x6_4_hotswap/mid.stl relay/P029/2025-09-29_initial_mid.stl
+          export_blob 78f98649839acc89e80e5bb155366a659da3dbed mechanical/cases/4x6_4_hotswap/mid.stl relay/P029/2026-03-03_current_mid.stl
+
+          find relay -type f -print0 | sort -z | xargs -0 sha256sum > relay/SHA256SUMS.txt
+          find relay -type f -printf '%P\t%s bytes\n' | sort > relay/INVENTORY.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, zipfile
+          rows=[]
+          for p in sorted(Path('relay').rglob('*')):
+              if p.is_file() and p.suffix.lower()=='.3mf':
+                  with zipfile.ZipFile(p) as z:
+                      rows.append({'file':str(p),'members':[{'name':i.filename,'size':i.file_size} for i in z.infolist()]})
+          Path('relay/THREEMF_MEMBERS.json').write_text(json.dumps(rows,indent=2)+'\n')
+          PY
+          cat relay/INVENTORY.txt
+
+      - name: Upload exact historical assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-historical-p025-p029-assets
+          path: relay
+          compression-level: 6
+          if-no-files-found: error
+          retention-days: 3
