@@ -10,16 +10,18 @@ permissions:
 jobs:
   build-pinned-export-helper:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - name: Build OCCT 8.0.0 data-exchange runtime
+      - name: Fetch and build official OCCT 8.0.0
         shell: bash
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build cmake g++ git libx11-dev libxmu-dev libxi-dev
-          git clone --depth 1 --branch V8_0_0 https://github.com/Open-Cascade-SAS/OCCT.git occt
+          sudo apt-get install -y --no-install-recommends ninja-build cmake g++ git
+          git init occt
+          git -C occt remote add origin https://github.com/Open-Cascade-SAS/OCCT.git
+          git -C occt fetch --depth 1 origin refs/tags/V8_0_0:refs/tags/V8_0_0
+          git -C occt checkout --detach refs/tags/V8_0_0
           test "$(git -C occt describe --tags --exact-match)" = "V8_0_0"
           cmake -S occt -B occt-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -27,9 +29,7 @@ jobs:
             -DBUILD_MODULE_Visualization=OFF \
             -DBUILD_MODULE_Draw=OFF \
             -DBUILD_MODULE_ApplicationFramework=OFF \
-            -DUSE_FREETYPE=OFF \
-            -DUSE_TCL=OFF \
-            -DUSE_TK=OFF
+            -DUSE_FREETYPE=OFF -DUSE_TCL=OFF -DUSE_TK=OFF
           cmake --build occt-build --parallel 4
           cmake --install occt-build
 
@@ -41,83 +41,106 @@ jobs:
           #include <BRep_Builder.hxx>
           #include <BRepTools.hxx>
           #include <BRepCheck_Analyzer.hxx>
-          #include <TopExp_Explorer.hxx>
-          #include <TopAbs_ShapeEnum.hxx>
-          #include <TopoDS_Shape.hxx>
-          #include <STEPControl_Writer.hxx>
-          #include <STEPControl_Reader.hxx>
-          #include <IFSelect_ReturnStatus.hxx>
           #include <BRepGProp.hxx>
           #include <GProp_GProps.hxx>
+          #include <IFSelect_ReturnStatus.hxx>
+          #include <Message_ProgressRange.hxx>
+          #include <STEPControl_Reader.hxx>
+          #include <STEPControl_Writer.hxx>
+          #include <TopAbs_ShapeEnum.hxx>
+          #include <TopExp_Explorer.hxx>
+          #include <TopoDS_Shape.hxx>
+          #include <cmath>
           #include <fstream>
           #include <iomanip>
           #include <iostream>
           #include <string>
 
-          static int count(const TopoDS_Shape& s, TopAbs_ShapeEnum kind) {
+          static int count(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
             int n = 0;
-            for (TopExp_Explorer ex(s, kind); ex.More(); ex.Next()) ++n;
+            for (TopExp_Explorer ex(shape, kind); ex.More(); ex.Next()) ++n;
             return n;
           }
-          static void props(const TopoDS_Shape& s, double& volume, double& area) {
-            GProp_GProps v, a;
-            BRepGProp::VolumeProperties(s, v);
-            BRepGProp::SurfaceProperties(s, a);
-            volume = v.Mass();
-            area = a.Mass();
+
+          static void properties(const TopoDS_Shape& shape, double& volume, double& area) {
+            GProp_GProps vp, ap;
+            BRepGProp::VolumeProperties(shape, vp);
+            BRepGProp::SurfaceProperties(shape, ap);
+            volume = vp.Mass();
+            area = ap.Mass();
           }
+
           int main(int argc, char** argv) {
             if (argc != 4) {
               std::cerr << "usage: occt8_brep_to_step input.brep output.step report.json\n";
               return 2;
             }
-            const std::string input = argv[1], output = argv[2], report = argv[3];
+            const std::string input = argv[1];
+            const std::string output = argv[2];
+            const std::string report = argv[3];
+
             BRep_Builder builder;
             TopoDS_Shape source;
-            std::ifstream in(input);
-            if (!in || !BRepTools::Read(source, in, builder)) return 10;
-            BRepCheck_Analyzer sourceCheck(source);
-            double sv = 0.0, sa = 0.0;
-            props(source, sv, sa);
+            std::ifstream in(input, std::ios::in);
+            if (!in) return 10;
+            BRepTools::Read(source, in, builder, Message_ProgressRange());
+            if (source.IsNull()) return 10;
+
+            const bool sourceValid = BRepCheck_Analyzer(source).IsValid();
+            double sourceVolume = 0.0, sourceArea = 0.0;
+            properties(source, sourceVolume, sourceArea);
 
             STEPControl_Writer writer;
-            const auto ts = writer.Transfer(source, STEPControl_ManifoldSolidBrep);
-            const auto ws = writer.Write(output.c_str());
-            if (ws != IFSelect_RetDone) return 11;
+            const auto transferStatus = writer.Transfer(source, STEPControl_ManifoldSolidBrep);
+            const auto writeStatus = writer.Write(output.c_str());
+            if (writeStatus != IFSelect_RetDone) return 11;
 
             STEPControl_Reader reader;
-            const auto rs = reader.ReadFile(output.c_str());
-            if (rs != IFSelect_RetDone) return 12;
+            if (reader.ReadFile(output.c_str()) != IFSelect_RetDone) return 12;
             reader.TransferRoots();
             TopoDS_Shape roundtrip = reader.OneShape();
-            BRepCheck_Analyzer roundCheck(roundtrip);
-            double rv = 0.0, ra = 0.0;
-            props(roundtrip, rv, ra);
+            if (roundtrip.IsNull()) return 13;
+
+            const bool roundtripValid = BRepCheck_Analyzer(roundtrip).IsValid();
+            double roundtripVolume = 0.0, roundtripArea = 0.0;
+            properties(roundtrip, roundtripVolume, roundtripArea);
+
+            const int sourceSolids = count(source, TopAbs_SOLID);
+            const int sourceShells = count(source, TopAbs_SHELL);
+            const int sourceFaces = count(source, TopAbs_FACE);
+            const int roundtripSolids = count(roundtrip, TopAbs_SOLID);
+            const int roundtripShells = count(roundtrip, TopAbs_SHELL);
+            const int roundtripFaces = count(roundtrip, TopAbs_FACE);
+            const bool topologyPass = sourceValid && roundtripValid
+              && sourceSolids == 1 && sourceShells == 1
+              && roundtripSolids == 1 && roundtripShells == 1
+              && sourceFaces == roundtripFaces;
 
             std::ofstream out(report);
             out << std::setprecision(17)
                 << "{\n"
                 << "  \"occt_tag\": \"V8_0_0\",\n"
-                << "  \"source_valid\": " << (sourceCheck.IsValid() ? "true" : "false") << ",\n"
-                << "  \"source_solids\": " << count(source, TopAbs_SOLID) << ",\n"
-                << "  \"source_shells\": " << count(source, TopAbs_SHELL) << ",\n"
-                << "  \"source_faces\": " << count(source, TopAbs_FACE) << ",\n"
-                << "  \"source_volume\": " << sv << ",\n"
-                << "  \"source_area\": " << sa << ",\n"
-                << "  \"transfer_status\": " << static_cast<int>(ts) << ",\n"
-                << "  \"write_status\": " << static_cast<int>(ws) << ",\n"
-                << "  \"roundtrip_valid\": " << (roundCheck.IsValid() ? "true" : "false") << ",\n"
-                << "  \"roundtrip_solids\": " << count(roundtrip, TopAbs_SOLID) << ",\n"
-                << "  \"roundtrip_shells\": " << count(roundtrip, TopAbs_SHELL) << ",\n"
-                << "  \"roundtrip_faces\": " << count(roundtrip, TopAbs_FACE) << ",\n"
-                << "  \"roundtrip_volume\": " << rv << ",\n"
-                << "  \"roundtrip_area\": " << ra << ",\n"
-                << "  \"volume_delta\": " << (rv - sv) << ",\n"
-                << "  \"area_delta\": " << (ra - sa) << "\n"
+                << "  \"source_valid\": " << (sourceValid ? "true" : "false") << ",\n"
+                << "  \"source_solids\": " << sourceSolids << ",\n"
+                << "  \"source_shells\": " << sourceShells << ",\n"
+                << "  \"source_faces\": " << sourceFaces << ",\n"
+                << "  \"source_volume\": " << sourceVolume << ",\n"
+                << "  \"source_area\": " << sourceArea << ",\n"
+                << "  \"transfer_status\": " << static_cast<int>(transferStatus) << ",\n"
+                << "  \"write_status\": " << static_cast<int>(writeStatus) << ",\n"
+                << "  \"roundtrip_valid\": " << (roundtripValid ? "true" : "false") << ",\n"
+                << "  \"roundtrip_solids\": " << roundtripSolids << ",\n"
+                << "  \"roundtrip_shells\": " << roundtripShells << ",\n"
+                << "  \"roundtrip_faces\": " << roundtripFaces << ",\n"
+                << "  \"roundtrip_volume\": " << roundtripVolume << ",\n"
+                << "  \"roundtrip_area\": " << roundtripArea << ",\n"
+                << "  \"volume_delta\": " << (roundtripVolume - sourceVolume) << ",\n"
+                << "  \"area_delta\": " << (roundtripArea - sourceArea) << ",\n"
+                << "  \"topology_pass\": " << (topologyPass ? "true" : "false") << "\n"
                 << "}\n";
             out.close();
             std::cout << std::ifstream(report).rdbuf();
-            return 0;
+            return topologyPass ? 0 : 14;
           }
           CPP
           c++ -std=c++17 -O2 occt8_brep_to_step.cpp -o occt8_brep_to_step \
@@ -127,16 +150,42 @@ jobs:
             -lTKDESTEP -lTKDE -lTKXSBase -lTKShHealing -lTKTopAlgo -lTKBRep \
             -lTKGeomAlgo -lTKGeomBase -lTKG3d -lTKG2d -lTKMath -lTKernel
 
-      - name: Package pinned helper and shared libraries
+      - name: Smoke-test exact offset-curve round trip
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p artifact/bin artifact/lib artifact/evidence
+          python3 -m pip install 'build123d==0.11.1'
+          mkdir -p smoke
+          python3 - <<'PY'
+          from build123d import Edge, Face, Solid, Vector, Wire
+          from OCP.BRepTools import BRepTools
+          edges = [
+              Edge.make_bezier(Vector(0,0), Vector(5,-4), Vector(15,-4), Vector(20,0)),
+              Edge.make_line(Vector(20,0), Vector(20,20)),
+              Edge.make_line(Vector(20,20), Vector(0,20)),
+              Edge.make_line(Vector(0,20), Vector(0,0)),
+          ]
+          offset = Wire(edges).offset_2d(2.0)
+          if isinstance(offset, list): offset = offset[0]
+          body = Solid.extrude(Face(offset), Vector(0,0,5))
+          assert body.is_valid and len(body.solids()) == 1
+          assert BRepTools.Write_s(body.wrapped, 'smoke/offset_prism.brep')
+          PY
+          mkdir -p smoke/results
+          LD_LIBRARY_PATH="$PWD/occt-install/lib" ./occt8_brep_to_step \
+            smoke/offset_prism.brep smoke/results/offset_prism.step smoke/results/report.json
+
+      - name: Package pinned helper and evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/bin artifact/lib artifact/evidence artifact/smoke
           cp occt8_brep_to_step artifact/bin/
           cp -a occt-install/lib/*.so* artifact/lib/
+          cp -a smoke/results/. artifact/smoke/
           printf '%s\n' V8_0_0 > artifact/evidence/OCCT_TAG.txt
           git -C occt rev-parse HEAD > artifact/evidence/OCCT_COMMIT.txt
-          sha256sum artifact/bin/occt8_brep_to_step artifact/lib/* > artifact/evidence/SHA256SUMS.txt
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/evidence/SHA256SUMS.txt
           tar -C artifact -czf occt8-pinned-brep-to-step-helper.tar.gz .
           sha256sum occt8-pinned-brep-to-step-helper.tar.gz > occt8-pinned-brep-to-step-helper.tar.gz.sha256
 
