@@ -1,0 +1,91 @@
+name: Temporary OCCT 8 tag-fetch BREP STEP helper
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  build-helper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Fetch official OCCT 8.0.0 tag
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build cmake g++ git
+          git init occt
+          git -C occt remote add origin https://github.com/Open-Cascade-SAS/OCCT.git
+          git -C occt fetch --depth 1 origin refs/tags/V8_0_0:refs/tags/V8_0_0
+          git -C occt checkout --detach refs/tags/V8_0_0
+          test "$(git -C occt describe --tags --exact-match)" = "V8_0_0"
+      - name: Build OCCT data exchange
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S occt -B occt-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/occt-install" \
+            -DBUILD_MODULE_Visualization=OFF \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_MODULE_ApplicationFramework=OFF \
+            -DUSE_FREETYPE=OFF -DUSE_TCL=OFF -DUSE_TK=OFF
+          cmake --build occt-build --parallel 4
+          cmake --install occt-build
+      - name: Build deterministic BREP-to-STEP helper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > helper.cpp <<'CPP'
+          #include <BRep_Builder.hxx>
+          #include <BRepTools.hxx>
+          #include <BRepCheck_Analyzer.hxx>
+          #include <TopExp_Explorer.hxx>
+          #include <TopAbs_ShapeEnum.hxx>
+          #include <TopoDS_Shape.hxx>
+          #include <STEPControl_Writer.hxx>
+          #include <STEPControl_Reader.hxx>
+          #include <IFSelect_ReturnStatus.hxx>
+          #include <BRepGProp.hxx>
+          #include <GProp_GProps.hxx>
+          #include <Bnd_Box.hxx>
+          #include <BRepBndLib.hxx>
+          #include <fstream>
+          #include <iomanip>
+          #include <iostream>
+          static int count(const TopoDS_Shape& s, TopAbs_ShapeEnum k){int n=0;for(TopExp_Explorer e(s,k);e.More();e.Next())++n;return n;}
+          static void props(const TopoDS_Shape& s,double& v,double& a){GProp_GProps pv,pa;BRepGProp::VolumeProperties(s,pv);BRepGProp::SurfaceProperties(s,pa);v=pv.Mass();a=pa.Mass();}
+          int main(int argc,char**argv){
+            if(argc!=4)return 2; BRep_Builder b;TopoDS_Shape s;std::ifstream in(argv[1]);if(!in||!BRepTools::Read(s,in,b))return 10;
+            double sv,sa;props(s,sv,sa);STEPControl_Writer w;auto ts=w.Transfer(s,STEPControl_ManifoldSolidBrep);auto ws=w.Write(argv[2]);if(ws!=IFSelect_RetDone)return 11;
+            STEPControl_Reader r;if(r.ReadFile(argv[2])!=IFSelect_RetDone)return 12;r.TransferRoots();TopoDS_Shape q=r.OneShape();double rv,ra;props(q,rv,ra);
+            std::ofstream o(argv[3]);o<<std::setprecision(17)<<"{\n  \"occt_tag\": \"V8_0_0\",\n  \"source_valid\": "<<(BRepCheck_Analyzer(s).IsValid()?"true":"false")<<",\n  \"source_solids\": "<<count(s,TopAbs_SOLID)<<",\n  \"source_shells\": "<<count(s,TopAbs_SHELL)<<",\n  \"source_faces\": "<<count(s,TopAbs_FACE)<<",\n  \"source_volume\": "<<sv<<",\n  \"source_area\": "<<sa<<",\n  \"transfer_status\": "<<(int)ts<<",\n  \"write_status\": "<<(int)ws<<",\n  \"roundtrip_valid\": "<<(BRepCheck_Analyzer(q).IsValid()?"true":"false")<<",\n  \"roundtrip_solids\": "<<count(q,TopAbs_SOLID)<<",\n  \"roundtrip_shells\": "<<count(q,TopAbs_SHELL)<<",\n  \"roundtrip_faces\": "<<count(q,TopAbs_FACE)<<",\n  \"roundtrip_volume\": "<<rv<<",\n  \"roundtrip_area\": "<<ra<<",\n  \"volume_delta\": "<<(rv-sv)<<",\n  \"area_delta\": "<<(ra-sa)<<"\n}\n";return 0;}
+          CPP
+          c++ -std=c++17 -O2 helper.cpp -o occt8_brep_to_step \
+            -I"$PWD/occt-install/include/opencascade" -L"$PWD/occt-install/lib" \
+            -Wl,-rpath,'$ORIGIN/../lib' -lTKDESTEP -lTKDE -lTKXSBase -lTKShHealing \
+            -lTKTopAlgo -lTKBRep -lTKGeomAlgo -lTKGeomBase -lTKG3d -lTKG2d -lTKMath -lTKernel
+      - name: Package helper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/bin artifact/lib artifact/evidence
+          cp occt8_brep_to_step artifact/bin/
+          cp -a occt-install/lib/*.so* artifact/lib/
+          git -C occt rev-parse HEAD > artifact/evidence/OCCT_COMMIT.txt
+          printf '%s\n' V8_0_0 > artifact/evidence/OCCT_TAG.txt
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/evidence/SHA256SUMS.txt
+          tar -C artifact -czf occt8-tagfetch-brep-step-helper.tar.gz .
+          sha256sum occt8-tagfetch-brep-step-helper.tar.gz > occt8-tagfetch-brep-step-helper.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: occt8-tagfetch-brep-step-helper
+          path: |
+            occt8-tagfetch-brep-step-helper.tar.gz
+            occt8-tagfetch-brep-step-helper.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
