@@ -1,0 +1,1 @@
+Temporary trigger for pinned KiCad Edge.Cuts centerline export.
