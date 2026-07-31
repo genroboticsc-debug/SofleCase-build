@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-pinned-export-helper:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Fetch and build official OCCT 8.0.0
         shell: bash
@@ -30,7 +30,7 @@ jobs:
             -DBUILD_MODULE_Draw=OFF \
             -DBUILD_MODULE_ApplicationFramework=OFF \
             -DUSE_FREETYPE=OFF -DUSE_TCL=OFF -DUSE_TK=OFF
-          cmake --build occt-build --parallel 4
+          cmake --build occt-build --parallel 1
           cmake --install occt-build
 
       - name: Build deterministic topology-only BREP-to-STEP CLI
