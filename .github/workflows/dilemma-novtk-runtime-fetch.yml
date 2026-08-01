@@ -1,0 +1,38 @@
+name: Dilemma no-VTK runtime fetch
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-runtime-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact P311 OCP runtime wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse \
+            cadquery-ocp-novtk==7.9.3.1.1 \
+            cadquery-ocp-proxy==7.9.3.1.1
+          cd wheelhouse
+          sha256sum *.whl | sort > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Upload exact no-VTK runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-p311-novtk-runtime-cp313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
