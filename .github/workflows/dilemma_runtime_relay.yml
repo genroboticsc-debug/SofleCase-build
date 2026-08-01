@@ -1,0 +1,31 @@
+name: Dilemma runtime relay
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download pinned wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p wheelhouse
+          python -m pip download --no-deps --only-binary=:all: --dest wheelhouse \
+            build123d==0.11.1 \
+            manifold3d==3.5.2
+          (cd wheelhouse && sha256sum *.whl > SHA256SUMS.txt)
+          cat wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-runtime-relay
+          path: wheelhouse/
+          retention-days: 1
