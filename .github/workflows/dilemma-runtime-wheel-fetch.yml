@@ -5,6 +5,10 @@ on:
     branches: [master]
     paths:
       - .github/workflows/dilemma-runtime-wheel-fetch.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-runtime-trigger.txt
 
 permissions:
   contents: read
