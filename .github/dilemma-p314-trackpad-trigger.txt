@@ -1,1 +1,2 @@
 Trigger verified upstream 35 mm trackpad source retrieval for P314.
+Revision 2: retrieve authored source assets, not STL contour fitting.
