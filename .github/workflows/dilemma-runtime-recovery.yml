@@ -1,0 +1,57 @@
+name: Dilemma runtime recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/dilemma-runtime-recovery.yml'
+      - 'runtime-recovery/**'
+
+permissions:
+  contents: read
+
+jobs:
+  wheelhouse:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact CAD runtime wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --dest wheelhouse --only-binary=:all: \
+            build123d==0.11.1 \
+            manifold3d==3.5.2
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          rows = []
+          for path in sorted(Path('wheelhouse').glob('*.whl')):
+              rows.append({
+                  'name': path.name,
+                  'size': path.stat().st_size,
+                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+              })
+          Path('wheelhouse/SHA256SUMS.json').write_text(json.dumps(rows, indent=2) + '\n')
+          required = {
+              'build123d-0.11.1-py3-none-any.whl': '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10',
+              'manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl': 'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45',
+          }
+          by_name = {row['name']: row['sha256'] for row in rows}
+          for name, expected in required.items():
+              actual = by_name.get(name)
+              if actual != expected:
+                  raise SystemExit(f'hash mismatch or missing {name}: {actual} != {expected}')
+          print(json.dumps(rows, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-cad-runtime-cp313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
