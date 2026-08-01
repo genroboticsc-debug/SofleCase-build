@@ -1,0 +1,1 @@
+Trigger exact pinned tent STL retrieval for P036-P038 validation.
