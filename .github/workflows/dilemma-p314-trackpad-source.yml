@@ -1,0 +1,35 @@
+name: Dilemma P314 upstream trackpad source
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-p314-trackpad-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact upstream trackpad directory
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout main
+          test "$(sha256sum mechanical/trackpad/35mm/bottom2.stl | awk '{print $1}')" = "4519a8dd4853234d42329682c657039d99e89d03293d9e517b9586b1100195dd"
+          find mechanical/trackpad/35mm -maxdepth 3 -type f -print | sort
+          mkdir -p ../artifact
+          cp -a mechanical/trackpad/35mm ../artifact/
+          git rev-parse HEAD > ../artifact/UPSTREAM_COMMIT.txt
+          find ../artifact -type f -print0 | sort -z | xargs -0 sha256sum > ../artifact/SHA256SUMS.txt
+      - name: Upload verified source directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-p314-trackpad-35mm-source
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 1
