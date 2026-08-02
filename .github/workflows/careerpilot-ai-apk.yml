@@ -136,6 +136,23 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/CareerPilotAI.apk"
           sha256sum "$GITHUB_WORKSPACE/CareerPilotAI.apk" > "$GITHUB_WORKSPACE/CareerPilotAI.apk.sha256"
 
+      - name: Verify APK signature and package metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI.apk
+          } | tee CareerPilotAI.validation.txt | tee -a careerpilot-build.log
+
       - name: Upload compiler diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -153,5 +170,6 @@ jobs:
           path: |
             CareerPilotAI.apk
             CareerPilotAI.apk.sha256
+            CareerPilotAI.validation.txt
           if-no-files-found: error
           retention-days: 1
