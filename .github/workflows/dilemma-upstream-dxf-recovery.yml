@@ -12,14 +12,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Recover pinned upstream drawings
+      - name: Recover pinned upstream drawings and drills
         shell: bash
         run: |
           set -euxo pipefail
           git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
           git -C upstream checkout f5cffb4821fe560b095418b71382ac7d8043c61a
           mkdir -p artifact
-          find upstream -type f \( -iname '*Edge*Cuts*.dxf' -o -iname 'dilemma.kicad_pcb' \) -print0 | while IFS= read -r -d '' f; do
+          find upstream -type f \( -iname '*Edge*Cuts*.dxf' -o -iname 'dilemma.kicad_pcb' -o -iname '*.drl' -o -iname '*.xln' \) -print0 | while IFS= read -r -d '' f; do
             rel="${f#upstream/}"
             mkdir -p "artifact/$(dirname "$rel")"
             cp "$f" "artifact/$rel"
@@ -29,6 +29,6 @@ jobs:
           find artifact -type f -printf '%P\n' | sort
       - uses: actions/upload-artifact@v4
         with:
-          name: dilemma-pinned-upstream-dxf
+          name: dilemma-pinned-upstream-dxf-drills
           path: artifact
           retention-days: 1
