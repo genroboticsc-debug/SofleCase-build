@@ -79,20 +79,25 @@ jobs:
           from pathlib import Path
 
           path = Path("build-src/CareerPilotAI/app/build.gradle.kts")
-          text = path.read_text(encoding="utf-8")
-          old = '''    kotlinOptions {
-              jvmTarget = "17"
-          }
-          '''
-          new = '''    kotlin {
-              compilerOptions {
-                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-              }
-          }
-          '''
-          if old not in text:
-              raise SystemExit("Expected kotlinOptions block not found; refusing an approximate patch")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          expected = [
+              "    kotlinOptions {",
+              "        jvmTarget = \"17\"",
+              "    }",
+          ]
+          replacement = [
+              "    kotlin {",
+              "        compilerOptions {",
+              "            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)",
+              "        }",
+              "    }",
+          ]
+          matches = [i for i in range(len(lines) - 2) if lines[i:i + 3] == expected]
+          if matches != [38]:
+              raise SystemExit(f"Expected one exact kotlinOptions block at source lines 39-41; found {matches}")
+          index = matches[0]
+          lines[index:index + 3] = replacement
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           grep -n -A5 -B2 'compilerOptions' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
 
