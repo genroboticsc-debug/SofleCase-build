@@ -1,0 +1,36 @@
+name: P041 internal Arial validation asset
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/p041-font-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  extract-font:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Microsoft core Arial for internal geometry validation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cabextract curl fonttools
+          mkdir -p font-out
+          curl -fL --retry 5 --retry-delay 3 \
+            'https://sourceforge.net/projects/corefonts/files/the%20fonts/final/arial32.exe/download' \
+            -o arial32.exe
+          cabextract -d font-out arial32.exe
+          test -s font-out/Arial.TTF || test -s font-out/arial.ttf
+          find font-out -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > font-out/SHA256SUMS.txt
+          cat font-out/SHA256SUMS.txt
+      - name: Upload internal validation asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: p041-internal-arial-validation
+          path: font-out/
+          if-no-files-found: error
+          retention-days: 1
