@@ -1,0 +1,34 @@
+name: Dilemma Gmsh recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/dilemma-gmsh-recovery.yml'
+      - 'runtime-recovery/GMSH_TRIGGER'
+
+permissions:
+  contents: read
+
+jobs:
+  gmsh:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download stable Gmsh wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p wheelhouse
+          python -m pip download --dest wheelhouse --only-binary=:all: gmsh==4.15.2
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS.txt
+          cat wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-gmsh-4.15.2
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
