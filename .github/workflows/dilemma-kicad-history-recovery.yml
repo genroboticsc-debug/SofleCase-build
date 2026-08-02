@@ -1,0 +1,36 @@
+name: Dilemma KiCad history recovery
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover historical board revisions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/Bastardkb/Dilemma.git upstream
+          mkdir -p artifact
+          for path in 3x5_2/dilemma.kicad_pcb 3x5_3/dilemma.kicad_pcb 3x5_3_procyon/dilemma.kicad_pcb 4x6_4/dilemma.kicad_pcb; do
+            mkdir -p "artifact/$path.history"
+            git -C upstream log --all --format='%H' -- "$path" | while read -r sha; do
+              if git -C upstream cat-file -e "$sha:$path" 2>/dev/null; then
+                git -C upstream show "$sha:$path" > "artifact/$path.history/$sha.kicad_pcb"
+              fi
+            done
+            git -C upstream log --all --date=iso-strict --format='%H %ad %s' -- "$path" > "artifact/$path.history/LOG.txt"
+          done
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/SHA256SUMS.txt
+          find artifact -type f -printf '%P %s bytes\n' | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-kicad-history
+          path: artifact
+          retention-days: 1
