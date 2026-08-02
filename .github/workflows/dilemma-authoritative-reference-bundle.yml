@@ -1,0 +1,53 @@
+name: Dilemma authoritative 3D reference bundle
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-reference-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pinned upstream source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+          cd ..
+      - name: Collect authoritative mechanical references
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p bundle
+          while IFS= read -r -d '' file; do
+            rel="${file#upstream/}"
+            mkdir -p "bundle/$(dirname "$rel")"
+            cp "$file" "bundle/$rel"
+          done < <(find upstream/mechanical -type f \( -iname '*.stl' -o -iname '*.step' -o -iname '*.3mf' -o -iname '*.fcstd' \) -print0)
+          for file in upstream/3x5_2/dilemma.step upstream/3x5_3/dilemma.step upstream/4x6_4/dilemma.step; do
+            rel="${file#upstream/}"
+            mkdir -p "bundle/$(dirname "$rel")"
+            cp "$file" "bundle/$rel"
+          done
+          find upstream -path '*/3d/SK6805-EC15 v2.step' -type f -print0 | while IFS= read -r -d '' file; do
+            rel="${file#upstream/}"
+            mkdir -p "bundle/$(dirname "$rel")"
+            cp "$file" "bundle/$rel"
+          done
+          (cd bundle && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          du -sh bundle
+      - name: Upload authoritative references
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-authoritative-3d-references
+          path: bundle/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
