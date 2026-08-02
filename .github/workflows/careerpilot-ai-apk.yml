@@ -47,11 +47,11 @@ jobs:
           set +e
           {
             echo '=== CAREERPILOT SOURCE CHUNK BYTE COUNTS ==='
-            wc -c careerpilot_build/v2/p*
+            wc -c careerpilot_build/v2/p0[0-9] careerpilot_build/v2/p10 careerpilot_build/v2/p11_parts/q*
             echo '=== CAREERPILOT SOURCE CHUNK HASHES ==='
-            sha256sum careerpilot_build/v2/p*
+            sha256sum careerpilot_build/v2/p0[0-9] careerpilot_build/v2/p10 careerpilot_build/v2/p11_parts/q*
             echo '=== CAREERPILOT SOURCE REASSEMBLY ==='
-            cat careerpilot_build/v2/p* > careerpilot_project.b64
+            cat careerpilot_build/v2/p0[0-9] careerpilot_build/v2/p10 careerpilot_build/v2/p11_parts/q* > careerpilot_project.b64
             wc -c careerpilot_project.b64
             base64 --decode careerpilot_project.b64 > careerpilot_project.zip
             decode_status=$?
