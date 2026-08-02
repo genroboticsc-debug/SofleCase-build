@@ -1,0 +1,38 @@
+name: Dilemma upstream CAD recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Clone exact upstream revision
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout 7a708552984f154e51ee31c1c05e7e8e990a8a53
+      - name: Inventory and archive mechanical assets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd upstream
+          find mechanical -type f -printf '%p\t%s bytes\n' | sort | tee ../mechanical_inventory.tsv
+          find mechanical -type f \( -iname '*.step' -o -iname '*.stp' -o -iname '*.stl' -o -iname '*.f3d' -o -iname '*.f3z' -o -iname '*.sldprt' -o -iname '*.fcstd' -o -iname '*.scad' -o -iname '*.py' -o -iname '*.json' -o -iname '*.dxf' -o -iname '*.svg' \) -print0 | tar --null -czf ../dilemma_mechanical_assets.tar.gz --files-from=-
+          cd ..
+          sha256sum dilemma_mechanical_assets.tar.gz mechanical_inventory.tsv > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-upstream-mechanical-assets
+          path: |
+            dilemma_mechanical_assets.tar.gz
+            mechanical_inventory.tsv
+            SHA256SUMS
+          retention-days: 1
