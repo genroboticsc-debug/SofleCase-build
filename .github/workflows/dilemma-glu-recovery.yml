@@ -1,0 +1,32 @@
+name: Dilemma GLU recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/dilemma-glu-recovery.yml'
+      - 'runtime-recovery/GLU_TRIGGER'
+
+permissions:
+  contents: read
+
+jobs:
+  glu:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Gmsh runtime libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p debs
+          cd debs
+          apt-get download libglu1-mesa libopengl0
+          sha256sum *.deb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-gmsh-glu-ubuntu2204
+          path: debs/
+          if-no-files-found: error
+          retention-days: 1
