@@ -44,22 +44,40 @@ jobs:
       - name: Reassemble and verify exact source archive
         shell: bash
         run: |
-          set -euxo pipefail
-          cat careerpilot_build/v2/p* > careerpilot_project.b64
-          base64 --decode careerpilot_project.b64 > careerpilot_project.zip
-          echo "19e06f3c7e71b0cf49da6a6f92edfe0697f229460b62cdabb2e45037f0808dac  careerpilot_project.zip" | sha256sum -c -
-          rm -rf build-src
-          mkdir build-src
-          unzip -q careerpilot_project.zip -d build-src
-          test -f build-src/CareerPilotAI/settings.gradle.kts
-          test -f build-src/CareerPilotAI/app/build.gradle.kts
+          set +e
+          {
+            echo '=== CAREERPILOT SOURCE CHUNK BYTE COUNTS ==='
+            wc -c careerpilot_build/v2/p*
+            echo '=== CAREERPILOT SOURCE CHUNK HASHES ==='
+            sha256sum careerpilot_build/v2/p*
+            echo '=== CAREERPILOT SOURCE REASSEMBLY ==='
+            cat careerpilot_build/v2/p* > careerpilot_project.b64
+            wc -c careerpilot_project.b64
+            base64 --decode careerpilot_project.b64 > careerpilot_project.zip
+            decode_status=$?
+            echo "decode_status=$decode_status"
+            sha256sum careerpilot_project.zip
+            echo "19e06f3c7e71b0cf49da6a6f92edfe0697f229460b62cdabb2e45037f0808dac  careerpilot_project.zip" | sha256sum -c -
+            archive_status=$?
+            echo "archive_status=$archive_status"
+            if [ "$decode_status" -ne 0 ] || [ "$archive_status" -ne 0 ]; then
+              exit 1
+            fi
+            rm -rf build-src
+            mkdir build-src
+            unzip -q careerpilot_project.zip -d build-src
+            test -f build-src/CareerPilotAI/settings.gradle.kts
+            test -f build-src/CareerPilotAI/app/build.gradle.kts
+          } 2>&1 | tee "$GITHUB_WORKSPACE/careerpilot-build.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
 
       - name: Compile tests and package debug APK
         working-directory: build-src/CareerPilotAI
         shell: bash
         run: |
           set +e
-          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee "$GITHUB_WORKSPACE/careerpilot-build.log"
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
@@ -75,7 +93,7 @@ jobs:
         with:
           name: CareerPilotAI-build-diagnostics
           path: careerpilot-build.log
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 1
 
       - name: Upload installable APK
