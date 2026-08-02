@@ -72,6 +72,30 @@ jobs:
           status=${PIPESTATUS[0]}
           exit "$status"
 
+      - name: Apply Kotlin 2.3 compiler DSL compatibility fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build-src/CareerPilotAI/app/build.gradle.kts")
+          text = path.read_text(encoding="utf-8")
+          old = '''    kotlinOptions {
+              jvmTarget = "17"
+          }
+          '''
+          new = '''    kotlin {
+              compilerOptions {
+                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+              }
+          }
+          '''
+          if old not in text:
+              raise SystemExit("Expected kotlinOptions block not found; refusing an approximate patch")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          grep -n -A5 -B2 'compilerOptions' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+
       - name: Compile tests and package debug APK
         working-directory: build-src/CareerPilotAI
         shell: bash
