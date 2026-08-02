@@ -116,6 +116,11 @@ jobs:
           grep -n -A5 -B2 'compilerOptions' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
           grep -n 'androidx.lifecycle' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
 
+      - name: Apply exact Kotlin source fixes
+        shell: bash
+        run: |
+          python3 careerpilot_build/apply_exact_source_fixes.py | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+
       - name: Compile tests and package debug APK
         working-directory: build-src/CareerPilotAI
         shell: bash
