@@ -72,7 +72,7 @@ jobs:
           status=${PIPESTATUS[0]}
           exit "$status"
 
-      - name: Apply Kotlin 2.3 compiler DSL compatibility fix
+      - name: Apply exact build compatibility fixes
         shell: bash
         run: |
           python3 - <<'PY'
@@ -80,6 +80,7 @@ jobs:
 
           path = Path("build-src/CareerPilotAI/app/build.gradle.kts")
           lines = path.read_text(encoding="utf-8").splitlines()
+
           expected = [
               "    kotlinOptions {",
               "        jvmTarget = \"17\"",
@@ -97,9 +98,23 @@ jobs:
               raise SystemExit(f"Expected one exact kotlinOptions block at source lines 39-41; found {matches}")
           index = matches[0]
           lines[index:index + 3] = replacement
+
+          pins = {
+              '    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")':
+                  '    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")',
+              '    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")':
+                  '    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")',
+          }
+          for old, new in pins.items():
+              count = lines.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one exact dependency line {old!r}; found {count}")
+              lines[lines.index(old)] = new
+
           path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           grep -n -A5 -B2 'compilerOptions' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+          grep -n 'androidx.lifecycle' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
 
       - name: Compile tests and package debug APK
         working-directory: build-src/CareerPilotAI
