@@ -1,0 +1,34 @@
+name: Dilemma upstream DXF recovery
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover pinned upstream drawings
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          git -C upstream checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+          mkdir -p artifact
+          find upstream -type f \( -iname '*Edge*Cuts*.dxf' -o -iname 'dilemma.kicad_pcb' \) -print0 | while IFS= read -r -d '' f; do
+            rel="${f#upstream/}"
+            mkdir -p "artifact/$(dirname "$rel")"
+            cp "$f" "artifact/$rel"
+          done
+          printf '%s\n' f5cffb4821fe560b095418b71382ac7d8043c61a > artifact/UPSTREAM_COMMIT.txt
+          find artifact -type f -print0 | sort -z | xargs -0 sha256sum > artifact/SHA256SUMS.txt
+          find artifact -type f -printf '%P\n' | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-upstream-dxf
+          path: artifact
+          retention-days: 1
