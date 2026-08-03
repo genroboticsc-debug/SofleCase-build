@@ -1,0 +1,74 @@
+name: Dilemma current fail-set validation
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - dilemma-runner/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout runner branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install exact CAD and Boolean toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install \
+            build123d==0.11.1 \
+            manifold3d==3.5.2 \
+            trimesh==4.8.3
+          python - <<'PY'
+          import build123d, manifold3d, trimesh
+          print('build123d', build123d.__version__)
+          print('manifold3d', manifold3d.__version__)
+          print('trimesh', trimesh.__version__)
+          PY
+
+      - name: Decode standalone runner bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          base64 --decode dilemma-runner/project.tgz.b64 > dilemma-runner/project.tgz
+          tar -xzf dilemma-runner/project.tgz -C dilemma-runner
+
+      - name: Checkout pinned authoritative Dilemma source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git dilemma-runner/upstream
+          cd dilemma-runner/upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+
+      - name: Build and validate 13-part fail set
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python dilemma-runner/project/prepare_and_run.py
+
+      - name: Upload complete build and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-current-failset-results
+          path: |
+            dilemma-runner/project/generated/
+            dilemma-runner/project/XYZ/
+            dilemma-runner/project/validation/
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 3
