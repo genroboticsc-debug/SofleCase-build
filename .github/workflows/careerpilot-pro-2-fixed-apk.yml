@@ -51,6 +51,7 @@ jobs:
           mkdir -p build-src
           tar -xJf "$SOURCE" -C build-src
           python careerpilot_build/pro_v2/apply_compiler_fixes.py | tee -a careerpilot-pro-2-build.log
+          python careerpilot_build/pro_v2/apply_compiler_fixes_2.py | tee -a careerpilot-pro-2-build.log
           test -f build-src/CareerPilotAI/settings.gradle.kts
           test -f build-src/CareerPilotAI/app/build.gradle.kts
 
