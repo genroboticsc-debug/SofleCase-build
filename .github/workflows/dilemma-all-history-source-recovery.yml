@@ -28,14 +28,22 @@ jobs:
           git rev-list --all | sort -u > recovery/inventory/all_commits.txt
           : > recovery/inventory/candidate_counts.tsv
           : > recovery/inventory/path_hits.tsv
+          : > recovery/inventory/seen_trees.txt
 
           while IFS= read -r commit; do
+            tree_sha=$(git rev-parse "$commit^{tree}")
+            if grep -qxF "$tree_sha" recovery/inventory/seen_trees.txt; then
+              continue
+            fi
+            echo "$tree_sha" >> recovery/inventory/seen_trees.txt
+
             treefile="recovery/inventory/tree.tmp"
             git ls-tree -r --long "$commit" > "$treefile" || continue
+            cut -f2- "$treefile" > recovery/inventory/paths.tmp
             short=${commit:0:12}
 
             # Direct script trees retained in historical commits.
-            mapfile -t script_paths < <(awk '{print $4}' "$treefile" | grep -E '(^|/)scripts/[^/]+\.py$' | sort -u || true)
+            mapfile -t script_paths < <(grep -E '(^|/)scripts/[^/]+\.py$' recovery/inventory/paths.tmp | sort -u || true)
             count=${#script_paths[@]}
             if (( count >= 45 )); then
               out="recovery/candidates/${short}_direct"
@@ -44,14 +52,15 @@ jobs:
               echo -e "$commit\tdirect_script_tree\t$count" >> recovery/inventory/candidate_counts.tsv
             fi
 
-            # Inventory any likely checkpoint/archive paths for provenance.
-            grep -Ei 'dilemma|canonical_51|project\.(tar|tgz)|\.b64\.part-|checkpoint.*\.zip$' "$treefile" \
+            # Inventory likely checkpoint/archive paths for provenance.
+            grep -Ei 'dilemma|canonical_51|project\.(tar|tgz)|\.b64\.part-|checkpoint.*\.zip$' recovery/inventory/paths.tmp \
               | sed "s#^#$commit\t#" >> recovery/inventory/path_hits.tsv || true
 
-            # Split base64 archives. Group exact stems independently.
-            mapfile -t part_paths < <(awk '{print $4}' "$treefile" | grep -E '\.b64\.part-[0-9]+$' | sort || true)
+            # Split base64 archives, grouped by exact stem.
+            mapfile -t part_paths < <(grep -E '\.b64\.part-[0-9]+$' recovery/inventory/paths.tmp | sort || true)
             if ((${#part_paths[@]})); then
-              printf '%s\n' "${part_paths[@]}" | sed -E 's/\.part-[0-9]+$//' | sort -u | while IFS= read -r stem; do
+              mapfile -t stems < <(printf '%s\n' "${part_paths[@]}" | sed -E 's/\.part-[0-9]+$//' | sort -u)
+              for stem in "${stems[@]}"; do
                 mapfile -t group < <(printf '%s\n' "${part_paths[@]}" | grep -F "${stem}.part-" | sort)
                 work="recovery/candidates/${short}_$(basename "$stem" | tr '. /:' '____')"
                 mkdir -p "$work/extracted"
@@ -65,8 +74,8 @@ jobs:
               done
             fi
 
-            # Single archive blobs historically committed.
-            mapfile -t archives < <(awk '{print $4}' "$treefile" | grep -Ei '(dilemma|checkpoint|project).*(\.zip|\.tar\.xz|\.tar\.gz|\.tgz)$' | sort -u || true)
+            # Single historical archive blobs.
+            mapfile -t archives < <(grep -Ei '(dilemma|checkpoint|project).*(\.zip|\.tar\.xz|\.tar\.gz|\.tgz)$' recovery/inventory/paths.tmp | sort -u || true)
             for a in "${archives[@]}"; do
               work="recovery/candidates/${short}_$(basename "$a" | tr '. /:' '____')"
               mkdir -p "$work/extracted"
