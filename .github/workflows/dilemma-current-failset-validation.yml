@@ -43,8 +43,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cat dilemma-runner/project.tgz.b64.part-* | base64 --decode > dilemma-runner/project.tgz
-          tar -xzf dilemma-runner/project.tgz -C dilemma-runner
+          cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > dilemma-runner/project.tar.xz
+          tar -xJf dilemma-runner/project.tar.xz -C dilemma-runner
 
       - name: Checkout pinned authoritative Dilemma source
         shell: bash
