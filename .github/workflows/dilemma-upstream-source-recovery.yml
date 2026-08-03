@@ -1,0 +1,35 @@
+name: Dilemma upstream source recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pinned Dilemma source
+        run: |
+          git clone https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout 7a708552984f154e51ee31c1c05e7e8e990a8a53
+      - name: Collect exact source files
+        run: |
+          mkdir -p bundle/3x5_3_procyon bundle/mechanical/cases/3x5_3 bundle/mechanical/cases/3x5_3_hotswap bundle/mechanical/cases/4x6_4 bundle/4x6_4
+          cp upstream/3x5_3_procyon/dilemma.kicad_pcb bundle/3x5_3_procyon/
+          cp upstream/mechanical/cases/3x5_3/bottom_acry_full.dxf bundle/mechanical/cases/3x5_3/
+          cp upstream/mechanical/cases/3x5_3/bottom_metal.dxf bundle/mechanical/cases/3x5_3/
+          cp upstream/mechanical/cases/3x5_3/mid_acry_full.dxf bundle/mechanical/cases/3x5_3/
+          cp upstream/mechanical/cases/3x5_3_hotswap/midplate.dxf bundle/mechanical/cases/3x5_3_hotswap/
+          cp upstream/mechanical/cases/4x6_4/acrylic.dxf bundle/mechanical/cases/4x6_4/
+          cp upstream/4x6_4/trackpad.dxf bundle/4x6_4/
+          find bundle -type f -print0 | sort -z | xargs -0 sha256sum > bundle/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-upstream-sources-pinned
+          path: bundle
+          retention-days: 1
