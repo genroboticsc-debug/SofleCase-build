@@ -1,4 +1,4 @@
-name: CareerPilot Pro Android APK
+name: CareerPilot Pro 2 Android APK
 
 on:
   push:
@@ -41,50 +41,14 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Reassemble and verify upgraded source
+      - name: Verify and extract CareerPilot Pro 2 source
         shell: bash
         run: |
           set -euxo pipefail
-          cat > expected-segments.sha256 <<'HASHES'
-          e821865034e74428ae72c88e9e0d396206f75f431a90490df5929dcc28efebc2  careerpilot_build/pro_v1/part00
-          b196f52d76a10db12d4c155c48e1aea12b22cf4cba9e952af0abd025e9d290a2  careerpilot_build/pro_v1/part01
-          4a5776d9d9dc4a16b47282e21714c0db66481a99999df7c1c882ef5e0dd86fe0  careerpilot_build/pro_v1/part02
-          2be1bb41b9d42653a51139ec744281990f65a335ad31de742867dbc8884b878a  careerpilot_build/pro_v1/part03
-          3a680bbed23987f3d4eeb90909c8710c27a5dbd2fd19faafbad63e6163f546aa  careerpilot_build/pro_v1/part04_s0
-          154b564ef028034d67db2ce20e64a9ce2660a11c8f7393f4d76931d58b0127fd  careerpilot_build/pro_v1/part04_s1
-          7bb2d236f7f310498740ac0b40f82d05161d79dafda1eb07570a4386c685feef  careerpilot_build/pro_v1/part04_s2a
-          ae2626d68a1e49fd1180bfe120197a3fb7ec14b21ebec944aa39f0870bd6c3c0  careerpilot_build/pro_v1/part04_s2b
-          f73c4ff0ef456bfe86a5714aa06eeb848f6a3708c96f133fdfef1af2ca49327b  careerpilot_build/pro_v1/part05
-          5dad5008f39a39520663b27fe55852cd0de1940782a98f5dd14b3c7dfc21c515  careerpilot_build/pro_v1/part06
-          a0b9cf5cc4f3fcb21c0b80b1d7c2dbba52cfb6de66c8b5ce9dd51822755802f9  careerpilot_build/pro_v1/part07
-          0ca0b10d15518297ded192375c615cba7dfbac5696d3584a52ef10903e88c77e  careerpilot_build/pro_v1/part08
-          534761e24e1c686f42994b2e8fdb08f17b0210be66e5607677fb632980f53482  careerpilot_build/pro_v1/part09
-          63c09fd4308238544673552bd6b71db0cce95933727fdd6865ee8debcf122b07  careerpilot_build/pro_v1/part10
-          a2b4bf1a7defd89d8f0855da5957384ac8c2d62504e9cdaed5affa449469b027  careerpilot_build/pro_v1/part11
-          b496f7303c995306020fe565278f3174139dadb61b59897ab5bc3bb1ed5e847a  careerpilot_build/pro_v1/part12
-          HASHES
-          sha256sum -c expected-segments.sha256 | tee careerpilot-pro-build.log
-          cat \
-            careerpilot_build/pro_v1/part00 \
-            careerpilot_build/pro_v1/part01 \
-            careerpilot_build/pro_v1/part02 \
-            careerpilot_build/pro_v1/part03 \
-            careerpilot_build/pro_v1/part04_s0 \
-            careerpilot_build/pro_v1/part04_s1 \
-            careerpilot_build/pro_v1/part04_s2a \
-            careerpilot_build/pro_v1/part04_s2b \
-            careerpilot_build/pro_v1/part05 \
-            careerpilot_build/pro_v1/part06 \
-            careerpilot_build/pro_v1/part07 \
-            careerpilot_build/pro_v1/part08 \
-            careerpilot_build/pro_v1/part09 \
-            careerpilot_build/pro_v1/part10 \
-            careerpilot_build/pro_v1/part11 \
-            careerpilot_build/pro_v1/part12 \
-            > CareerPilotAI_Pro_1.0.0_source.b64
-          base64 --decode CareerPilotAI_Pro_1.0.0_source.b64 > CareerPilotAI_Pro_1.0.0_source.zip
-          echo "ac9e4f427bbb47d784a262c2319f67582a11a75dae3530742402172939dde185  CareerPilotAI_Pro_1.0.0_source.zip" | sha256sum -c - | tee -a careerpilot-pro-build.log
-          unzip -q CareerPilotAI_Pro_1.0.0_source.zip -d build-src
+          SOURCE="careerpilot_build/pro_v2/CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c - | tee careerpilot-pro-2-build.log
+          mkdir -p build-src
+          tar -xJf "$SOURCE" -C build-src
           test -f build-src/CareerPilotAI/settings.gradle.kts
           test -f build-src/CareerPilotAI/app/build.gradle.kts
 
@@ -93,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-build.log"
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-2-build.log"
           status=${PIPESTATUS[0]}
           set -e
           exit "$status"
@@ -102,25 +66,26 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro.apk
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.apk
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           {
             echo '=== APK SIGNATURE ==='
-            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro.apk
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro-2.apk
             echo '=== APK PACKAGE METADATA ==='
-            "$AAPT" dump badging CareerPilotAI-Pro.apk
+            "$AAPT" dump badging CareerPilotAI-Pro-2.apk
             echo '=== APK SHA256 ==='
-            sha256sum CareerPilotAI-Pro.apk
-          } | tee CareerPilotAI-Pro.validation.txt | tee -a careerpilot-pro-build.log
-          sha256sum CareerPilotAI-Pro.apk > CareerPilotAI-Pro.apk.sha256
+            sha256sum CareerPilotAI-Pro-2.apk
+          } | tee CareerPilotAI-Pro-2.validation.txt | tee -a careerpilot-pro-2-build.log
+          sha256sum CareerPilotAI-Pro-2.apk > CareerPilotAI-Pro-2.apk.sha256
+          unzip -t CareerPilotAI-Pro-2.apk | tail -n 2 | tee -a CareerPilotAI-Pro-2.validation.txt
 
       - name: Upload compiler diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CareerPilotAI-Pro-build-diagnostics
-          path: careerpilot-pro-build.log
+          name: CareerPilotAI-Pro-2-build-diagnostics
+          path: careerpilot-pro-2-build.log
           if-no-files-found: warn
           retention-days: 1
 
@@ -128,10 +93,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: CareerPilotAI-Pro-Android-APK
+          name: CareerPilotAI-Pro-2-Android-APK
           path: |
-            CareerPilotAI-Pro.apk
-            CareerPilotAI-Pro.apk.sha256
-            CareerPilotAI-Pro.validation.txt
+            CareerPilotAI-Pro-2.apk
+            CareerPilotAI-Pro-2.apk.sha256
+            CareerPilotAI-Pro-2.validation.txt
           if-no-files-found: error
           retention-days: 1
