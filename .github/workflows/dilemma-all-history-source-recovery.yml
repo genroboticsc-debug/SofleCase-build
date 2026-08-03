@@ -1,0 +1,91 @@
+name: Dilemma all history source recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch every reachable ref
+        run: |
+          git fetch --all --prune --tags --force
+      - name: Scan complete history
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery/candidates recovery/inventory
+          git rev-list --all --objects > recovery/inventory/all_objects.txt
+          git rev-list --all | sort -u > recovery/inventory/all_commits.txt
+          : > recovery/inventory/candidate_counts.tsv
+          : > recovery/inventory/path_hits.tsv
+
+          while IFS= read -r commit; do
+            treefile="recovery/inventory/tree.tmp"
+            git ls-tree -r --long "$commit" > "$treefile" || continue
+            short=${commit:0:12}
+
+            # Direct script trees retained in historical commits.
+            mapfile -t script_paths < <(awk '{print $4}' "$treefile" | grep -E '(^|/)scripts/[^/]+\.py$' | sort -u || true)
+            count=${#script_paths[@]}
+            if (( count >= 45 )); then
+              out="recovery/candidates/${short}_direct"
+              mkdir -p "$out"
+              git archive "$commit" "${script_paths[@]}" | tar -x -C "$out"
+              echo -e "$commit\tdirect_script_tree\t$count" >> recovery/inventory/candidate_counts.tsv
+            fi
+
+            # Inventory any likely checkpoint/archive paths for provenance.
+            grep -Ei 'dilemma|canonical_51|project\.(tar|tgz)|\.b64\.part-|checkpoint.*\.zip$' "$treefile" \
+              | sed "s#^#$commit\t#" >> recovery/inventory/path_hits.tsv || true
+
+            # Split base64 archives. Group exact stems independently.
+            mapfile -t part_paths < <(awk '{print $4}' "$treefile" | grep -E '\.b64\.part-[0-9]+$' | sort || true)
+            if ((${#part_paths[@]})); then
+              printf '%s\n' "${part_paths[@]}" | sed -E 's/\.part-[0-9]+$//' | sort -u | while IFS= read -r stem; do
+                mapfile -t group < <(printf '%s\n' "${part_paths[@]}" | grep -F "${stem}.part-" | sort)
+                work="recovery/candidates/${short}_$(basename "$stem" | tr '. /:' '____')"
+                mkdir -p "$work/extracted"
+                : > "$work/payload.b64"
+                for p in "${group[@]}"; do git show "$commit:$p" >> "$work/payload.b64"; done
+                tr -d '\r\n ' < "$work/payload.b64" | base64 -d > "$work/payload" 2>"$work/base64.err" || true
+                tar -xf "$work/payload" -C "$work/extracted" 2>"$work/extract.err" || true
+                scount=$(find "$work/extracted" -type f -path '*/scripts/*.py' | wc -l)
+                echo -e "$commit\t$stem\t$scount" >> recovery/inventory/candidate_counts.tsv
+                if (( scount < 45 )); then rm -rf "$work"; fi
+              done
+            fi
+
+            # Single archive blobs historically committed.
+            mapfile -t archives < <(awk '{print $4}' "$treefile" | grep -Ei '(dilemma|checkpoint|project).*(\.zip|\.tar\.xz|\.tar\.gz|\.tgz)$' | sort -u || true)
+            for a in "${archives[@]}"; do
+              work="recovery/candidates/${short}_$(basename "$a" | tr '. /:' '____')"
+              mkdir -p "$work/extracted"
+              git show "$commit:$a" > "$work/archive" || continue
+              case "$a" in
+                *.zip) unzip -q "$work/archive" -d "$work/extracted" 2>"$work/extract.err" || true ;;
+                *) tar -xf "$work/archive" -C "$work/extracted" 2>"$work/extract.err" || true ;;
+              esac
+              scount=$(find "$work/extracted" -type f -path '*/scripts/*.py' | wc -l)
+              echo -e "$commit\t$a\t$scount" >> recovery/inventory/candidate_counts.tsv
+              if (( scount < 45 )); then rm -rf "$work"; fi
+            done
+          done < recovery/inventory/all_commits.txt
+
+          find recovery/candidates -type f -path '*/scripts/*.py' -print > recovery/inventory/recovered_scripts.txt
+          find recovery/candidates -type d -name scripts -print > recovery/inventory/recovered_script_dirs.txt
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-all-history-source-recovery
+          path: recovery
+          retention-days: 1
