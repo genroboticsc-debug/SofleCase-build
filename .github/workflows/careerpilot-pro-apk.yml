@@ -41,12 +41,12 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Download and verify upgraded source
+      - name: Reassemble and verify upgraded source
         shell: bash
         run: |
           set -euxo pipefail
-          python -m pip install --quiet gdown
-          gdown 1MFcQqCiyL5yJvnbtzXQjnc76ZFZv-bOa --output CareerPilotAI_Pro_1.0.0_source.zip
+          cat careerpilot_build/pro_v1/part* > CareerPilotAI_Pro_1.0.0_source.b64
+          base64 --decode CareerPilotAI_Pro_1.0.0_source.b64 > CareerPilotAI_Pro_1.0.0_source.zip
           echo "ac9e4f427bbb47d784a262c2319f67582a11a75dae3530742402172939dde185  CareerPilotAI_Pro_1.0.0_source.zip" | sha256sum -c -
           unzip -q CareerPilotAI_Pro_1.0.0_source.zip -d build-src
           test -f build-src/CareerPilotAI/settings.gradle.kts
