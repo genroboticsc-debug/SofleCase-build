@@ -1,0 +1,48 @@
+name: Dilemma KiCad reference export
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install KiCad CLI
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad
+          kicad-cli --version
+      - name: Fetch pinned Dilemma repository
+        run: |
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout 7a708552984f154e51ee31c1c05e7e8e990a8a53
+      - name: Verify native source hashes
+        run: |
+          cd upstream
+          sha256sum 3x5_2/dilemma.kicad_pcb 3x5_3/dilemma.kicad_pcb 3x5_3_procyon/dilemma.kicad_pcb 4x6_4/dilemma.kicad_pcb
+      - name: Export board-only STEP references
+        run: |
+          mkdir -p out
+          for pair in \
+            'P001 3x5_2/dilemma.kicad_pcb' \
+            'P002 3x5_3/dilemma.kicad_pcb' \
+            'P004 3x5_3_procyon/dilemma.kicad_pcb' \
+            'P006 4x6_4/dilemma.kicad_pcb'; do
+            set -- $pair
+            id=$1
+            src=$2
+            kicad-cli pcb export step --force --board-only --cut-vias-in-body --grid-origin --no-optimize-step --output "out/${id}_native.step" "upstream/${src}"
+          done
+          sha256sum out/* > out/SHA256SUMS.txt
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-kicad-native-step
+          path: out
+          retention-days: 1
