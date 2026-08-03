@@ -47,6 +47,18 @@ jobs:
           cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > dilemma-runner/project.tar.xz
           tar -xJf dilemma-runner/project.tar.xz -C dilemma-runner
 
+      - name: Apply exact current source fixes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python dilemma-runner/apply_current_fixes.py
+
+      - name: Diagnose exact P029 upper construction
+        shell: bash
+        run: |
+          set -uxo pipefail
+          python dilemma-runner/diagnose_p029.py | tee dilemma-runner/project/validation/p029_upper_diagnostic.log
+
       - name: Checkout pinned authoritative Dilemma source
         shell: bash
         run: |
@@ -60,6 +72,13 @@ jobs:
         run: |
           set -euxo pipefail
           python dilemma-runner/project/prepare_and_run.py
+
+      - name: Compute exact P010 and P011 STEP metrics
+        if: always()
+        shell: bash
+        run: |
+          set -uxo pipefail
+          python dilemma-runner/step_exact_metrics.py | tee dilemma-runner/project/validation/p010_p011_exact_metrics.log
 
       - name: Upload complete build and validation evidence
         if: always()
