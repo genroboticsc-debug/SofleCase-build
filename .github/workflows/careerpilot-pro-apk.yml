@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - careerpilot-pro-v1-20260803
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
