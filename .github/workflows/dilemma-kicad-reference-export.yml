@@ -12,8 +12,11 @@ jobs:
   export:
     runs-on: ubuntu-24.04
     steps:
-      - name: Install KiCad CLI
+      - name: Install KiCad 9 CLI
         run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad
           kicad-cli --version
