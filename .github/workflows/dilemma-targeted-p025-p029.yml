@@ -32,6 +32,11 @@ jobs:
         continue-on-error: true
         run: |
           python dilemma-runner/diagnose_p029.py | tee dilemma-runner/project/validation/p029_targeted.log
+      - name: Diagnose P025 exact rib-10 contact
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python dilemma-runner/diagnose_p025.py | tee dilemma-runner/project/validation/p025_rib10_diagnostic.log
       - name: Build P025 exact feature tree
         timeout-minutes: 15
         continue-on-error: true
