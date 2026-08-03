@@ -1,6 +1,7 @@
 from __future__ import annotations
 import importlib.util
 from pathlib import Path
+import sys
 import traceback
 
 from build123d import Face, Location, Shell, Solid, Wire
@@ -10,6 +11,7 @@ script = root / 'scripts' / 'dilemma_4x6_4_hotswap_mid.py'
 spec = importlib.util.spec_from_file_location('p029', script)
 mod = importlib.util.module_from_spec(spec)
 assert spec.loader
+sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 
 p = mod.P029UpperParameters()
