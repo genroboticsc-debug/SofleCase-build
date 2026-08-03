@@ -52,7 +52,8 @@ jobs:
           2be1bb41b9d42653a51139ec744281990f65a335ad31de742867dbc8884b878a  careerpilot_build/pro_v1/part03
           3a680bbed23987f3d4eeb90909c8710c27a5dbd2fd19faafbad63e6163f546aa  careerpilot_build/pro_v1/part04_s0
           154b564ef028034d67db2ce20e64a9ce2660a11c8f7393f4d76931d58b0127fd  careerpilot_build/pro_v1/part04_s1
-          2c1b4f5ab637725566e6cb91d83fcbd58d4c731a09b96e5ed28ffc839e7f4e40  careerpilot_build/pro_v1/part04_s2
+          7bb2d236f7f310498740ac0b40f82d05161d79dafda1eb07570a4386c685feef  careerpilot_build/pro_v1/part04_s2a
+          ae2626d68a1e49fd1180bfe120197a3fb7ec14b21ebec944aa39f0870bd6c3c0  careerpilot_build/pro_v1/part04_s2b
           f73c4ff0ef456bfe86a5714aa06eeb848f6a3708c96f133fdfef1af2ca49327b  careerpilot_build/pro_v1/part05
           5dad5008f39a39520663b27fe55852cd0de1940782a98f5dd14b3c7dfc21c515  careerpilot_build/pro_v1/part06
           a0b9cf5cc4f3fcb21c0b80b1d7c2dbba52cfb6de66c8b5ce9dd51822755802f9  careerpilot_build/pro_v1/part07
@@ -70,7 +71,8 @@ jobs:
             careerpilot_build/pro_v1/part03 \
             careerpilot_build/pro_v1/part04_s0 \
             careerpilot_build/pro_v1/part04_s1 \
-            careerpilot_build/pro_v1/part04_s2 \
+            careerpilot_build/pro_v1/part04_s2a \
+            careerpilot_build/pro_v1/part04_s2b \
             careerpilot_build/pro_v1/part05 \
             careerpilot_build/pro_v1/part06 \
             careerpilot_build/pro_v1/part07 \
