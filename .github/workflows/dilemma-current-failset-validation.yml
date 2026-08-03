@@ -30,12 +30,14 @@ jobs:
           python -m pip install \
             build123d==0.11.1 \
             manifold3d==3.5.2 \
-            trimesh==4.8.3
+            trimesh==4.8.3 \
+            networkx==3.5
           python - <<'PY'
-          import build123d, manifold3d, trimesh
+          import build123d, manifold3d, trimesh, networkx
           print('build123d', build123d.__version__)
           print('manifold3d import', manifold3d.__file__)
           print('trimesh', trimesh.__version__)
+          print('networkx', networkx.__version__)
           PY
 
       - name: Decode standalone runner bundle
