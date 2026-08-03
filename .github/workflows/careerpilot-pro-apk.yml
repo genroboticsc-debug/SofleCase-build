@@ -44,20 +44,59 @@ jobs:
       - name: Reassemble and verify upgraded source
         shell: bash
         run: |
-          set -euxo pipefail
-          cat careerpilot_build/pro_v1/part* > CareerPilotAI_Pro_1.0.0_source.b64
-          base64 --decode CareerPilotAI_Pro_1.0.0_source.b64 > CareerPilotAI_Pro_1.0.0_source.zip
-          echo "ac9e4f427bbb47d784a262c2319f67582a11a75dae3530742402172939dde185  CareerPilotAI_Pro_1.0.0_source.zip" | sha256sum -c -
-          unzip -q CareerPilotAI_Pro_1.0.0_source.zip -d build-src
-          test -f build-src/CareerPilotAI/settings.gradle.kts
-          test -f build-src/CareerPilotAI/app/build.gradle.kts
+          set -o pipefail
+          {
+            echo '=== SOURCE SEGMENT SHA256 ==='
+            sha256sum careerpilot_build/pro_v1/part*
+            echo '=== EXPECTED SOURCE SEGMENT SHA256 ==='
+            cat <<'HASHES'
+          e821865034e74428ae72c88e9e0d396206f75f431a90490df5929dcc28efebc2  careerpilot_build/pro_v1/part00
+          b196f52d76a10db12d4c155c48e1aea12b22cf4cba9e952af0abd025e9d290a2  careerpilot_build/pro_v1/part01
+          4a5776d9d9dc4a16b47282e21714c0db66481a99999df7c1c882ef5e0dd86fe0  careerpilot_build/pro_v1/part02
+          2be1bb41b9d42653a51139ec744281990f65a335ad31de742867dbc8884b878a  careerpilot_build/pro_v1/part03
+          085c8c27fe52c8c9ff04c070e225a19ad53f8e07ecb4e42ec7fcc3b141c2ef95  careerpilot_build/pro_v1/part04
+          f73c4ff0ef456bfe86a5714aa06eeb848f6a3708c96f133fdfef1af2ca49327b  careerpilot_build/pro_v1/part05
+          5dad5008f39a39520663b27fe55852cd0de1940782a98f5dd14b3c7dfc21c515  careerpilot_build/pro_v1/part06
+          a0b9cf5cc4f3fcb21c0b80b1d7c2dbba52cfb6de66c8b5ce9dd51822755802f9  careerpilot_build/pro_v1/part07
+          0ca0b10d15518297ded192375c615cba7dfbac5696d3584a52ef10903e88c77e  careerpilot_build/pro_v1/part08
+          534761e24e1c686f42994b2e8fdb08f17b0210be66e5607677fb632980f53482  careerpilot_build/pro_v1/part09
+          63c09fd4308238544673552bd6b71db0cce95933727fdd6865ee8debcf122b07  careerpilot_build/pro_v1/part10
+          a2b4bf1a7defd89d8f0855da5957384ac8c2d62504e9cdaed5affa449469b027  careerpilot_build/pro_v1/part11
+          b496f7303c995306020fe565278f3174139dadb61b59897ab5bc3bb1ed5e847a  careerpilot_build/pro_v1/part12
+          HASHES
+            echo '=== SOURCE SEGMENT VERIFICATION ==='
+            cat > expected-segments.sha256 <<'HASHES'
+          e821865034e74428ae72c88e9e0d396206f75f431a90490df5929dcc28efebc2  careerpilot_build/pro_v1/part00
+          b196f52d76a10db12d4c155c48e1aea12b22cf4cba9e952af0abd025e9d290a2  careerpilot_build/pro_v1/part01
+          4a5776d9d9dc4a16b47282e21714c0db66481a99999df7c1c882ef5e0dd86fe0  careerpilot_build/pro_v1/part02
+          2be1bb41b9d42653a51139ec744281990f65a335ad31de742867dbc8884b878a  careerpilot_build/pro_v1/part03
+          085c8c27fe52c8c9ff04c070e225a19ad53f8e07ecb4e42ec7fcc3b141c2ef95  careerpilot_build/pro_v1/part04
+          f73c4ff0ef456bfe86a5714aa06eeb848f6a3708c96f133fdfef1af2ca49327b  careerpilot_build/pro_v1/part05
+          5dad5008f39a39520663b27fe55852cd0de1940782a98f5dd14b3c7dfc21c515  careerpilot_build/pro_v1/part06
+          a0b9cf5cc4f3fcb21c0b80b1d7c2dbba52cfb6de66c8b5ce9dd51822755802f9  careerpilot_build/pro_v1/part07
+          0ca0b10d15518297ded192375c615cba7dfbac5696d3584a52ef10903e88c77e  careerpilot_build/pro_v1/part08
+          534761e24e1c686f42994b2e8fdb08f17b0210be66e5607677fb632980f53482  careerpilot_build/pro_v1/part09
+          63c09fd4308238544673552bd6b71db0cce95933727fdd6865ee8debcf122b07  careerpilot_build/pro_v1/part10
+          a2b4bf1a7defd89d8f0855da5957384ac8c2d62504e9cdaed5affa449469b027  careerpilot_build/pro_v1/part11
+          b496f7303c995306020fe565278f3174139dadb61b59897ab5bc3bb1ed5e847a  careerpilot_build/pro_v1/part12
+          HASHES
+            sha256sum -c expected-segments.sha256
+            cat careerpilot_build/pro_v1/part* > CareerPilotAI_Pro_1.0.0_source.b64
+            base64 --decode CareerPilotAI_Pro_1.0.0_source.b64 > CareerPilotAI_Pro_1.0.0_source.zip
+            echo '=== RECONSTRUCTED SOURCE SHA256 ==='
+            sha256sum CareerPilotAI_Pro_1.0.0_source.zip
+            echo "ac9e4f427bbb47d784a262c2319f67582a11a75dae3530742402172939dde185  CareerPilotAI_Pro_1.0.0_source.zip" | sha256sum -c -
+            unzip -q CareerPilotAI_Pro_1.0.0_source.zip -d build-src
+            test -f build-src/CareerPilotAI/settings.gradle.kts
+            test -f build-src/CareerPilotAI/app/build.gradle.kts
+          } 2>&1 | tee careerpilot-pro-build.log
 
       - name: Build, test and package APK
         working-directory: build-src/CareerPilotAI
         shell: bash
         run: |
           set +e
-          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee "$GITHUB_WORKSPACE/careerpilot-pro-build.log"
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-build.log"
           status=${PIPESTATUS[0]}
           set -e
           exit "$status"
