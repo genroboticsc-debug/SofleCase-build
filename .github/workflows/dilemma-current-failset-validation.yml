@@ -55,6 +55,7 @@ jobs:
 
       - name: Diagnose exact P029 upper construction
         continue-on-error: true
+        timeout-minutes: 2
         shell: bash
         run: |
           set -uxo pipefail
@@ -77,6 +78,7 @@ jobs:
       - name: Compute exact P010 and P011 STEP metrics
         if: always()
         continue-on-error: true
+        timeout-minutes: 10
         shell: bash
         run: |
           set -uxo pipefail
