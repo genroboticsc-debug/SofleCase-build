@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 root = Path(__file__).resolve().parent / 'project'
@@ -140,3 +141,15 @@ if old not in text:
 text = text.replace(old, new, 1)
 p029.write_text(text, encoding='utf-8')
 print('Applied P029 exact sewn ruled-shell construction')
+
+# Recovery-only source snapshot. The workflow already uploads validation/;
+# copying here exposes the decoded current scripts without modifying geometry.
+snapshot = root / 'validation' / 'source_snapshot'
+shutil.rmtree(snapshot, ignore_errors=True)
+snapshot.mkdir(parents=True, exist_ok=True)
+shutil.copytree(root / 'scripts', snapshot / 'scripts')
+for name in ('CANONICAL_51_PART_MAP.json', 'requirements.txt', 'README.md'):
+    source = root / name
+    if source.is_file():
+        shutil.copy2(source, snapshot / name)
+print('Copied decoded Dilemma source snapshot into validation artifact')
