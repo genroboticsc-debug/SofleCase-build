@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv, importlib.util, json, tempfile
+import csv, importlib.util, json, sys, tempfile
 from pathlib import Path
 from build123d import import_step
 from OCP.BRepGProp import BRepGProp
@@ -10,6 +10,7 @@ validator_path = root / 'validation' / 'Final_validation_check.py'
 spec = importlib.util.spec_from_file_location('validator', validator_path)
 v = importlib.util.module_from_spec(spec)
 assert spec.loader
+sys.modules[spec.name] = v
 spec.loader.exec_module(v)
 original_metrics = v._metrics
 
