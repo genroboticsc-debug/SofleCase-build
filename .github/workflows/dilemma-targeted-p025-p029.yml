@@ -12,7 +12,7 @@ permissions:
 jobs:
   targeted:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,6 +32,12 @@ jobs:
         continue-on-error: true
         run: |
           python dilemma-runner/diagnose_p029.py | tee dilemma-runner/project/validation/p029_targeted.log
+      - name: Build P029 exact feature tree
+        timeout-minutes: 20
+        continue-on-error: true
+        working-directory: dilemma-runner/project
+        run: |
+          python scripts/dilemma_4x6_4_hotswap_mid.py --output-dir generated | tee validation/p029_targeted_build.log
       - name: Diagnose P025 exact rib-10 contact
         timeout-minutes: 5
         continue-on-error: true
