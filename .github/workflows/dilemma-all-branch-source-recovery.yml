@@ -1,0 +1,71 @@
+name: Dilemma all branch source recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch all remote branches
+        run: |
+          git fetch --all --prune --tags
+      - name: Scan and recover embedded Dilemma projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery/candidates recovery/inventory
+          git for-each-ref --format='%(refname)' refs/remotes/origin | sort > recovery/inventory/branches.txt
+          : > recovery/inventory/tree_hits.tsv
+          : > recovery/inventory/candidate_counts.tsv
+          while IFS= read -r ref; do
+            short=${ref#refs/remotes/origin/}
+            safe=$(printf '%s' "$short" | tr '/:' '__')
+            git ls-tree -r --long "$ref" > "recovery/inventory/tree_${safe}.txt" || continue
+            grep -Ei 'dilemma|project\.(tar|tgz)|\.b64\.part-|\.zip$' "recovery/inventory/tree_${safe}.txt" | sed "s#^#$short\t#" >> recovery/inventory/tree_hits.tsv || true
+
+            mapfile -t parts < <(git ls-tree -r --name-only "$ref" | grep -E 'project\.(tar\.xz|tgz|tar\.gz)\.b64\.part-[0-9]+$' | sort || true)
+            if ((${#parts[@]})); then
+              work="recovery/candidates/${safe}_embedded"
+              mkdir -p "$work"
+              : > "$work/project.b64"
+              for p in "${parts[@]}"; do git show "$ref:$p" >> "$work/project.b64"; done
+              tr -d '\r\n ' < "$work/project.b64" | base64 -d > "$work/project.payload" || true
+              mkdir -p "$work/extracted"
+              tar -xf "$work/project.payload" -C "$work/extracted" 2>"$work/extract.err" || true
+              count=$(find "$work/extracted" -type f -path '*/scripts/*.py' | wc -l)
+              echo -e "$short\tembedded_parts\t$count" >> recovery/inventory/candidate_counts.tsv
+              if (( count < 40 )); then rm -rf "$work/extracted" "$work/project.payload" "$work/project.b64"; fi
+            fi
+
+            mapfile -t zips < <(git ls-tree -r --name-only "$ref" | grep -Ei '(dilemma.*\.zip$|\.zip$)' | sort || true)
+            for z in "${zips[@]}"; do
+              work="recovery/candidates/${safe}_$(basename "$z" .zip | tr ' ' '_')"
+              mkdir -p "$work/extracted"
+              git show "$ref:$z" > "$work/archive.zip" || continue
+              unzip -q "$work/archive.zip" -d "$work/extracted" 2>"$work/extract.err" || true
+              count=$(find "$work/extracted" -type f -path '*/scripts/*.py' | wc -l)
+              echo -e "$short\t$z\t$count" >> recovery/inventory/candidate_counts.tsv
+              if (( count < 40 )); then rm -rf "$work"; fi
+            done
+          done < recovery/inventory/branches.txt
+
+          find recovery/candidates -type d -name scripts -print > recovery/inventory/recovered_script_dirs.txt
+          while IFS= read -r d; do
+            [ -d "$d" ] || continue
+            printf '%s\t%s\n' "$d" "$(find "$d" -maxdepth 1 -type f -name '*.py' | wc -l)" >> recovery/inventory/recovered_script_dir_counts.tsv
+          done < recovery/inventory/recovered_script_dirs.txt
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-all-branch-source-recovery
+          path: recovery
+          retention-days: 1
