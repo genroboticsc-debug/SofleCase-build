@@ -1,0 +1,51 @@
+name: Dilemma historical board export
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install KiCad 9
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad
+          kicad-cli --version
+      - name: Clone full upstream history
+        run: git clone https://github.com/Bastardkb/Dilemma.git upstream
+      - name: Export selected historical boards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/sources out/steps
+          while read -r label commit path; do
+            git -C upstream show "${commit}:${path}" > "out/sources/${label}.kicad_pcb"
+            sha256sum "out/sources/${label}.kicad_pcb" >> out/SOURCE_SHA256SUMS.txt
+            kicad-cli pcb export step --force --board-only --grid-origin \
+              --output "out/steps/${label}.step" "out/sources/${label}.kicad_pcb"
+          done <<'EOF'
+          P002_2024_09 51f6ca670a028b58f784a11d06bfc5c3cb06ec41 3x5_3/dilemma.kicad_pcb
+          P002_vcuts 9a77199dbe4cfd7d299bf905d5d65e3872fdc642 3x5_3/dilemma.kicad_pcb
+          P002_mousebites 90c660dd2419dd0285e87b06c165db5666d10a50 3x5_3/dilemma.kicad_pcb
+          P002_latest 6cb0ba3009cd2387a0a3bf0286029e88ca128a80 3x5_3/dilemma.kicad_pcb
+          P004_current a217dea6681f7891369c7c20f3f0fd1735f5c700 3x5_3_procyon/dilemma.kicad_pcb
+          P006_pre_mousebites ca95fa24749dbd94fedc0a8396e4188ed3dead27 4x6_4/dilemma.kicad_pcb
+          P006_mousebites 9336d20d64f3b1c112f83a9a5f08fdddbd4c91c2 4x6_4/dilemma.kicad_pcb
+          P006_latest bc36ea1f08bce4a09123f83e41df8776dfda028c 4x6_4/dilemma.kicad_pcb
+          EOF
+          sha256sum out/steps/*.step > out/STEP_SHA256SUMS.txt
+          ls -lh out/steps
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-historical-board-steps
+          path: out
+          retention-days: 1
