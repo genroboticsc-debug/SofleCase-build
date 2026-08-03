@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euxo pipefail
           python -m pip install --quiet gdown
-          gdown --id 1MFcQqCiyL5yJvnbtzXQjnc76ZFZv-bOa --output CareerPilotAI_Pro_1.0.0_source.zip
+          gdown 1MFcQqCiyL5yJvnbtzXQjnc76ZFZv-bOa --output CareerPilotAI_Pro_1.0.0_source.zip
           echo "ac9e4f427bbb47d784a262c2319f67582a11a75dae3530742402172939dde185  CareerPilotAI_Pro_1.0.0_source.zip" | sha256sum -c -
           unzip -q CareerPilotAI_Pro_1.0.0_source.zip -d build-src
           test -f build-src/CareerPilotAI/settings.gradle.kts
