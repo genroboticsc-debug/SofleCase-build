@@ -29,16 +29,14 @@ jobs:
       - name: Export board-only STEP references
         run: |
           mkdir -p out
-          for pair in \
-            'P001 3x5_2/dilemma.kicad_pcb' \
-            'P002 3x5_3/dilemma.kicad_pcb' \
-            'P004 3x5_3_procyon/dilemma.kicad_pcb' \
-            'P006 4x6_4/dilemma.kicad_pcb'; do
-            set -- $pair
-            id=$1
-            src=$2
-            kicad-cli pcb export step --force --board-only --cut-vias-in-body --grid-origin --no-optimize-step --output "out/${id}_native.step" "upstream/${src}"
-          done
+          while read -r id src; do
+            kicad-cli pcb export step --force --board-only --grid-origin --output "out/${id}_native.step" "upstream/${src}"
+          done <<'EOF'
+          P001 3x5_2/dilemma.kicad_pcb
+          P002 3x5_3/dilemma.kicad_pcb
+          P004 3x5_3_procyon/dilemma.kicad_pcb
+          P006 4x6_4/dilemma.kicad_pcb
+          EOF
           sha256sum out/* > out/SHA256SUMS.txt
           ls -lh out
       - uses: actions/upload-artifact@v4
