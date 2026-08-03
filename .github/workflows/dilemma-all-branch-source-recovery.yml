@@ -13,37 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Fetch all remote branches
-        run: |
-          git fetch --all --prune --tags
-      - name: Decode exact embedded Dilemma payloads
+      - name: Decode exact current fail-set payload
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p recovery/candidates recovery/inventory
-          git for-each-ref --format='%(refname)' refs/remotes/origin | sort > recovery/inventory/branches.txt
-          : > recovery/inventory/candidate_counts.tsv
-          while IFS= read -r ref; do
-            short=${ref#refs/remotes/origin/}
-            safe=$(printf '%s' "$short" | tr '/:' '__')
-            mapfile -t parts < <(git ls-tree -r --name-only "$ref" | grep -E 'project\.(tar\.xz|tgz|tar\.gz)\.b64\.part-[0-9]+$' | sort || true)
-            if ((${#parts[@]})); then
-              work="recovery/candidates/${safe}_embedded"
-              mkdir -p "$work/extracted"
-              : > "$work/project.b64"
-              for p in "${parts[@]}"; do git show "$ref:$p" >> "$work/project.b64"; done
-              tr -d '\r\n ' < "$work/project.b64" | base64 -d > "$work/project.payload"
-              tar -xf "$work/project.payload" -C "$work/extracted"
-              count=$(find "$work/extracted" -type f -path '*/scripts/*.py' | wc -l)
-              echo -e "$short\tembedded_parts\t$count" >> recovery/inventory/candidate_counts.tsv
-              sha256sum "$work/project.payload" > "$work/project.payload.sha256"
-            fi
-          done < recovery/inventory/branches.txt
+          set -euxo pipefail
+          mkdir -p recovery/extracted recovery/inventory
+          cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > recovery/project.tar.xz
+          xz -t recovery/project.tar.xz
+          tar -xJf recovery/project.tar.xz -C recovery/extracted
+          find recovery/extracted -type f | sort > recovery/inventory/files.txt
+          find recovery/extracted -type f -path '*/scripts/*.py' | sort > recovery/inventory/scripts.txt
+          sha256sum recovery/project.tar.xz > recovery/project.tar.xz.sha256
           find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: dilemma-all-branch-source-recovery
+          name: dilemma-current-failset-source
           path: recovery
           retention-days: 3
