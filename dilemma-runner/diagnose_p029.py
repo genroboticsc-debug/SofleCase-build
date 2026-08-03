@@ -52,8 +52,9 @@ try:
         try:
             shell = Shell(group)
             solid = Solid(shell).fix()
-            print('manual group', idx, 'shell closed', shell.is_closed, 'solid valid', solid.is_valid,
-                  'solids', len(solid.solids()), 'volume', solid.volume)
+            print('manual group', idx, 'solid valid', solid.is_valid,
+                  'solids', len(solid.solids()), 'volume', solid.volume,
+                  'shells', len(solid.shells()), 'faces', len(solid.faces()))
         except Exception as exc:
             print('manual group', idx, 'FAILED', type(exc).__name__, exc)
 except Exception as exc:
