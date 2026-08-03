@@ -38,12 +38,6 @@ for ruled in (True, False):
         print('full loft ruled=', ruled, 'FAILED', type(exc).__name__, exc)
 
 try:
-    solid = mod.sweep_exact_upper_branch(path, p, 'upper diagnostic')
-    print('sweep valid', solid.is_valid, 'solids', len(solid.solids()), 'volume', solid.volume)
-except Exception as exc:
-    print('sweep FAILED', type(exc).__name__, exc)
-
-try:
     outer_side = Face.make_surface_from_curves(bo, to)
     inner_side = Face.make_surface_from_curves(bi, ti)
     print('outer side', type(outer_side).__name__, 'faces', len(outer_side.faces()), 'valid', outer_side.is_valid)
