@@ -1,0 +1,98 @@
+name: CareerPilot Pro Android APK
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Download and verify upgraded source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --quiet gdown
+          gdown --id 1MFcQqCiyL5yJvnbtzXQjnc76ZFZv-bOa --output CareerPilotAI_Pro_1.0.0_source.zip
+          echo "ac9e4f427bbb47d784a262c2319f67582a11a75dae3530742402172939dde185  CareerPilotAI_Pro_1.0.0_source.zip" | sha256sum -c -
+          unzip -q CareerPilotAI_Pro_1.0.0_source.zip -d build-src
+          test -f build-src/CareerPilotAI/settings.gradle.kts
+          test -f build-src/CareerPilotAI/app/build.gradle.kts
+
+      - name: Build, test and package APK
+        working-directory: build-src/CareerPilotAI
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee "$GITHUB_WORKSPACE/careerpilot-pro-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify APK signature and package metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI-Pro.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI-Pro.apk
+          } | tee CareerPilotAI-Pro.validation.txt | tee -a careerpilot-pro-build.log
+          sha256sum CareerPilotAI-Pro.apk > CareerPilotAI-Pro.apk.sha256
+
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-build-diagnostics
+          path: careerpilot-pro-build.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Upload installable APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-Android-APK
+          path: |
+            CareerPilotAI-Pro.apk
+            CareerPilotAI-Pro.apk.sha256
+            CareerPilotAI-Pro.validation.txt
+          if-no-files-found: error
+          retention-days: 1
