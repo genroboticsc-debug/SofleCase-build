@@ -30,13 +30,6 @@ for name, wire in [('bo',bo),('to',to),('bi',bi),('ti',ti)]:
 print('bottom band edges', len(bottom.outer_wire().edges()), 'area', bottom.area)
 print('top band edges', len(top.outer_wire().edges()), 'area', top.area)
 
-for ruled in (True, False):
-    try:
-        solid = Solid.make_loft((bottom.outer_wire(), top.outer_wire()), ruled=ruled)
-        print('full loft ruled=', ruled, 'valid', solid.is_valid, 'solids', len(solid.solids()), 'volume', solid.volume)
-    except Exception as exc:
-        print('full loft ruled=', ruled, 'FAILED', type(exc).__name__, exc)
-
 try:
     outer_side = Face.make_surface_from_curves(bo, to)
     inner_side = Face.make_surface_from_curves(bi, ti)
