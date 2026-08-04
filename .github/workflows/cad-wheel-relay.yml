@@ -29,7 +29,8 @@ jobs:
           mkdir -p wheelhouse
           python -m pip download --dest wheelhouse \
             'build123d==0.11.1' \
-            'manifold3d==3.5.2'
+            'manifold3d==3.5.2' \
+            'trimesh==4.11.1'
           cd wheelhouse
           echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  build123d-0.11.1-py3-none-any.whl' | sha256sum -c -
           MANIFOLD=$(find . -maxdepth 1 -type f -name 'manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl' -printf '%f\n')
