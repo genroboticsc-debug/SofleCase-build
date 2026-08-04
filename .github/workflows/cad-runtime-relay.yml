@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - cad-runtime-relay-20260804
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
@@ -34,10 +37,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           names = sorted(p.name for p in Path('runtime_wheels').glob('*.whl'))
-          required = {
-              'build123d-0.11.1-py3-none-any.whl',
-          }
-          assert required.issubset(names), names
+          assert 'build123d-0.11.1-py3-none-any.whl' in names, names
           assert any(n.startswith('cadquery_ocp_novtk-7.9.3.1.1-cp313') and 'manylinux' in n for n in names), names
           assert any(n.startswith('manifold3d-3.5.2-cp313') and 'manylinux' in n for n in names), names
           print('\n'.join(names))
