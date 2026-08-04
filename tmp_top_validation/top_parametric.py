@@ -68,6 +68,7 @@ TR_STEP_X = TR_X + math.sqrt(
 TR_ARC_START_DEG = math.degrees(
     math.atan2(TR_STEP_Z - TR_Z, TR_STEP_X - TR_X)
 )
+TR_JUNCTION_EDGE_LENGTH = TR_STEP_X - X_RIGHT_WALL
 
 # Main opening
 MAIN_X = -4.78930378
@@ -210,14 +211,39 @@ def build_top():
             add(outer_profile_sketch())
         extrude(amount=-(Y_TOP - Y_BODY_LOW))
 
-        # F002 — R2 fillet on maximum-Y perimeter edges
-        top_edges = [
+        # F002 — exact R2 top fillet. The 0.076052190... mm top-right
+        # transition edge is shorter than the fillet radius and is consumed by
+        # the intersection of the adjacent offset fillet surfaces in the
+        # reference. It is therefore not a seed edge for the OpenCascade
+        # fillet; all remaining maximum-Y outer edges are selected.
+        candidate_top_edges = [
             edge
             for edge in top.edges()
             if abs(edge.center().Y - Y_TOP) <= 1.0e-6
         ]
+        transition_edges = [
+            edge
+            for edge in candidate_top_edges
+            if abs(edge.length - TR_JUNCTION_EDGE_LENGTH) <= 1.0e-6
+        ]
+        if len(transition_edges) != 1:
+            diagnostics = sorted(edge.length for edge in candidate_top_edges)
+            raise RuntimeError(
+                "Unable to identify the exact top-right transition edge; "
+                f"top edge lengths={diagnostics}"
+            )
+        transition_edge = transition_edges[0]
+        top_edges = [
+            edge for edge in candidate_top_edges if edge is not transition_edge
+        ]
         if not top_edges:
-            raise RuntimeError("Unable to identify Y=67.2 top perimeter edges")
+            raise RuntimeError("Unable to identify Y=67.2 fillet seed edges")
+        print(
+            "F002 fillet seed lengths:",
+            sorted(round(edge.length, 12) for edge in top_edges),
+            "excluded transition:",
+            round(transition_edge.length, 12),
+        )
         fillet(top_edges, radius=TOP_FILLET_RADIUS)
 
         # F003–F005 — clipped cylindrical mounting bosses
