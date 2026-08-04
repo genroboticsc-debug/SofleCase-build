@@ -1,0 +1,79 @@
+name: Dilemma Tenting Puck Partitioned Exact Validation
+
+on:
+  push:
+    branches:
+      - reverse-engineering/dilemma-tenting-puck
+    paths:
+      - ".github/workflows/dilemma_tenting_puck_partitioned_validation.yml"
+      - "dilemma_tenting_puck/validate_recovered_partitioned.py"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/dilemma_tenting_puck_partitioned_validation.yml"
+      - "dilemma_tenting_puck/validate_recovered_partitioned.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  partitioned-exact-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout branch and history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned exact CAD kernel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "build123d==0.11.1" "cadquery-ocp==7.9.3.1.1"
+
+      - name: Recover exact standalone candidate scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin dilemma-current-failset-20260803
+          mkdir -p /tmp/recovered recovered_sources partitioned_validation
+          : > /tmp/project.tar.xz.b64
+          for part in 00 01 02 03 04 05 06; do
+            git show "origin/dilemma-current-failset-20260803:dilemma-runner/project.tar.xz.b64.part-${part}" >> /tmp/project.tar.xz.b64
+          done
+          base64 --decode /tmp/project.tar.xz.b64 > /tmp/project.tar.xz
+          tar -xJf /tmp/project.tar.xz -C /tmp/recovered
+          opening=$(find /tmp/recovered -type f -name 'dilemma_case_tenting_puck_opening.py' | head -n1)
+          integrated=$(find /tmp/recovered -type f -name 'dilemma_case_integrated_tenting_puck.py' | head -n1)
+          test -n "$opening" && test -n "$integrated"
+          cp "$opening" recovered_sources/
+          cp "$integrated" recovered_sources/
+          sha256sum recovered_sources/*.py | tee partitioned_validation/source_sha256.txt
+          python -m py_compile recovered_sources/*.py dilemma_tenting_puck/validate_recovered_partitioned.py
+
+      - name: Fresh build and exact partitioned validation
+        shell: bash
+        run: |
+          set +e
+          python dilemma_tenting_puck/validate_recovered_partitioned.py 2>&1 | tee partitioned_validation/validation.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > partitioned_validation/validator_exit_code.txt
+          exit 0
+
+      - name: Upload partitioned validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-tenting-puck-partitioned-validation
+          path: |
+            recovered_sources/**
+            partitioned_validation/**
+          if-no-files-found: error
+          retention-days: 7
