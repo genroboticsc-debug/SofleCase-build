@@ -70,6 +70,10 @@ jobs:
               '''        "reference_exact_y_datums": abs(rp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(rp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n        "generated_exact_y_datums": abs(gp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(gp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n''',
               '''        "reference_exact_y_datums": abs(rp["vertex_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-9 and abs(rp["vertex_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-9,\n        "generated_exact_y_datums": abs(gp["vertex_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-9 and abs(gp["vertex_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-9,\n''',
           )
+          source = source.replace(
+              '''    }\n    metrics["checks"] = checks\n''',
+              '''    }\n    checks = {name: bool(value) for name, value in checks.items()}\n    metrics["checks"] = checks\n''',
+          )
           validator.write_text(source, encoding="utf-8")
           PY
 
