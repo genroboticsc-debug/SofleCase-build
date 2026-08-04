@@ -1,1 +1,1 @@
-Strict SROT explicit F001-F012 solid Boolean validation trigger: 2026-08-05T01:57+05:30
+Strict SROT offset-safe explicit Boolean-tree trigger: 2026-08-05T02:04+05:30
