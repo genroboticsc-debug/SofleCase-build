@@ -1,0 +1,72 @@
+name: Dilemma targeted historical file recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch all refs and recover targeted files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --all --tags --prune --force
+          mkdir -p recovery/by_object recovery/by_commit recovery/inventory
+          git rev-list --all --objects > recovery/inventory/all_objects.txt
+
+          patterns='(part_dilemma_nuts_v27\.py|dilemma_nuts_profiles\.json|dilemma_nuts_v27_step_facets\.npz|dilemma_3x5_2_tenting_puck_case\.py|dilemma_3x5_3_hotswap_mid\.py|dilemma_4x6_4_top\.py|dilemma_4x6_4_hotswap_mid\.py|pcb_dilemma_3x5_3_(left|right)\.py|pcb_dilemma_3x5_3_procyon_(left|right)\.py|pcb_dilemma_4x6_4_(left|right)\.py)$'
+          grep -E "$patterns" recovery/inventory/all_objects.txt > recovery/inventory/target_objects.txt || true
+
+          while read -r object path; do
+            [ -n "${object:-}" ] || continue
+            safe=$(printf '%s' "$path" | tr '/ ' '__')
+            out="recovery/by_object/${object}_${safe}"
+            git cat-file blob "$object" > "$out" 2>"$out.err" || true
+            if [ ! -s "$out" ]; then rm -f "$out"; fi
+          done < recovery/inventory/target_objects.txt
+
+          : > recovery/inventory/commit_paths.tsv
+          while IFS= read -r commit; do
+            git ls-tree -r --name-only "$commit" | grep -E "$patterns" | while read -r path; do
+              printf '%s\t%s\n' "$commit" "$path" >> recovery/inventory/commit_paths.tsv
+            done || true
+          done < <(git rev-list --all)
+          sort -u recovery/inventory/commit_paths.tsv -o recovery/inventory/commit_paths.tsv
+
+          while IFS=$'\t' read -r commit path; do
+            [ -n "${commit:-}" ] || continue
+            safe=$(printf '%s' "$path" | tr '/ ' '__')
+            out="recovery/by_commit/${commit:0:12}_${safe}"
+            git show "$commit:$path" > "$out" 2>"$out.err" || true
+            if [ ! -s "$out" ]; then rm -f "$out"; fi
+          done < recovery/inventory/commit_paths.tsv
+
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          rows=[]
+          for root in (Path('recovery/by_object'),Path('recovery/by_commit')):
+              for p in sorted(root.iterdir()):
+                  if not p.is_file() or p.suffix=='.err': continue
+                  data=p.read_bytes()
+                  rows.append({'path':str(p),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+          Path('recovery/inventory/files.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+          print(json.dumps({'files':len(rows),'unique_hashes':len({r['sha256'] for r in rows})},indent=2))
+          PY
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-targeted-historical-file-recovery
+          path: recovery
+          retention-days: 3
+          if-no-files-found: error
