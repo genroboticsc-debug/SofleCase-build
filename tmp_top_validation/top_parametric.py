@@ -22,7 +22,6 @@ from build123d import (
     BuildLine,
     BuildPart,
     BuildSketch,
-    CenterArc,
     Circle,
     FontStyle,
     Line,
@@ -33,6 +32,7 @@ from build123d import (
     Rectangle,
     Rot,
     Text,
+    ThreePointArc,
     add,
     export_step,
     export_stl,
@@ -111,48 +111,71 @@ def xz_plane(y: float) -> Plane:
     )
 
 
+def _circle_point(
+    center_x: float,
+    center_z: float,
+    radius: float,
+    angle_degrees: float,
+) -> tuple[float, float]:
+    """Exact analytic point on an identified circular feature."""
+    angle = math.radians(angle_degrees)
+    return (
+        center_x + radius * math.cos(angle),
+        center_z + radius * math.sin(angle),
+    )
+
+
 def outer_profile_sketch():
-    """Return the exact analytic outer profile as a build123d Sketch."""
+    """Return the exact analytic outer profile as a build123d Sketch.
+
+    Every adjacent edge is constructed from the same endpoint object. Circular
+    edges are true OpenCascade arcs defined by their identified centres,
+    radii, endpoints, and an exact analytic midpoint; no sampled polyline or
+    fitted spline is used.
+    """
+    radius = OUTER_RADIUS
+
+    bottom_left_center = (X_LEFT + radius, Z_BOTTOM + radius)
+    bottom_right_center = (X_RIGHT_WALL - radius, Z_BOTTOM + radius)
+    top_left_center = (X_LEFT + radius, Z_TOP - radius)
+
+    p0 = (X_LEFT, Z_BOTTOM + radius)
+    p1 = (X_LEFT + radius, Z_BOTTOM)
+    p2 = (X_RIGHT_WALL - radius, Z_BOTTOM)
+    p3 = (X_RIGHT_WALL, Z_BOTTOM + radius)
+    p4 = (X_RIGHT_WALL, TR_STEP_Z)
+    p5 = (TR_STEP_X, TR_STEP_Z)
+    p6 = (TR_X, Z_TOP)
+    p7 = (X_LEFT + radius, Z_TOP)
+    p8 = (X_LEFT, Z_TOP - radius)
+
+    mid_bottom_left = _circle_point(
+        bottom_left_center[0], bottom_left_center[1], radius, 225.0
+    )
+    mid_bottom_right = _circle_point(
+        bottom_right_center[0], bottom_right_center[1], radius, 315.0
+    )
+    mid_top_right = _circle_point(
+        TR_X,
+        TR_Z,
+        radius,
+        (TR_ARC_START_DEG + 90.0) / 2.0,
+    )
+    mid_top_left = _circle_point(
+        top_left_center[0], top_left_center[1], radius, 135.0
+    )
+
     with BuildSketch() as profile:
         with BuildLine():
-            CenterArc(
-                (X_LEFT + OUTER_RADIUS, Z_BOTTOM + OUTER_RADIUS),
-                OUTER_RADIUS,
-                180.0,
-                90.0,
-            )
-            Line(
-                (X_LEFT + OUTER_RADIUS, Z_BOTTOM),
-                (X_RIGHT_WALL - OUTER_RADIUS, Z_BOTTOM),
-            )
-            CenterArc(
-                (X_RIGHT_WALL - OUTER_RADIUS, Z_BOTTOM + OUTER_RADIUS),
-                OUTER_RADIUS,
-                270.0,
-                90.0,
-            )
-            Line(
-                (X_RIGHT_WALL, Z_BOTTOM + OUTER_RADIUS),
-                (X_RIGHT_WALL, TR_STEP_Z),
-            )
-            Line((X_RIGHT_WALL, TR_STEP_Z), (TR_STEP_X, TR_STEP_Z))
-            CenterArc(
-                (TR_X, TR_Z),
-                OUTER_RADIUS,
-                TR_ARC_START_DEG,
-                90.0 - TR_ARC_START_DEG,
-            )
-            Line((TR_X, Z_TOP), (X_LEFT + OUTER_RADIUS, Z_TOP))
-            CenterArc(
-                (X_LEFT + OUTER_RADIUS, Z_TOP - OUTER_RADIUS),
-                OUTER_RADIUS,
-                90.0,
-                90.0,
-            )
-            Line(
-                (X_LEFT, Z_TOP - OUTER_RADIUS),
-                (X_LEFT, Z_BOTTOM + OUTER_RADIUS),
-            )
+            ThreePointArc(p0, mid_bottom_left, p1)
+            Line(p1, p2)
+            ThreePointArc(p2, mid_bottom_right, p3)
+            Line(p3, p4)
+            Line(p4, p5)
+            ThreePointArc(p5, mid_top_right, p6)
+            Line(p6, p7)
+            ThreePointArc(p7, mid_top_left, p8)
+            Line(p8, p0)
         make_face()
     return profile.sketch
 
