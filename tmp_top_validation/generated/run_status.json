@@ -1,0 +1,8 @@
+{
+  "strict_srot": true,
+  "generation": false,
+  "validation": false,
+  "overall_pass": false,
+  "exception": "RuntimeError: F005 boss union is invalid",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/remote_runner.py\", line 80, in run\n    step_path, stl_path = export_model(GENERATED)\n                          ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 473, in export_model\n    model = build_top()\n            ^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 414, in build_top\n    raise RuntimeError(f\"F{feature_index:03d} boss union is invalid\")\nRuntimeError: F005 boss union is invalid\n"
+}
