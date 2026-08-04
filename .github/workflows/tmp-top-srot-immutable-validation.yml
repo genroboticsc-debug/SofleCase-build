@@ -1,5 +1,5 @@
-# Tessellation tolerance sweep trigger 2026-08-05T05:08+05:30
-name: Immutable top tessellation tolerance sweep
+# Absolute tessellation tolerance sweep trigger 2026-08-05T05:15+05:30
+name: Immutable top absolute tessellation sweep
 
 on:
   pull_request:
@@ -55,7 +55,7 @@ jobs:
           python -m py_compile tmp_top_validation/top_parametric.py
           git diff --check
 
-      - name: Sweep isolated OCCT circle tessellation tolerances
+      - name: Sweep absolute OCCT deflection
         shell: bash
         run: |
           set -euxo pipefail
@@ -65,6 +65,7 @@ jobs:
           python - <<'PY' 2>&1 | tee generated/tessellation_tolerance/sweep.log
           from __future__ import annotations
 
+          import inspect
           import json
           import math
           from pathlib import Path
@@ -76,16 +77,23 @@ jobs:
           import top_parametric as tp
 
           out = Path("generated/tessellation_tolerance")
-          linear_values = [0.0028, 0.0030, 0.0031, 0.0032, 0.00325, 0.0033, 0.003333333333, 0.00335, 0.0034, 0.0035, 0.0036]
-          angular_values = [0.08, 0.10, 0.12, 0.15, 0.20]
+          print("export_stl signature:", inspect.signature(export_stl), flush=True)
+          linear_values = [0.0028, 0.0030, 0.0031, 0.0032, 0.00325, 0.00328, 0.00330, 0.00332, 0.003333333333, 0.00334, 0.00336, 0.00338, 0.00340, 0.00345, 0.00350]
+          angular_values = [0.20, 0.25, 0.30, 0.40, 0.60, 1.00]
           radii = {
+              "mount_bore_r2p3": tp.MOUNT_BORE_RADIUS,
               "boss_r4p3": tp.BOSS_RADIUS,
               "through_r19p5": tp.THROUGH_RADIUS,
               "counterbore_r21p5": tp.COUNTERBORE_RADIUS,
-              "mount_bore_r2p3": tp.MOUNT_BORE_RADIUS,
+          }
+          expected = {
+              "mount_bore_r2p3": 59,
+              "boss_r4p3": 80,
+              "through_r19p5": 170,
+              "counterbore_r21p5": 179,
           }
 
-          def ring_stats(path: Path, radius: float) -> dict[str, float | int | list[float]]:
+          def ring_stats(path: Path, radius: float) -> dict[str, float | int]:
               mesh = trimesh.load_mesh(path, process=False)
               if isinstance(mesh, trimesh.Scene):
                   mesh = mesh.to_mesh()
@@ -111,27 +119,26 @@ jobs:
           rows = []
           for linear in linear_values:
               for angular in angular_values:
-                  row = {"linear_tolerance_mm": linear, "angular_tolerance_rad": angular, "features": {}}
+                  row = {"linear_tolerance_mm": linear, "angular_tolerance_rad": angular, "relative": False, "features": {}}
                   for label, radius in radii.items():
                       solid = tp._subtract_cylindrical_bore(0.0, 0.0, radius, 0.0, 1.0)
                       path = out / f"{label}__lin_{linear:.12g}__ang_{angular:.12g}.stl"
-                      export_stl(solid, path, tolerance=linear, angular_tolerance=angular, ascii_format=False)
+                      export_stl(solid, path, tolerance=linear, angular_tolerance=angular, relative=False, ascii_format=False)
                       row["features"][label] = ring_stats(path, radius)
                       path.unlink()
-                  boss = row["features"]["boss_r4p3"]
-                  through = row["features"]["through_r19p5"]
-                  row["target_score"] = abs(boss["ring_vertex_count"] - 80) + abs(through["ring_vertex_count"] - 170)
+                  row["target_score"] = sum(abs(row["features"][name]["ring_vertex_count"] - count) for name, count in expected.items())
                   rows.append(row)
                   print(json.dumps(row, sort_keys=True), flush=True)
 
           rows.sort(key=lambda item: (item["target_score"], abs(item["linear_tolerance_mm"] - 0.003333333333), item["angular_tolerance_rad"]))
           report = {
-              "targets": {
-                  "boss_r4p3_expected_segments": 80,
-                  "through_r19p5_expected_segments": 170,
-                  "inferred_reference_chord_sag_mm": 0.00333,
+              "reference_targets": {
+                  "mount_bore_r2p3_segments": 59,
+                  "boss_r4p3_inferred_full_circle_segments": 80,
+                  "through_r19p5_segments": 170,
+                  "counterbore_r21p5_inferred_full_circle_segments": 179,
               },
-              "best": rows[:12],
+              "best": rows[:20],
               "all": rows,
           }
           (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -140,10 +147,10 @@ jobs:
           PY
           cat generated/tessellation_tolerance/report.json
 
-      - name: Upload tolerance sweep evidence
+      - name: Upload absolute tolerance sweep evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-tessellation-sweep-${{ github.run_id }}
+          name: immutable-top-absolute-tessellation-sweep-${{ github.run_id }}
           path: tmp_top_validation/generated/tessellation_tolerance/**
           if-no-files-found: warn
