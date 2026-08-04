@@ -1,5 +1,5 @@
-# Frozen lowercase-v residual localization trigger 2026-08-05T04:08+05:30
-name: Immutable top Strict SROT validation
+# Tessellation tolerance sweep trigger 2026-08-05T05:08+05:30
+name: Immutable top tessellation tolerance sweep
 
 on:
   pull_request:
@@ -11,11 +11,11 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out immutable lowercase-v localization commit
+      - name: Check out immutable lowercase-v source commit
         uses: actions/checkout@v4
         with:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
@@ -43,19 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r tmp_top_validation/requirements.txt
 
-      - name: Reassemble and verify immutable reference STL
-        shell: bash
-        run: |
-          set -euxo pipefail
-          REF_DIR=tmp_top_validation/reference
-          cat "$REF_DIR"/top.stl.xz.b64.00 "$REF_DIR"/top.stl.xz.b64.01 "$REF_DIR"/top.stl.xz.b64.02 "$REF_DIR"/top.stl.xz.b64.03 "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
-          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64 | awk '{print $1}')" = "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
-          base64 --decode "$REF_DIR"/top.stl.xz.b64 > "$REF_DIR"/top.stl.xz
-          test "$(sha256sum "$REF_DIR"/top.stl.xz | awk '{print $1}')" = "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
-          xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
-          test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
-
-      - name: Install and compile final recovered feature tree plus localizer
+      - name: Install final recovered lowercase-v feature tree
         shell: bash
         run: |
           set -euxo pipefail
@@ -64,28 +52,98 @@ jobs:
           python tmp_top_validation/apply_f012_all_faces_fix.py
           python tmp_top_validation/apply_f012_font_size_fix.py
           python tmp_top_validation/apply_f012_lowercase_v_fix.py
-          python -m py_compile \
-            tmp_top_validation/top_parametric.py \
-            tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/validate_fast_manifold.py \
-            tmp_top_validation/validate_feature_tree_manifold.py \
-            tmp_top_validation/diagnose_difference_components.py
+          python -m py_compile tmp_top_validation/top_parametric.py
           git diff --check
 
-      - name: Localize lowercase-v bidirectional Boolean residuals
+      - name: Sweep isolated OCCT circle tessellation tolerances
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
-          rm -rf generated
-          mkdir -p generated
-          python diagnose_difference_components.py 2>&1 | tee generated/lowercase_difference_localization.log
-          cat generated/difference_components/report.json
+          rm -rf generated/tessellation_tolerance
+          mkdir -p generated/tessellation_tolerance
+          python - <<'PY' 2>&1 | tee generated/tessellation_tolerance/sweep.log
+          from __future__ import annotations
 
-      - name: Upload lowercase residual evidence
+          import json
+          import math
+          from pathlib import Path
+
+          import numpy as np
+          import trimesh
+          from build123d import export_stl
+
+          import top_parametric as tp
+
+          out = Path("generated/tessellation_tolerance")
+          linear_values = [0.0028, 0.0030, 0.0031, 0.0032, 0.00325, 0.0033, 0.003333333333, 0.00335, 0.0034, 0.0035, 0.0036]
+          angular_values = [0.08, 0.10, 0.12, 0.15, 0.20]
+          radii = {
+              "boss_r4p3": tp.BOSS_RADIUS,
+              "through_r19p5": tp.THROUGH_RADIUS,
+              "counterbore_r21p5": tp.COUNTERBORE_RADIUS,
+              "mount_bore_r2p3": tp.MOUNT_BORE_RADIUS,
+          }
+
+          def ring_stats(path: Path, radius: float) -> dict[str, float | int | list[float]]:
+              mesh = trimesh.load_mesh(path, process=False)
+              if isinstance(mesh, trimesh.Scene):
+                  mesh = mesh.to_mesh()
+              vertices = np.asarray(mesh.vertices, dtype=float)
+              radial = np.hypot(vertices[:, 0], vertices[:, 2])
+              mask = np.isclose(radial, radius, atol=2.0e-5)
+              angles = np.mod(np.arctan2(vertices[mask, 2], vertices[mask, 0]), 2.0 * math.pi)
+              rounded = np.unique(np.round(angles, 12))
+              rounded.sort()
+              wrapped = np.r_[rounded, rounded[0] + 2.0 * math.pi]
+              steps_deg = np.degrees(np.diff(wrapped))
+              median_step = float(np.median(steps_deg))
+              return {
+                  "ring_vertex_count": int(len(rounded)),
+                  "median_step_deg": median_step,
+                  "min_step_deg": float(np.min(steps_deg)),
+                  "max_step_deg": float(np.max(steps_deg)),
+                  "median_chord_sag_mm": float(radius * (1.0 - math.cos(math.radians(median_step) / 2.0))),
+                  "face_count": int(len(mesh.faces)),
+                  "vertex_count": int(len(mesh.vertices)),
+              }
+
+          rows = []
+          for linear in linear_values:
+              for angular in angular_values:
+                  row = {"linear_tolerance_mm": linear, "angular_tolerance_rad": angular, "features": {}}
+                  for label, radius in radii.items():
+                      solid = tp._subtract_cylindrical_bore(0.0, 0.0, radius, 0.0, 1.0)
+                      path = out / f"{label}__lin_{linear:.12g}__ang_{angular:.12g}.stl"
+                      export_stl(solid, path, tolerance=linear, angular_tolerance=angular, ascii_format=False)
+                      row["features"][label] = ring_stats(path, radius)
+                      path.unlink()
+                  boss = row["features"]["boss_r4p3"]
+                  through = row["features"]["through_r19p5"]
+                  row["target_score"] = abs(boss["ring_vertex_count"] - 80) + abs(through["ring_vertex_count"] - 170)
+                  rows.append(row)
+                  print(json.dumps(row, sort_keys=True), flush=True)
+
+          rows.sort(key=lambda item: (item["target_score"], abs(item["linear_tolerance_mm"] - 0.003333333333), item["angular_tolerance_rad"]))
+          report = {
+              "targets": {
+                  "boss_r4p3_expected_segments": 80,
+                  "through_r19p5_expected_segments": 170,
+                  "inferred_reference_chord_sag_mm": 0.00333,
+              },
+              "best": rows[:12],
+              "all": rows,
+          }
+          (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+          print("BEST")
+          print(json.dumps(report["best"], indent=2))
+          PY
+          cat generated/tessellation_tolerance/report.json
+
+      - name: Upload tolerance sweep evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-lowercase-residual-${{ github.run_id }}
-          path: tmp_top_validation/generated/**
+          name: immutable-top-tessellation-sweep-${{ github.run_id }}
+          path: tmp_top_validation/generated/tessellation_tolerance/**
           if-no-files-found: warn
