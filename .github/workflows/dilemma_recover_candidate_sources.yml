@@ -1,4 +1,4 @@
-name: Recover Dilemma Tenting Puck Candidate Sources
+name: Recover and Validate Dilemma Tenting Puck Candidates
 
 on:
   push:
@@ -6,27 +6,39 @@ on:
       - reverse-engineering/dilemma-tenting-puck
     paths:
       - ".github/workflows/dilemma_recover_candidate_sources.yml"
+      - "dilemma_tenting_puck/validate_recovered_candidates.py"
   pull_request:
     branches:
       - master
     paths:
       - ".github/workflows/dilemma_recover_candidate_sources.yml"
+      - "dilemma_tenting_puck/validate_recovered_candidates.py"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  recover:
+  recover-and-validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - name: Checkout work branch with history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Recover historical project archive
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install exact CAD kernel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "build123d==0.11.1" "cadquery-ocp==7.9.3.1.1"
+
+      - name: Recover historical standalone scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -45,11 +57,25 @@ jobs:
           cp "$integrated" recovered_sources/
           sha256sum recovered_sources/*.py | tee recovered_sources/SHA256SUMS.txt
           wc -l -c recovered_sources/*.py | tee recovered_sources/SIZES.txt
+          python -m py_compile recovered_sources/*.py dilemma_tenting_puck/validate_recovered_candidates.py
 
-      - name: Upload recovered standalone sources
+      - name: Build and exact-validate recovered candidates
+        shell: bash
+        run: |
+          set +e
+          mkdir -p recovered_validation
+          python dilemma_tenting_puck/validate_recovered_candidates.py 2>&1 | tee recovered_validation/validation.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > recovered_validation/validator_exit_code.txt
+          exit 0
+
+      - name: Upload recovered sources and validation
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dilemma-recovered-candidate-sources
-          path: recovered_sources/**
+          name: dilemma-recovered-candidate-validation
+          path: |
+            recovered_sources/**
+            recovered_validation/**
           if-no-files-found: error
           retention-days: 7
