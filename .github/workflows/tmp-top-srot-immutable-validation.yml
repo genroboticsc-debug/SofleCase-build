@@ -45,7 +45,10 @@ jobs:
           python -m pip install --upgrade pip
           mkdir -p runtime_wheels
           python -m pip download --only-binary=:all: --no-deps \
-            --dest runtime_wheels cadquery-ocp==7.9.3.1.1
+            --dest runtime_wheels \
+            cadquery-ocp==7.9.3.1.1 \
+            cadquery-ocp-proxy==7.9.3.1.1 \
+            vtk==9.6.2
           sha256sum runtime_wheels/* > runtime_wheels/SHA256SUMS.txt
           cat runtime_wheels/SHA256SUMS.txt
           python -m pip install --only-binary=:all: \
@@ -54,11 +57,12 @@ jobs:
             trimesh==4.11.1 \
             numpy==2.3.5
           python - <<'PY'
-          import build123d, OCP, numpy, trimesh
+          import build123d, OCP, numpy, trimesh, vtk
           print('build123d', getattr(build123d, '__version__', 'unknown'))
           print('OCP', getattr(OCP, '__version__', 'unknown'))
           print('numpy', numpy.__version__)
           print('trimesh', trimesh.__version__)
+          print('vtk', vtk.vtkVersion.GetVTKVersion())
           PY
 
       - name: Run clean strict SROT and true Boolean validation
@@ -72,7 +76,7 @@ jobs:
           echo "$status" > reports/github_actions_exit_code.txt
           exit 0
 
-      - name: Upload generated geometry, reports, and exact OCC wheel
+      - name: Upload generated geometry, reports, and exact OCC runtime wheels
         if: always()
         uses: actions/upload-artifact@v4
         with:
