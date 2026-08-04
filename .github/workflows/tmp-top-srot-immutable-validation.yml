@@ -1,4 +1,4 @@
-# Frozen complete F012 multi-face diagnostic trigger 2026-08-05T03:35+05:30
+# Frozen recovered F012 font-size diagnostic trigger 2026-08-05T03:40+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -21,7 +21,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 2c1b4c822e6ce0c29ed8314776ce4bb0a5fffac0
+          ref: 46c4e1e9535f266542e9f14dd3256da000031d4a
 
       - name: Verify reference chunks
         shell: bash
@@ -85,23 +85,24 @@ jobs:
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/diagnose_engraving.py \
-            tmp_top_validation/diagnose_engraving_all_faces.py
+            tmp_top_validation/diagnose_engraving_all_faces.py \
+            tmp_top_validation/diagnose_engraving_size.py
           git diff --check
 
-      - name: Diagnose complete F012 multi-face engraving
+      - name: Diagnose recovered F012 font size
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_engraving_all_faces.py 2>&1 | tee generated/engraving_all_faces_diagnostic.log
-          cat generated/engraving_all_faces_diagnostic/report.json
+          python diagnose_engraving_size.py 2>&1 | tee generated/engraving_size_diagnostic.log
+          cat generated/engraving_size_diagnostic/report.json
 
       - name: Upload engraving evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-engraving-all-faces-${{ github.run_id }}
+          name: immutable-top-engraving-size-${{ github.run_id }}
           path: tmp_top_validation/generated/**
           if-no-files-found: warn
