@@ -76,6 +76,7 @@ jobs:
         run: |
           set -euxo pipefail
           python tmp_top_validation/apply_explicit_feature_fix.py
+          python tmp_top_validation/apply_top_right_boss_clip_fix.py
           python -m py_compile tmp_top_validation/top_parametric.py
           git diff --check
 
@@ -117,9 +118,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tmp_top_validation/top_parametric.py
           git commit -m "Use explicit robust operands for downstream CAD features"
-          # The source correction is committed. Remove only reconstructed and
-          # generated working-tree files before rebasing against concurrent
-          # trigger commits; no generated geometry is committed.
           git reset --hard HEAD
           git clean -fd
           git fetch origin tmp/top-exact-validation-20260804
