@@ -64,7 +64,7 @@ jobs:
           echo "0eac18187e9688ad8979c0db32f5e09382332214f87f186b0d404400a1c58320  careerpilot-22.patch.xz" | sha256sum -c - | tee -a "$LOG"
           xz -dc careerpilot-22.patch.xz > careerpilot-22.patch
           echo "f3e4a974ce1731ab7f9227bcf7c1f0a37cb0c678ad88f25f3d0783b5a04f13f4  careerpilot-22.patch" | sha256sum -c - | tee -a "$LOG"
-          cd build-src/cp2src
+          cd build-src/CareerPilotAI
           patch -p4 --forward --batch < "$GITHUB_WORKSPACE/careerpilot-22.patch" | tee -a "$LOG"
           grep -q 'versionName = "2.2.0-beta"' app/build.gradle.kts
           grep -q 'AccountAccess' app/src/main/java/com/careerpilot/ai/ai/AiModels.kt
@@ -92,7 +92,7 @@ jobs:
           test "$ok" -ge 3
 
       - name: Build tests and APK
-        working-directory: build-src/cp2src
+        working-directory: build-src/CareerPilotAI
         shell: bash
         run: |
           set +e
@@ -105,7 +105,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cp build-src/cp2src/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.2.apk
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.2.apk
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           {
