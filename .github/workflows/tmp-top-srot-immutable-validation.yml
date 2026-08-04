@@ -1,4 +1,4 @@
-# Frozen first-character engraving diagnostic trigger 2026-08-05T03:54+05:30
+# Frozen lowercase-v final Boolean validation trigger 2026-08-05T04:01+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out immutable first-character diagnostic commit
+      - name: Check out immutable lowercase-v validation commit
         uses: actions/checkout@v4
         with:
-          ref: 782bcfeeaf8763588dc5b7beb10b8fb3d3dc9131
+          ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -58,7 +58,7 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install and compile final feature tree plus diagnostic
+      - name: Install and compile final recovered feature tree
         shell: bash
         run: |
           set -euxo pipefail
@@ -66,28 +66,30 @@ jobs:
           python tmp_top_validation/apply_f005_boolean_tolerance_fix.py
           python tmp_top_validation/apply_f012_all_faces_fix.py
           python tmp_top_validation/apply_f012_font_size_fix.py
+          python tmp_top_validation/apply_f012_lowercase_v_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/diagnose_engraving.py \
-            tmp_top_validation/diagnose_engraving_all_faces.py \
-            tmp_top_validation/diagnose_engraving_first_char.py
+            tmp_top_validation/validate_fast_manifold.py \
+            tmp_top_validation/validate_feature_tree_manifold.py \
+            tmp_top_validation/apply_f012_lowercase_v_fix.py
           git diff --check
 
-      - name: Validate uppercase versus lowercase first glyph
+      - name: Run Strict SROT, STEP/STL congruence, and bidirectional Boolean
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_engraving_first_char.py 2>&1 | tee generated/engraving_first_char.log
-          cat generated/engraving_first_char_diagnostic/report.json
+          python validate_feature_tree_manifold.py 2>&1 | tee generated/workflow.log
+          cat generated/strict_srot_report.json
+          cat generated/feature_tree_validation_report.json
 
-      - name: Upload first-character evidence
+      - name: Upload complete validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-first-character-${{ github.run_id }}
+          name: immutable-top-lowercase-v-validation-${{ github.run_id }}
           path: tmp_top_validation/generated/**
           if-no-files-found: warn
