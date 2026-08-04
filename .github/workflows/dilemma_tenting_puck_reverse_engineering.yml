@@ -43,6 +43,7 @@ jobs:
           python dilemma_tenting_puck/apply_baseline_refinement.py
           python dilemma_tenting_puck/apply_controller_order_fix.py
           python dilemma_tenting_puck/apply_controller_baseline_bypass.py
+          python dilemma_tenting_puck/apply_honeycomb_batch_fix.py
           python -m py_compile \
             dilemma_tenting_puck/dilemma_tenting_puck_family.py \
             dilemma_tenting_puck/validate_dilemma_tenting_puck.py
