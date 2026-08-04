@@ -1,0 +1,43 @@
+name: Exact CAD wheel relay
+
+on:
+  push:
+    branches:
+      - chatgpt/cad-wheel-relay-20260804
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download pinned CAD wheelhouse
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --dest wheelhouse \
+            'build123d==0.11.1' \
+            'manifold3d==3.5.2'
+          cd wheelhouse
+          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  build123d-0.11.1-py3-none-any.whl' | sha256sum -c -
+          MANIFOLD=$(find . -maxdepth 1 -type f -name 'manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl' -printf '%f\n')
+          test -n "$MANIFOLD"
+          echo "bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45  $MANIFOLD" | sha256sum -c -
+          sha256sum *.whl > SHA256SUMS.txt
+
+      - name: Upload exact wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-cad-wheelhouse-cp313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
