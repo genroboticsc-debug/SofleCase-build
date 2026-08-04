@@ -1,1 +1,1 @@
-Exact analytic R2 sweep diagnostic trigger: 2026-08-05T00:42+05:30
+Exact solid-offset R2 cap diagnostic trigger: 2026-08-05T00:49+05:30
