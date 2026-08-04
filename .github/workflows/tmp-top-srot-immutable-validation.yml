@@ -1,5 +1,5 @@
-# Native OCCT absolute deflection sweep trigger 2026-08-05T05:22+05:30
-name: Immutable top native absolute tessellation sweep
+# Full native absolute-deflection validation matrix 2026-08-05T05:32+05:30
+name: Immutable top absolute-deflection validation matrix
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -43,7 +43,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r tmp_top_validation/requirements.txt
 
-      - name: Install final recovered lowercase-v feature tree
+      - name: Reassemble and verify immutable reference STL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          REF_DIR=tmp_top_validation/reference
+          cat "$REF_DIR"/top.stl.xz.b64.00 "$REF_DIR"/top.stl.xz.b64.01 "$REF_DIR"/top.stl.xz.b64.02 "$REF_DIR"/top.stl.xz.b64.03 "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64 | awk '{print $1}')" = "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
+          base64 --decode "$REF_DIR"/top.stl.xz.b64 > "$REF_DIR"/top.stl.xz
+          test "$(sha256sum "$REF_DIR"/top.stl.xz | awk '{print $1}')" = "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
+          xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
+          test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
+
+      - name: Install and compile final recovered feature tree
         shell: bash
         run: |
           set -euxo pipefail
@@ -52,109 +64,103 @@ jobs:
           python tmp_top_validation/apply_f012_all_faces_fix.py
           python tmp_top_validation/apply_f012_font_size_fix.py
           python tmp_top_validation/apply_f012_lowercase_v_fix.py
-          python -m py_compile tmp_top_validation/top_parametric.py
+          python -m py_compile \
+            tmp_top_validation/top_parametric.py \
+            tmp_top_validation/strict_srot_check.py \
+            tmp_top_validation/validate_fast_manifold.py \
+            tmp_top_validation/validate_feature_tree_manifold.py
           git diff --check
 
-      - name: Sweep native OCCT absolute deflection
+      - name: Run full native absolute-deflection matrix
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
-          rm -rf generated/tessellation_tolerance
-          mkdir -p generated/tessellation_tolerance
-          python - <<'PY' 2>&1 | tee generated/tessellation_tolerance/sweep.log
+          rm -rf generated/absolute_matrix
+          mkdir -p generated/absolute_matrix
+          python - <<'PY' 2>&1 | tee generated/absolute_matrix/matrix.log
           from __future__ import annotations
 
           import json
-          import math
           from pathlib import Path
 
-          import numpy as np
           import trimesh
           from OCP.BRepMesh import BRepMesh_IncrementalMesh
           from OCP.StlAPI import StlAPI_Writer
 
-          import top_parametric as tp
+          import validate_feature_tree_manifold as vf
 
-          out = Path("generated/tessellation_tolerance")
-          linear_values = [0.00328, 0.00330, 0.00332, 0.0033296, 0.003333333333, 0.00334, 0.003345, 0.0033485, 0.00336]
-          angular_values = [0.20, 0.30, 0.40, 0.60, 1.00]
-          radii = {
-              "mount_bore_r2p3": tp.MOUNT_BORE_RADIUS,
-              "boss_r4p3": tp.BOSS_RADIUS,
-              "through_r19p5": tp.THROUGH_RADIUS,
-              "counterbore_r21p5": tp.COUNTERBORE_RADIUS,
-          }
-          expected = {
-              "mount_bore_r2p3": 59,
-              "boss_r4p3": 80,
-              "through_r19p5": 170,
-              "counterbore_r21p5": 179,
-          }
+          matrix_root = Path("generated/absolute_matrix")
+          candidates = [0.006666666667, 0.006680000000, 0.006695000000]
+          angular = 0.60
+          summaries = []
 
-          def export_absolute(shape, path: Path, linear: float, angular: float) -> None:
-              mesher = BRepMesh_IncrementalMesh(shape.wrapped, linear, False, angular, True)
-              mesher.Perform()
-              if not mesher.IsDone():
-                  raise RuntimeError(f"OCCT meshing failed for {path.name}")
-              writer = StlAPI_Writer()
-              writer.ASCIIMode = False
-              if not writer.Write(shape.wrapped, str(path)):
-                  raise RuntimeError(f"OCCT STL write failed for {path.name}")
+          def make_tessellator(linear: float, features_dir: Path):
+              def tessellate_shape(shape, name: str):
+                  features_dir.mkdir(parents=True, exist_ok=True)
+                  path = features_dir / f"{name}.stl"
+                  mesher = BRepMesh_IncrementalMesh(shape.wrapped, linear, False, angular, True)
+                  mesher.Perform()
+                  if not mesher.IsDone():
+                      raise RuntimeError(f"OCCT absolute meshing failed for {name}")
+                  writer = StlAPI_Writer()
+                  writer.ASCIIMode = False
+                  if not writer.Write(shape.wrapped, str(path)):
+                      raise RuntimeError(f"OCCT STL write failed for {name}")
+                  mesh = trimesh.load_mesh(path, process=True)
+                  return vf.as_mesh(mesh, name)
+              return tessellate_shape
 
-          def ring_stats(path: Path, radius: float) -> dict[str, float | int]:
-              mesh = trimesh.load_mesh(path, process=False)
-              if isinstance(mesh, trimesh.Scene):
-                  mesh = mesh.to_mesh()
-              vertices = np.asarray(mesh.vertices, dtype=float)
-              radial = np.hypot(vertices[:, 0], vertices[:, 2])
-              mask = np.isclose(radial, radius, atol=2.0e-5)
-              angles = np.mod(np.arctan2(vertices[mask, 2], vertices[mask, 0]), 2.0 * math.pi)
-              rounded = np.unique(np.round(angles, 12))
-              rounded.sort()
-              wrapped = np.r_[rounded, rounded[0] + 2.0 * math.pi]
-              steps_deg = np.degrees(np.diff(wrapped))
-              median_step = float(np.median(steps_deg))
-              return {
-                  "ring_vertex_count": int(len(rounded)),
-                  "median_step_deg": median_step,
-                  "min_step_deg": float(np.min(steps_deg)),
-                  "max_step_deg": float(np.max(steps_deg)),
-                  "median_chord_sag_mm": float(radius * (1.0 - math.cos(math.radians(median_step) / 2.0))),
-                  "face_count": int(len(mesh.faces)),
-                  "vertex_count": int(len(mesh.vertices)),
-              }
+          for linear in candidates:
+              tag = f"lin_{linear:.12f}".replace(".", "p")
+              out = matrix_root / tag
+              out.mkdir(parents=True, exist_ok=True)
+              vf.GENERATED = out
+              vf.FEATURES = out / "feature_meshes"
+              vf.tessellate_shape = make_tessellator(linear, vf.FEATURES)
+              print(f"=== FULL VALIDATION linear={linear:.12f} angular={angular:.6f} relative=False ===", flush=True)
+              try:
+                  return_code = vf.main()
+                  report_path = out / "feature_tree_validation_report.json"
+                  report = json.loads(report_path.read_text(encoding="utf-8"))
+                  metrics = report.get("metrics", {})
+                  summary = {
+                      "linear_tolerance_mm": linear,
+                      "angular_tolerance_rad": angular,
+                      "relative": False,
+                      "return_code": return_code,
+                      "overall_pass": report.get("overall_pass", False),
+                      "checks": report.get("checks", {}),
+                      "symmetric_difference_volume_mm3": metrics.get("symmetric_difference_volume_mm3"),
+                      "symmetric_difference_percent": metrics.get("symmetric_difference_percent"),
+                      "generated_minus_reference_volume_mm3": metrics.get("generated_minus_reference_volume_mm3"),
+                      "reference_minus_generated_volume_mm3": metrics.get("reference_minus_generated_volume_mm3"),
+                      "generated_stl_volume_mm3": metrics.get("generated_stl_volume_mm3"),
+                      "generated_stl_area_mm2": metrics.get("generated_stl_area_mm2"),
+                  }
+              except Exception as exc:
+                  summary = {
+                      "linear_tolerance_mm": linear,
+                      "angular_tolerance_rad": angular,
+                      "relative": False,
+                      "overall_pass": False,
+                      "exception": repr(exc),
+                  }
+              summaries.append(summary)
+              print(json.dumps(summary, indent=2), flush=True)
 
-          rows = []
-          for linear in linear_values:
-              for angular in angular_values:
-                  row = {"linear_tolerance_mm": linear, "angular_tolerance_rad": angular, "relative": False, "features": {}}
-                  for label, radius in radii.items():
-                      solid = tp._subtract_cylindrical_bore(0.0, 0.0, radius, 0.0, 1.0)
-                      path = out / f"{label}__lin_{linear:.12g}__ang_{angular:.12g}.stl"
-                      export_absolute(solid, path, linear, angular)
-                      row["features"][label] = ring_stats(path, radius)
-                      path.unlink()
-                  row["target_score"] = sum(abs(row["features"][name]["ring_vertex_count"] - count) for name, count in expected.items())
-                  rows.append(row)
-                  print(json.dumps(row, sort_keys=True), flush=True)
-
-          rows.sort(key=lambda item: (item["target_score"], abs(item["linear_tolerance_mm"] - 0.003333333333), item["angular_tolerance_rad"]))
-          report = {
-              "reference_targets": expected,
-              "best": rows[:20],
-              "all": rows,
-          }
-          (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-          print("BEST")
-          print(json.dumps(report["best"], indent=2))
+          summaries.sort(key=lambda item: (not item.get("overall_pass", False), item.get("symmetric_difference_percent", float("inf"))))
+          final = {"candidates": summaries, "best": summaries[0]}
+          (matrix_root / "summary.json").write_text(json.dumps(final, indent=2), encoding="utf-8")
+          print("=== MATRIX SUMMARY ===")
+          print(json.dumps(final, indent=2))
           PY
-          cat generated/tessellation_tolerance/report.json
+          cat generated/absolute_matrix/summary.json
 
-      - name: Upload native absolute tolerance sweep evidence
+      - name: Upload full absolute-deflection evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-native-absolute-sweep-${{ github.run_id }}
-          path: tmp_top_validation/generated/tessellation_tolerance/**
+          name: immutable-top-absolute-validation-matrix-${{ github.run_id }}
+          path: tmp_top_validation/generated/absolute_matrix/**
           if-no-files-found: warn
