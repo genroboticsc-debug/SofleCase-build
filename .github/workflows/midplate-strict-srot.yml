@@ -51,12 +51,20 @@ jobs:
           validator = Path("validation_run/validation/validate.py")
           source = validator.read_text(encoding="utf-8")
           source = source.replace(
+              'from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut\n',
+              'from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut\nfrom OCP.BRepGProp import BRepGProp\nfrom OCP.GProp import GProp_GProps\n',
+          )
+          source = source.replace(
               '''    bmin = vec(bb.min)\n    bmax = vec(bb.max)\n    return {\n''',
               '''    bmin = vec(bb.min)\n    bmax = vec(bb.max)\n    vertex_coordinates = np.array(\n        [[float(vertex.X), float(vertex.Y), float(vertex.Z)] for vertex in shape.vertices()],\n        dtype=float,\n    )\n    vertex_min = vertex_coordinates.min(axis=0)\n    vertex_max = vertex_coordinates.max(axis=0)\n    return {\n''',
           )
           source = source.replace(
               '''        "bbox_size_mm": bmax - bmin,\n        "body_count": len(shape.solids()),\n''',
               '''        "bbox_size_mm": bmax - bmin,\n        "vertex_min_mm": vertex_min,\n        "vertex_max_mm": vertex_max,\n        "body_count": len(shape.solids()),\n''',
+          )
+          source = source.replace(
+              '''    result = operation.Shape()\n    if result.IsNull():\n        return 0.0\n    return float(Shape.cast(result).volume)\n''',
+              '''    result = operation.Shape()\n    if result.IsNull():\n        return 0.0\n    properties = GProp_GProps()\n    BRepGProp.VolumeProperties_s(result, properties)\n    return float(properties.Mass())\n''',
           )
           source = source.replace(
               '''        "reference_exact_y_datums": abs(rp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(rp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n        "generated_exact_y_datums": abs(gp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(gp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n''',
