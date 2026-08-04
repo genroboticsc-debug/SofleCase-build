@@ -1,4 +1,4 @@
-# Frozen recovered F012 font-size diagnostic trigger 2026-08-05T03:40+05:30
+# Frozen final Strict SROT and bidirectional Boolean trigger 2026-08-05T03:43+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -21,7 +21,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 46c4e1e9535f266542e9f14dd3256da000031d4a
+          ref: 89cb32f93c54b8a6192739b16cfd6d8af22e27bf
 
       - name: Verify reference chunks
         shell: bash
@@ -75,34 +75,39 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install and compile authoritative feature tree
+      - name: Install and compile final authoritative feature tree
         shell: bash
         run: |
           set -euxo pipefail
           python tmp_top_validation/apply_explicit_boolean_tree_fix.py
           python tmp_top_validation/apply_f005_boolean_tolerance_fix.py
+          python tmp_top_validation/apply_f012_all_faces_fix.py
+          python tmp_top_validation/apply_f012_font_size_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/diagnose_engraving.py \
-            tmp_top_validation/diagnose_engraving_all_faces.py \
-            tmp_top_validation/diagnose_engraving_size.py
+            tmp_top_validation/validate_fast_manifold.py \
+            tmp_top_validation/validate_feature_tree_manifold.py \
+            tmp_top_validation/apply_f005_boolean_tolerance_fix.py \
+            tmp_top_validation/apply_f012_all_faces_fix.py \
+            tmp_top_validation/apply_f012_font_size_fix.py
           git diff --check
 
-      - name: Diagnose recovered F012 font size
+      - name: Run Strict SROT, STEP/STL congruence, and exact Boolean validation
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_engraving_size.py 2>&1 | tee generated/engraving_size_diagnostic.log
-          cat generated/engraving_size_diagnostic/report.json
+          python validate_feature_tree_manifold.py 2>&1 | tee generated/workflow.log
+          cat generated/strict_srot_report.json
+          cat generated/feature_tree_validation_report.json
 
-      - name: Upload engraving evidence
+      - name: Upload complete final evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-engraving-size-${{ github.run_id }}
+          name: immutable-top-final-validation-${{ github.run_id }}
           path: tmp_top_validation/generated/**
           if-no-files-found: warn
