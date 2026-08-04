@@ -6,7 +6,7 @@ on:
     types: [opened, reopened, synchronize]
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
-      - ci/P014_ci_payload.tar.xz
+      - ci/P014_ci_payload.tar.xz.b64.part-*
 
 permissions:
   contents: read
@@ -22,11 +22,18 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Expand isolated P014 payload
+      - name: Decode and verify isolated P014 payload
+        shell: bash
         run: |
+          set -euxo pipefail
+          cat ci/P014_ci_payload.tar.xz.b64.part-* > /tmp/P014_ci_payload.tar.xz.b64
+          echo '8148177cad33b99dac2c4ee9abb36a52f1a165a50fc3cb238a5af3c6704d2e3b  /tmp/P014_ci_payload.tar.xz.b64' | sha256sum -c -
+          base64 --decode /tmp/P014_ci_payload.tar.xz.b64 > /tmp/P014_ci_payload.tar.xz
+          echo '90e7c8fcdc16cb8a266299aacdb44dfa0a43ee7421f8c7f3eecbf20596d572ee  /tmp/P014_ci_payload.tar.xz' | sha256sum -c -
+          xz -t /tmp/P014_ci_payload.tar.xz
           rm -rf p014
           mkdir p014
-          tar -xJf ci/P014_ci_payload.tar.xz -C p014
+          tar -xJf /tmp/P014_ci_payload.tar.xz -C p014
 
       - name: Install pinned CAD runtime
         working-directory: p014
