@@ -7,6 +7,12 @@ on:
     paths:
       - "dilemma_tenting_puck/**"
       - ".github/workflows/dilemma_tenting_puck_reverse_engineering.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "dilemma_tenting_puck/**"
+      - ".github/workflows/dilemma_tenting_puck_reverse_engineering.yml"
   workflow_dispatch:
 
 permissions:
@@ -33,6 +39,7 @@ jobs:
 
       - name: Analyze STEP B-reps and true boolean delta
         run: |
+          mkdir -p dilemma_tenting_puck/analysis_output
           python dilemma_tenting_puck/analyze_reference.py 2>&1 | tee dilemma_tenting_puck/analysis_output/run.log
 
       - name: Upload exact geometry analysis
