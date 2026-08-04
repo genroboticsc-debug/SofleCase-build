@@ -1,8 +1,10 @@
-"""Convert downstream Build123d operations to explicit sketch operands.
+"""Convert downstream Build123d operations to explicit robust operands.
 
-This is a deterministic source transformation used once by CI to remove
-implicit pending-sketch state across helper-function boundaries.  It changes
-no dimensions, coordinates, radii, feature order, or Boolean modes.
+This deterministic source transformation removes implicit pending-sketch state
+and replaces the numerically fragile coincident 2-D boss intersection with its
+exact 3-D equivalent: an analytic cylinder intersected by the analytic outer-
+profile prism. It changes no dimensions, coordinates, radii, feature order, or
+intended Boolean result.
 """
 
 from pathlib import Path
@@ -21,18 +23,27 @@ replacements = [
     extrude(amount=-(y1 - y0), mode=Mode.ADD)
 ''',
 '''def _add_clipped_boss(x: float, z: float, y0: float, y1: float) -> None:
-    """Add a circular boss clipped by the exact outer boundary."""
-    with BuildSketch(xz_plane(y0)) as boss_profile:
-        add(outer_profile_sketch())
-        with Locations((x, z)):
-            Circle(BOSS_RADIUS, mode=Mode.INTERSECT)
-    if not boss_profile.sketch.faces():
-        raise RuntimeError(f"Empty clipped boss profile at {(x, z, y0, y1)}")
-    extrude(
-        boss_profile.sketch,
-        amount=-(y1 - y0),
-        mode=Mode.ADD,
-    )
+    """Add an exact cylindrical boss clipped by the outer-profile prism.
+
+    The 3-D Boolean is geometrically identical to the intended 2-D profile
+    intersection but remains well-defined where a boss circle shares an exact
+    coincident arc with the recovered outer profile.
+    """
+    with BuildPart() as cylinder_builder:
+        with BuildSketch(xz_plane(y0)):
+            with Locations((x, z)):
+                Circle(BOSS_RADIUS)
+        extrude(amount=-(y1 - y0))
+
+    with BuildPart() as envelope_builder:
+        with BuildSketch(xz_plane(y0)):
+            add(outer_profile_sketch())
+        extrude(amount=-(y1 - y0))
+
+    clipped_boss = cylinder_builder.part & envelope_builder.part
+    if not clipped_boss.solids():
+        raise RuntimeError(f"Empty clipped boss solid at {(x, z, y0, y1)}")
+    add(clipped_boss, mode=Mode.ADD)
 ''',
     ),
     (
@@ -123,4 +134,4 @@ for old, new in replacements:
     text = text.replace(old, new)
 
 PATH.write_text(text, encoding="utf-8")
-print(f"Patched explicit feature operands in {PATH}")
+print(f"Patched explicit robust feature operands in {PATH}")
