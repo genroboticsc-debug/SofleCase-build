@@ -1,18 +1,14 @@
-# Frozen F002 topology diagnostic trigger 2026-08-05T03:18+05:30
+# Frozen F012 engraving diagnostic trigger 2026-08-05T03:24+05:30
 name: Immutable top Strict SROT validation
 
 on:
   push:
-    branches:
-      - master
-    paths:
-      - .github/workflows/tmp-top-srot-immutable-validation.yml
+    branches: [master]
+    paths: [.github/workflows/tmp-top-srot-immutable-validation.yml]
   pull_request:
-    branches:
-      - master
+    branches: [master]
     types: [opened, reopened, synchronize]
-    paths:
-      - .github/workflows/tmp-top-srot-immutable-validation.yml
+    paths: [.github/workflows/tmp-top-srot-immutable-validation.yml]
 
 permissions:
   contents: read
@@ -25,7 +21,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 1ac9451e2bb93d048dcece53b352cd9444450ae6
+          ref: 3618ffa274bcdff373f1fdc02b642d7e9ea86845
 
       - name: Verify reference chunks
         shell: bash
@@ -88,33 +84,23 @@ jobs:
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/validate_fast_manifold.py \
-            tmp_top_validation/diagnose_final_topology.py
+            tmp_top_validation/diagnose_engraving.py
           git diff --check
 
-      - name: Diagnose exact F002 and final topology variants
+      - name: Diagnose exact F012 engraving placement
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_final_topology.py 2>&1 | tee generated/final_topology_diagnostic.log
-          cat generated/final_topology_diagnostic/report.json
+          python diagnose_engraving.py 2>&1 | tee generated/engraving_diagnostic.log
+          cat generated/engraving_diagnostic/report.json
 
-      - name: Run Strict SROT and exact-polyhedral validation
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd tmp_top_validation
-          python validate_fast_manifold.py 2>&1 | tee generated/workflow.log
-          cat generated/strict_srot_report.json
-          cat generated/fast_validation_report.json
-
-      - name: Upload complete validation evidence
+      - name: Upload engraving evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-srot-validation-${{ github.run_id }}
+          name: immutable-top-engraving-diagnostic-${{ github.run_id }}
           path: tmp_top_validation/generated/**
           if-no-files-found: warn
