@@ -45,6 +45,32 @@ jobs:
             dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_mid.py \
             dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_plate_left.py \
             dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_plate_right.py
+      - name: Recover exact pinned reference meshes
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git dilemma-runner/upstream
+          git -C dilemma-runner/upstream checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+          mkdir -p dilemma-runner/project/XYZ/reference
+          for stem in \
+            dilemma_3x5_3_top \
+            dilemma_3x5_3_hotswap_bottom \
+            dilemma_3x5_3_hotswap_mid \
+            dilemma_3x5_3_hotswap_plate_left \
+            dilemma_3x5_3_hotswap_plate_right; do
+            mapfile -t matches < <(find dilemma-runner/upstream -type f -iname "$stem.stl")
+            test "${#matches[@]}" -eq 1
+            cp "${matches[0]}" "dilemma-runner/project/XYZ/reference/$stem.stl"
+          done
+          cd dilemma-runner/project/XYZ/reference
+          cat > SHA256SUMS <<'EOF'
+          734e7c741510f7062f89e2e7a72ed0f6afa1aefa92f5cba7207be638ef9c4eb8  dilemma_3x5_3_top.stl
+          43a294a3b21382ac59fe6644c1cbca15370f42a27aa6845c37156b3529c4c26b  dilemma_3x5_3_hotswap_bottom.stl
+          2acf8babae79ea185233231353c4bbcfa924c25411d46ac909c596fa89886070  dilemma_3x5_3_hotswap_mid.stl
+          7d98eef55ab409dcdedb384c8e156943ba07a6fb27f9e163a06730ac45f107bb  dilemma_3x5_3_hotswap_plate_left.stl
+          0487b760aab58541e0f5ae6a1689d428fedf05cbfa6419285db26c6ce3aca395  dilemma_3x5_3_hotswap_plate_right.stl
+          EOF
+          sed -i 's/^          //' SHA256SUMS
+          sha256sum -c SHA256SUMS
       - name: Fresh-build corrected parts
         env:
           OCP_SHOW: '0'
@@ -106,6 +132,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dilemma-fast-exact-topology-2
+          overwrite: true
           path: |
             dilemma-runner/project/generated/dilemma_3x5_3_top.*
             dilemma-runner/project/generated/dilemma_3x5_3_hotswap_bottom.*
