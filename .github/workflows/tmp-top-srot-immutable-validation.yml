@@ -43,14 +43,18 @@ jobs:
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip
-          mkdir -p runtime_wheels
+          mkdir -p runtime_wheels small_wheels
           python -m pip download --only-binary=:all: --no-deps \
             --dest runtime_wheels \
             cadquery-ocp==7.9.3.1.1 \
             cadquery-ocp-proxy==7.9.3.1.1 \
             vtk==9.6.2
+          python -m pip download --only-binary=:all: --no-deps \
+            --dest small_wheels svgelements==1.9.6
           sha256sum runtime_wheels/* > runtime_wheels/SHA256SUMS.txt
+          sha256sum small_wheels/* > small_wheels/SHA256SUMS.txt
           cat runtime_wheels/SHA256SUMS.txt
+          cat small_wheels/SHA256SUMS.txt
           python -m pip install --only-binary=:all: \
             build123d==0.11.1 \
             cadquery-ocp==7.9.3.1.1 \
@@ -64,6 +68,14 @@ jobs:
           print('trimesh', trimesh.__version__)
           print('vtk', vtk.vtkVersion.GetVTKVersion())
           PY
+
+      - name: Upload exact small Python dependency
+        uses: actions/upload-artifact@v4
+        with:
+          name: P014-svgelements-wheel-${{ github.run_id }}
+          path: p014/small_wheels
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Run clean strict SROT and true Boolean validation
         working-directory: p014
