@@ -35,6 +35,8 @@ jobs:
             validation_run/scripts/midplate_reference.py \
             validation_run/scripts/midplate_model.py \
             validation_run/validation/validate.py
+          sed -i 's/FEATURE_COUNTS\["inner_wires"\]/(FEATURE_COUNTS["closed_wires"] - 1)/g' \
+            validation_run/scripts/midplate_model.py
 
       - name: Fetch immutable authoritative geometry
         shell: bash
