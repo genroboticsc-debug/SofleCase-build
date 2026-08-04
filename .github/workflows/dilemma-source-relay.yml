@@ -1,0 +1,44 @@
+name: Dilemma pinned source relay
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  package-pinned-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact upstream revision with LFS
+        uses: actions/checkout@v4
+        with:
+          repository: Bastardkb/Dilemma
+          ref: f5cffb4821fe560b095418b71382ac7d8043c61a
+          fetch-depth: 0
+          lfs: true
+          path: upstream
+
+      - name: Verify and inventory mechanical sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C upstream rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+          mkdir -p relay
+          git -C upstream rev-parse HEAD > relay/PINNED_COMMIT.txt
+          git -C upstream lfs ls-files > relay/GIT_LFS_FILES.txt || true
+          find upstream/mechanical -type f -printf '%P\n' | sort > relay/MECHANICAL_FILE_INVENTORY.txt
+          find upstream/mechanical -type f \( -iname '*.step' -o -iname '*.stp' -o -iname '*.stl' -o -iname '*.3mf' -o -iname '*.f3d' -o -iname '*.fcstd' -o -iname '*.scad' -o -iname '*.dxf' -o -iname '*.kicad_pcb' -o -iname '*.json' -o -iname '*.py' \) -printf '%P\n' | sort > relay/CAD_SOURCE_INVENTORY.txt
+          cp -a upstream/mechanical relay/mechanical
+          sha256sum $(find relay/mechanical -type f -print) > relay/SHA256SUMS.txt
+
+      - name: Upload exact pinned mechanical tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-mechanical-f5cffb4821fe
+          path: relay/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
