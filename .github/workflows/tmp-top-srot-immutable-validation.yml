@@ -1,4 +1,4 @@
-# Fresh frozen corrected F012 engraving diagnostic trigger 2026-08-05T03:31+05:30
+# Frozen complete F012 multi-face diagnostic trigger 2026-08-05T03:35+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -21,7 +21,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 4e265795495c2613459584008de57e2842e330b3
+          ref: 2c1b4c822e6ce0c29ed8314776ce4bb0a5fffac0
 
       - name: Verify reference chunks
         shell: bash
@@ -84,23 +84,24 @@ jobs:
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/diagnose_engraving.py
+            tmp_top_validation/diagnose_engraving.py \
+            tmp_top_validation/diagnose_engraving_all_faces.py
           git diff --check
 
-      - name: Diagnose exact F012 engraving placement
+      - name: Diagnose complete F012 multi-face engraving
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_engraving.py 2>&1 | tee generated/engraving_diagnostic.log
-          cat generated/engraving_diagnostic/report.json
+          python diagnose_engraving_all_faces.py 2>&1 | tee generated/engraving_all_faces_diagnostic.log
+          cat generated/engraving_all_faces_diagnostic/report.json
 
       - name: Upload engraving evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-engraving-diagnostic-${{ github.run_id }}
+          name: immutable-top-engraving-all-faces-${{ github.run_id }}
           path: tmp_top_validation/generated/**
           if-no-files-found: warn
