@@ -6,6 +6,12 @@ on:
       - master
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
+  pull_request:
+    branches:
+      - master
+    types: [opened, reopened, synchronize]
+    paths:
+      - .github/workflows/tmp-top-srot-immutable-validation.yml
 
 permissions:
   contents: read
