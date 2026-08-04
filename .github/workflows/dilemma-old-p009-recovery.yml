@@ -19,13 +19,19 @@ jobs:
           set -euxo pipefail
           mkdir -p recovered
           git rev-list --objects --all > recovered/all_objects.txt
-          grep -Ei 'build_measured_stl_features\.py|mech_cases_3x5_2_tenting_puck_tenting_puck_v3_26\.(step|stl)|tenting_puck_v3_26\.(step|stl)' recovered/all_objects.txt > recovered/matches.txt || true
+          grep -Ei 'build_measured_stl_features\.py|mech_cases_3x5_2_tenting_puck_tenting_puck_v3_26\.(step|stl)|tenting_puck_v3_26\.(step|stl)|dilemma_3x5_2_tenting_puck_case\.py\.xz\.b64' recovered/all_objects.txt > recovered/matches.txt || true
           while read -r sha path; do
             [ -n "${sha:-}" ] || continue
             safe=$(printf '%s' "${path:-blob}" | tr '/\\ ' '___')
             git cat-file -p "$sha" > "recovered/${sha}_${safe}" || true
           done < recovered/matches.txt
-          git log --all --full-history --name-status --pretty='format:COMMIT %H %cI %s' -- 'scripts/build_measured_stl_features.py' '*tenting_puck_v3_26*' > recovered/history.log || true
+          P009_BLOB=45487b7efd814b058839817d55b122eadf425f98
+          git cat-file -e "${P009_BLOB}^{blob}"
+          git cat-file blob "$P009_BLOB" > recovered/dilemma_3x5_2_tenting_puck_case.py.xz.b64
+          base64 --decode recovered/dilemma_3x5_2_tenting_puck_case.py.xz.b64 > recovered/dilemma_3x5_2_tenting_puck_case.py.xz
+          xz --decompress --keep recovered/dilemma_3x5_2_tenting_puck_case.py.xz
+          python -m py_compile recovered/dilemma_3x5_2_tenting_puck_case.py
+          git log --all --full-history --name-status --pretty='format:COMMIT %H %cI %s' -- 'scripts/build_measured_stl_features.py' '*tenting_puck_v3_26*' '*dilemma_3x5_2_tenting_puck_case*' > recovered/history.log || true
           git fsck --full --no-reflogs --unreachable > recovered/fsck.txt || true
           awk '/unreachable blob/{print $3}' recovered/fsck.txt | while read -r sha; do
             size=$(git cat-file -s "$sha" 2>/dev/null || echo 0)
