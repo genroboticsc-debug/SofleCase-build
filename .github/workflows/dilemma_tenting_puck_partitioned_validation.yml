@@ -7,12 +7,14 @@ on:
     paths:
       - ".github/workflows/dilemma_tenting_puck_partitioned_validation.yml"
       - "dilemma_tenting_puck/validate_recovered_partitioned.py"
+      - "dilemma_tenting_puck/run_partitioned_validation.py"
   pull_request:
     branches:
       - master
     paths:
       - ".github/workflows/dilemma_tenting_puck_partitioned_validation.yml"
       - "dilemma_tenting_puck/validate_recovered_partitioned.py"
+      - "dilemma_tenting_puck/run_partitioned_validation.py"
   workflow_dispatch:
 
 permissions:
@@ -56,13 +58,13 @@ jobs:
           cp "$opening" recovered_sources/
           cp "$integrated" recovered_sources/
           sha256sum recovered_sources/*.py | tee partitioned_validation/source_sha256.txt
-          python -m py_compile recovered_sources/*.py dilemma_tenting_puck/validate_recovered_partitioned.py
+          python -m py_compile recovered_sources/*.py dilemma_tenting_puck/validate_recovered_partitioned.py dilemma_tenting_puck/run_partitioned_validation.py
 
       - name: Fresh build and exact partitioned validation
         shell: bash
         run: |
           set +e
-          python dilemma_tenting_puck/validate_recovered_partitioned.py 2>&1 | tee partitioned_validation/validation.log
+          python dilemma_tenting_puck/run_partitioned_validation.py 2>&1 | tee partitioned_validation/validation.log
           code=${PIPESTATUS[0]}
           echo "$code" > partitioned_validation/validator_exit_code.txt
           exit 0
