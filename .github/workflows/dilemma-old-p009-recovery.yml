@@ -2,6 +2,8 @@ name: Dilemma old P009 exact recovery
 on:
   push:
     branches: [dilemma-current-failset-20260803]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 jobs:
   recover:
@@ -25,7 +27,6 @@ jobs:
           done < recovered/matches.txt
           git log --all --full-history --name-status --pretty='format:COMMIT %H %cI %s' -- 'scripts/build_measured_stl_features.py' '*tenting_puck_v3_26*' > recovered/history.log || true
           git fsck --full --no-reflogs --unreachable > recovered/fsck.txt || true
-          # Inspect unreachable blobs for identifying strings without assuming paths.
           awk '/unreachable blob/{print $3}' recovered/fsck.txt | while read -r sha; do
             size=$(git cat-file -s "$sha" 2>/dev/null || echo 0)
             if [ "$size" -le 8000000 ]; then
