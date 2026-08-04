@@ -37,12 +37,17 @@ jobs:
           tar -xJf /tmp/P014_ci_payload.tar.xz -C p014
           python ci/P014_patch_source.py p014/scripts/dilemma_3x5_3_top.py
 
-      - name: Install pinned CAD runtime
+      - name: Install and preserve pinned CAD runtime
         working-directory: p014
         shell: bash
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip
+          mkdir -p runtime_wheels
+          python -m pip download --only-binary=:all: --no-deps \
+            --dest runtime_wheels cadquery-ocp==7.9.3.1.1
+          sha256sum runtime_wheels/* > runtime_wheels/SHA256SUMS.txt
+          cat runtime_wheels/SHA256SUMS.txt
           python -m pip install --only-binary=:all: \
             build123d==0.11.1 \
             cadquery-ocp==7.9.3.1.1 \
@@ -67,7 +72,7 @@ jobs:
           echo "$status" > reports/github_actions_exit_code.txt
           exit 0
 
-      - name: Upload generated geometry and complete reports
+      - name: Upload generated geometry, reports, and exact OCC wheel
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -75,6 +80,7 @@ jobs:
           path: |
             p014/generated
             p014/reports
+            p014/runtime_wheels
             p014/scripts/dilemma_3x5_3_top.py
             p014/reference/top.stl
           if-no-files-found: warn
