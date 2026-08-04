@@ -1,1 +1,1 @@
-Combined strict SROT and engraving-context validation trigger: 2026-08-05T01:43+05:30
+Strict SROT isolated F001-F002 operand validation trigger: 2026-08-05T01:49+05:30
