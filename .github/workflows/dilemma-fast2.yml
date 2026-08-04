@@ -1,0 +1,122 @@
+name: Dilemma fast exact topology batch 2
+
+on:
+  pull_request:
+    branches: [dilemma-current-failset-20260803]
+    paths:
+      - .github/workflows/dilemma-fast2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned CAD and Boolean runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build123d==0.11.1 manifold3d==3.5.2 trimesh==4.8.3 networkx==3.5
+      - name: Recover supplied checkpoint and exact edited scripts
+        run: |
+          set -euxo pipefail
+          mkdir -p dilemma-runner
+          cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > dilemma-runner/project.tar.xz
+          tar -xJf dilemma-runner/project.tar.xz -C dilemma-runner
+          git fetch --depth=1 origin agent/dilemma-fast-pass-20260804
+          for name in \
+            dilemma_3x5_3_top.py \
+            dilemma_3x5_3_hotswap_bottom.py \
+            dilemma_3x5_3_hotswap_mid.py \
+            dilemma_3x5_3_hotswap_plate_left.py \
+            dilemma_3x5_3_hotswap_plate_right.py; do
+            git show FETCH_HEAD:dilemma-fast/scripts/${name}.xz.b64 | base64 --decode | xz --decompress > dilemma-runner/project/scripts/$name
+          done
+          python -m py_compile \
+            dilemma-runner/project/scripts/dilemma_3x5_3_top.py \
+            dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_bottom.py \
+            dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_mid.py \
+            dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_plate_left.py \
+            dilemma-runner/project/scripts/dilemma_3x5_3_hotswap_plate_right.py
+      - name: Fresh-build corrected parts
+        env:
+          OCP_SHOW: '0'
+          PYTHONUNBUFFERED: '1'
+        working-directory: dilemma-runner/project
+        run: |
+          set +e
+          mkdir -p validation/fast_build_logs generated XYZ/generated
+          status=0
+          for stem in \
+            dilemma_3x5_3_top \
+            dilemma_3x5_3_hotswap_bottom \
+            dilemma_3x5_3_hotswap_mid \
+            dilemma_3x5_3_hotswap_plate_left \
+            dilemma_3x5_3_hotswap_plate_right; do
+            rm -f generated/$stem.step generated/$stem.stl XYZ/generated/$stem.stl
+            timeout 900 python scripts/$stem.py --output-dir generated > validation/fast_build_logs/$stem.log 2>&1
+            rc=$?
+            echo returncode=$rc >> validation/fast_build_logs/$stem.log
+            if [ "$rc" -eq 0 ] && [ -f generated/$stem.step ] && [ -f generated/$stem.stl ]; then
+              cp generated/$stem.stl XYZ/generated/$stem.stl
+              echo "$stem BUILD_OK"
+            else
+              echo "$stem BUILD_FAIL rc=$rc"
+              status=1
+            fi
+          done
+          echo "$status" > validation/fast_build_status.txt
+          exit 0
+      - name: Run supplied true two-way validator
+        working-directory: dilemma-runner/project
+        run: |
+          python validation/Final_validation_check.py --only P014 P018 P019 P021 P022 || true
+      - name: Write exact pass summary
+        working-directory: dilemma-runner/project
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          path=Path('validation/validation_report.json')
+          report=json.loads(path.read_text()) if path.exists() else {'rows':[]}
+          rows=report.get('rows',[])
+          def clean(v):
+              return None if isinstance(v,float) and not math.isfinite(v) else v
+          keys=['Canonical_Part_ID','Overall_PASS','Boolean_Success','Generated_STL_Watertight_PASS','Exact_0.01pct_Aspiration_PASS','Symmetric_Difference_%','Volume_Error_%','Area_Error_%','BBox_X_Diff_mm','BBox_Y_Diff_mm','BBox_Z_Diff_mm','COM_Shift_mm','Failure_Reason']
+          summary={
+            'validated':len(rows),
+            'official_pass_count':sum(bool(r.get('Overall_PASS')) for r in rows),
+            'below_0_01_percent_count':sum(bool(r.get('Exact_0.01pct_Aspiration_PASS')) for r in rows),
+            'watertight_count':sum(bool(r.get('Generated_STL_Watertight_PASS')) for r in rows),
+            'boolean_success_count':sum(bool(r.get('Boolean_Success')) for r in rows),
+            'parts':[{k:clean(r.get(k)) for k in keys} for r in rows],
+          }
+          Path('validation/fast_exact_summary.json').write_text(json.dumps(summary,indent=2,allow_nan=False)+'\n')
+          print(json.dumps(summary,indent=2,allow_nan=False))
+          PY
+      - name: Upload fresh CAD and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-fast-exact-topology-2
+          path: |
+            dilemma-runner/project/generated/dilemma_3x5_3_top.*
+            dilemma-runner/project/generated/dilemma_3x5_3_hotswap_bottom.*
+            dilemma-runner/project/generated/dilemma_3x5_3_hotswap_mid.*
+            dilemma-runner/project/generated/dilemma_3x5_3_hotswap_plate_left.*
+            dilemma-runner/project/generated/dilemma_3x5_3_hotswap_plate_right.*
+            dilemma-runner/project/validation/fast_build_logs/
+            dilemma-runner/project/validation/fast_build_status.txt
+            dilemma-runner/project/validation/validation_report.json
+            dilemma-runner/project/validation/validation_report.csv
+            dilemma-runner/project/validation/validationoutput.txt
+            dilemma-runner/project/validation/fast_exact_summary.json
+          if-no-files-found: warn
+          retention-days: 3
