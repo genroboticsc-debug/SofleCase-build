@@ -71,16 +71,21 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Apply explicit downstream feature operands
+      - name: Apply exact parametric feature corrections
         shell: bash
         run: |
           set -euxo pipefail
           python tmp_top_validation/apply_explicit_feature_fix.py
           python tmp_top_validation/apply_top_right_boss_clip_fix.py
-          python -m py_compile tmp_top_validation/top_parametric.py
+          python tmp_top_validation/apply_engraving_context_fix.py
+          python -m py_compile \
+            tmp_top_validation/top_parametric.py \
+            tmp_top_validation/strict_srot_check.py \
+            tmp_top_validation/remote_runner.py \
+            tmp_top_validation/validate_top.py
           git diff --check
 
-      - name: Diagnose exact clipped cap, generate, and validate
+      - name: Diagnose, audit strict SROT, generate, and validate
         shell: bash
         run: |
           set -euxo pipefail
@@ -89,6 +94,7 @@ jobs:
           mkdir -p generated
           python diagnose_clipped_cap_union.py 2>&1 | tee generated/clipped_cap_union_diagnostic.log
           python remote_runner.py 2>&1 | tee generated/workflow.log
+          cat generated/strict_srot_report.json
           cat generated/run_status.json
           if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
           python - <<'PY'
@@ -117,7 +123,7 @@ jobs:
           git config user.name "openai-cad-validator"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tmp_top_validation/top_parametric.py
-          git commit -m "Use explicit robust operands for downstream CAD features"
+          git commit -m "Complete explicit analytic feature-tree corrections"
           git reset --hard HEAD
           git clean -fd
           git fetch origin tmp/top-exact-validation-20260804
