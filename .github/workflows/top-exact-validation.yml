@@ -1,0 +1,92 @@
+name: Top exact geometry validation
+
+on:
+  push:
+    branches:
+      - tmp/top-exact-validation-20260804
+    paths:
+      - .github/workflows/top-exact-validation.yml
+      - tmp_top_validation/top_parametric.py
+      - tmp_top_validation/validate_top.py
+      - tmp_top_validation/remote_runner.py
+      - tmp_top_validation/requirements.txt
+      - tmp_top_validation/reference/top.stl.b64
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: top-exact-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out isolated validation branch
+        uses: actions/checkout@v4
+        with:
+          ref: tmp/top-exact-validation-20260804
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tmp_top_validation/requirements.txt
+
+      - name: Install Arial and CAD dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "msttcorefonts msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig ttf-mscorefonts-installer
+          sudo fc-cache -f -v >/dev/null
+          python -m pip install --upgrade pip
+          python -m pip install -r tmp_top_validation/requirements.txt
+
+      - name: Decode and verify immutable reference STL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p tmp_top_validation/reference
+          base64 --decode tmp_top_validation/reference/top.stl.b64 > tmp_top_validation/reference/top.stl
+          test "$(sha256sum tmp_top_validation/reference/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
+          sha256sum tmp_top_validation/reference/top.stl | tee tmp_top_validation/reference/top.stl.sha256
+
+      - name: Generate STEP and STL, then validate
+        shell: bash
+        env:
+          GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
+        run: |
+          set -euxo pipefail
+          cd tmp_top_validation
+          mkdir -p generated
+          python remote_runner.py 2>&1 | tee generated/workflow.log
+          printf '%s\n' "$GITHUB_RUN_ID_VALUE" > generated/run_id.txt
+          cat generated/run_status.json
+          test -f generated/validation_report.json || true
+          if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
+
+      - name: Upload full validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: top-exact-validation-${{ github.run_id }}
+          path: tmp_top_validation/generated/top_exact_validation_outputs.zip
+          if-no-files-found: error
+
+      - name: Commit result records to isolated branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f tmp_top_validation/generated tmp_top_validation/reference/top.stl.sha256
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Record top exact-validation run [skip ci]"
+          git push origin HEAD:tmp/top-exact-validation-20260804
