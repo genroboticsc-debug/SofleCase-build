@@ -1,0 +1,72 @@
+name: P014 top strict validation
+
+on:
+  push:
+    branches:
+      - p014-top-strict-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Expand isolated P014 payload
+        run: |
+          rm -rf p014
+          mkdir p014
+          tar -xJf ci/P014_ci_payload.tar.xz -C p014
+
+      - name: Install pinned CAD runtime
+        working-directory: p014
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: \
+            build123d==0.11.1 \
+            cadquery-ocp==7.9.3.1.1 \
+            trimesh==4.11.1 \
+            numpy==2.3.5
+          python - <<'PY'
+          import build123d, OCP, numpy, trimesh
+          print('build123d', build123d.__version__)
+          print('OCP', OCP.__version__)
+          print('numpy', numpy.__version__)
+          print('trimesh', trimesh.__version__)
+          PY
+
+      - name: Run clean strict SROT and true Boolean validation
+        working-directory: p014
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          python validation/run_all.py --root . 2>&1 | tee reports/github_actions_run.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > reports/github_actions_exit_code.txt
+          exit 0
+
+      - name: Upload generated geometry and complete reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: P014-top-strict-validation
+          path: |
+            p014/generated
+            p014/reports
+            p014/scripts/dilemma_3x5_3_top.py
+            p014/reference/top.stl
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce validation exit code
+        working-directory: p014
+        shell: bash
+        run: test "$(cat reports/github_actions_exit_code.txt)" = "0"
