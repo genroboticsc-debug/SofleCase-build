@@ -1,3 +1,4 @@
+# Fresh frozen corrected F012 engraving diagnostic trigger 2026-08-05T03:31+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -20,7 +21,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 3618ffa274bcdff373f1fdc02b642d7e9ea86845
+          ref: 4e265795495c2613459584008de57e2842e330b3
 
       - name: Verify reference chunks
         shell: bash
