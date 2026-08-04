@@ -10,7 +10,7 @@ on:
       - .github/workflows/top-exact-validation.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -71,6 +71,14 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
+      - name: Apply explicit downstream feature operands
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tmp_top_validation/apply_explicit_feature_fix.py
+          python -m py_compile tmp_top_validation/top_parametric.py
+          git diff --check
+
       - name: Diagnose exact clipped cap, generate, and validate
         shell: bash
         run: |
@@ -88,6 +96,20 @@ jobs:
           status = json.loads(Path('generated/run_status.json').read_text())
           raise SystemExit(0 if status.get('overall_pass') else 1)
           PY
+
+      - name: Persist deterministic source transformation
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if git diff --quiet -- tmp_top_validation/top_parametric.py; then
+            exit 0
+          fi
+          git config user.name "openai-cad-validator"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tmp_top_validation/top_parametric.py
+          git commit -m "Use explicit operands for downstream CAD features"
+          git push origin HEAD:tmp/top-exact-validation-20260804
 
       - name: Upload complete result package
         if: always()
