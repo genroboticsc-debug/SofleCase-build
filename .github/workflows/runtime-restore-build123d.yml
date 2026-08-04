@@ -1,0 +1,47 @@
+name: Runtime restore Build123d
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact runtime wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p runtime-wheels
+          python -m pip download --no-deps --dest runtime-wheels \
+            build123d==0.11.1 \
+            manifold3d==3.5.2 \
+            svgpathtools==1.7.1 \
+            ezdxf==1.4.2 \
+            ocpsvg==0.6.0 \
+            ocp_gordon==0.2.0 \
+            trianglesolver==1.2 \
+            lib3mf==2.4.1
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          files=[]
+          for p in sorted(Path('runtime-wheels').iterdir()):
+              if p.is_file():
+                  files.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          Path('runtime-wheels/MANIFEST.json').write_text(json.dumps(files,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build123d-0.11.1-runtime-wheels
+          path: runtime-wheels/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
