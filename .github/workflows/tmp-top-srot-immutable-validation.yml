@@ -24,7 +24,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 6fd353297075988693b64a18ae6cab392345bccd
+          ref: 1ac9451e2bb93d048dcece53b352cd9444450ae6
 
       - name: Verify reference chunks
         shell: bash
@@ -87,16 +87,25 @@ jobs:
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/validate_fast_manifold.py
+            tmp_top_validation/validate_fast_manifold.py \
+            tmp_top_validation/diagnose_final_topology.py
           git diff --check
 
-      - name: Run Strict SROT and exact-polyhedral validation
+      - name: Diagnose exact F002 and final topology variants
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
+          python diagnose_final_topology.py 2>&1 | tee generated/final_topology_diagnostic.log
+          cat generated/final_topology_diagnostic/report.json
+
+      - name: Run Strict SROT and exact-polyhedral validation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd tmp_top_validation
           python validate_fast_manifold.py 2>&1 | tee generated/workflow.log
           cat generated/strict_srot_report.json
           cat generated/fast_validation_report.json
