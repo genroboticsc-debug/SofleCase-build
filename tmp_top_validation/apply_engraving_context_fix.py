@@ -1,9 +1,9 @@
 """Move the exact Text feature outside the parent BuildPart context.
 
-Build123d Text is a sketch object.  The source geometry is unchanged: Arial
-Regular, 5 mm, MAX/MAX anchor, the recovered translation, +25 degree rotation,
-and 1 mm subtraction depth are preserved exactly.  This transformation also
-adds an explicit F001-F012 feature registry for the machine SROT audit.
+This legacy migration now exits when the explicit F001-F012 registry is already
+present.  The later offset-safe Boolean-tree transformation owns the complete
+downstream section and will install or repair the standalone engraving helper.
+No geometry or parameters are changed.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from pathlib import Path
 PATH = Path(__file__).with_name("top_parametric.py")
 text = PATH.read_text(encoding="utf-8")
 
-if "def _engraving_profile_sketch(" in text:
-    print(f"Explicit engraving sketch already present in {PATH}")
+if "FEATURE_TREE = (" in text or "def _engraving_profile_sketch(" in text:
+    print(f"Engraving migration already represented in {PATH}")
     raise SystemExit(0)
 
 constants_old = '''ENGRAVING_DEPTH = 1.00000000
