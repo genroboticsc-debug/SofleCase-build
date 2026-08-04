@@ -1,4 +1,4 @@
-# Frozen exact-polyhedral validation trigger 2026-08-05T03:04+05:30
+# Frozen zero-coordinate topology validation trigger 2026-08-05T03:12+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -25,7 +25,7 @@ jobs:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: 2e930785cd0691ecb693de49b07c30d84b75fdf9
+          ref: 6fd353297075988693b64a18ae6cab392345bccd
 
       - name: Verify reference chunks
         shell: bash
