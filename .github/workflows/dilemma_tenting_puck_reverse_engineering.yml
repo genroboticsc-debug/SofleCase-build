@@ -41,6 +41,7 @@ jobs:
         run: |
           mkdir -p dilemma_tenting_puck/analysis_output
           python dilemma_tenting_puck/analyze_reference.py 2>&1 | tee dilemma_tenting_puck/analysis_output/run.log
+          python dilemma_tenting_puck/render_reference.py
 
       - name: Upload exact geometry analysis
         if: always()
