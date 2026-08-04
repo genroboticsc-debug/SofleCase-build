@@ -42,14 +42,10 @@ jobs:
           python dilemma_tenting_puck/materialize_sources.py
           python dilemma_tenting_puck/apply_baseline_refinement.py
           python dilemma_tenting_puck/apply_controller_order_fix.py
+          python dilemma_tenting_puck/apply_controller_baseline_bypass.py
           python -m py_compile \
             dilemma_tenting_puck/dilemma_tenting_puck_family.py \
             dilemma_tenting_puck/validate_dilemma_tenting_puck.py
-
-      - name: Analyze exact reference B-reps
-        run: |
-          mkdir -p dilemma_tenting_puck/analysis_output
-          python dilemma_tenting_puck/analyze_reference.py 2>&1 | tee dilemma_tenting_puck/analysis_output/run.log
 
       - name: Build and validate genuine parametric feature trees
         id: validation
@@ -71,7 +67,6 @@ jobs:
           path: |
             dilemma_tenting_puck/dilemma_tenting_puck_family.py
             dilemma_tenting_puck/validate_dilemma_tenting_puck.py
-            dilemma_tenting_puck/analysis_output/**
             dilemma_tenting_puck/validation_output/**
           if-no-files-found: error
           retention-days: 7
