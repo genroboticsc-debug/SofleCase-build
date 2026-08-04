@@ -1,5 +1,5 @@
-# Absolute tessellation tolerance sweep trigger 2026-08-05T05:15+05:30
-name: Immutable top absolute tessellation sweep
+# Native OCCT absolute deflection sweep trigger 2026-08-05T05:22+05:30
+name: Immutable top native absolute tessellation sweep
 
 on:
   pull_request:
@@ -55,7 +55,7 @@ jobs:
           python -m py_compile tmp_top_validation/top_parametric.py
           git diff --check
 
-      - name: Sweep absolute OCCT deflection
+      - name: Sweep native OCCT absolute deflection
         shell: bash
         run: |
           set -euxo pipefail
@@ -65,21 +65,20 @@ jobs:
           python - <<'PY' 2>&1 | tee generated/tessellation_tolerance/sweep.log
           from __future__ import annotations
 
-          import inspect
           import json
           import math
           from pathlib import Path
 
           import numpy as np
           import trimesh
-          from build123d import export_stl
+          from OCP.BRepMesh import BRepMesh_IncrementalMesh
+          from OCP.StlAPI import StlAPI_Writer
 
           import top_parametric as tp
 
           out = Path("generated/tessellation_tolerance")
-          print("export_stl signature:", inspect.signature(export_stl), flush=True)
-          linear_values = [0.0028, 0.0030, 0.0031, 0.0032, 0.00325, 0.00328, 0.00330, 0.00332, 0.003333333333, 0.00334, 0.00336, 0.00338, 0.00340, 0.00345, 0.00350]
-          angular_values = [0.20, 0.25, 0.30, 0.40, 0.60, 1.00]
+          linear_values = [0.00328, 0.00330, 0.00332, 0.0033296, 0.003333333333, 0.00334, 0.003345, 0.0033485, 0.00336]
+          angular_values = [0.20, 0.30, 0.40, 0.60, 1.00]
           radii = {
               "mount_bore_r2p3": tp.MOUNT_BORE_RADIUS,
               "boss_r4p3": tp.BOSS_RADIUS,
@@ -92,6 +91,16 @@ jobs:
               "through_r19p5": 170,
               "counterbore_r21p5": 179,
           }
+
+          def export_absolute(shape, path: Path, linear: float, angular: float) -> None:
+              mesher = BRepMesh_IncrementalMesh(shape.wrapped, linear, False, angular, True)
+              mesher.Perform()
+              if not mesher.IsDone():
+                  raise RuntimeError(f"OCCT meshing failed for {path.name}")
+              writer = StlAPI_Writer()
+              writer.ASCIIMode = False
+              if not writer.Write(shape.wrapped, str(path)):
+                  raise RuntimeError(f"OCCT STL write failed for {path.name}")
 
           def ring_stats(path: Path, radius: float) -> dict[str, float | int]:
               mesh = trimesh.load_mesh(path, process=False)
@@ -123,7 +132,7 @@ jobs:
                   for label, radius in radii.items():
                       solid = tp._subtract_cylindrical_bore(0.0, 0.0, radius, 0.0, 1.0)
                       path = out / f"{label}__lin_{linear:.12g}__ang_{angular:.12g}.stl"
-                      export_stl(solid, path, tolerance=linear, angular_tolerance=angular, relative=False, ascii_format=False)
+                      export_absolute(solid, path, linear, angular)
                       row["features"][label] = ring_stats(path, radius)
                       path.unlink()
                   row["target_score"] = sum(abs(row["features"][name]["ring_vertex_count"] - count) for name, count in expected.items())
@@ -132,12 +141,7 @@ jobs:
 
           rows.sort(key=lambda item: (item["target_score"], abs(item["linear_tolerance_mm"] - 0.003333333333), item["angular_tolerance_rad"]))
           report = {
-              "reference_targets": {
-                  "mount_bore_r2p3_segments": 59,
-                  "boss_r4p3_inferred_full_circle_segments": 80,
-                  "through_r19p5_segments": 170,
-                  "counterbore_r21p5_inferred_full_circle_segments": 179,
-              },
+              "reference_targets": expected,
               "best": rows[:20],
               "all": rows,
           }
@@ -147,10 +151,10 @@ jobs:
           PY
           cat generated/tessellation_tolerance/report.json
 
-      - name: Upload absolute tolerance sweep evidence
+      - name: Upload native absolute tolerance sweep evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-absolute-tessellation-sweep-${{ github.run_id }}
+          name: immutable-top-native-absolute-sweep-${{ github.run_id }}
           path: tmp_top_validation/generated/tessellation_tolerance/**
           if-no-files-found: warn
