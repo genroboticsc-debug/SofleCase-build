@@ -1,0 +1,139 @@
+name: CareerPilot Pro 2.2 Functional Android APK
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reconstruct verified baseline and apply 2.2 patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          LOG="$GITHUB_WORKSPACE/careerpilot-pro-22-build.log"
+          SOURCE="CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > "$SOURCE"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c - | tee "$LOG"
+          mkdir -p build-src
+          tar -xJf "$SOURCE" -C build-src
+          python careerpilot_build/pro_v2/apply_compiler_fixes.py | tee -a "$LOG"
+          python careerpilot_build/pro_v2/apply_compiler_fixes_2.py | tee -a "$LOG"
+
+          cat > expected-v22-chunks.sha256 <<'HASHES'
+          815471a48bae55e023550653aa50a1bf8d29710eafde3fc02d448972d4944aa0  careerpilot_build/pro_v22_patch/part00.b64
+          c23e51b667b5973700628c03c6392f760e519d0c39794b0019c75c60e777f498  careerpilot_build/pro_v22_patch/part01.b64
+          d30817c723ccc997ce335b69cab33387188c533b82e43bd7378d944ba514aa31  careerpilot_build/pro_v22_patch/part02.b64
+          492a5d089fa3501c2907045825eed5020780d7bdc277b3485f94f73f2013c7ae  careerpilot_build/pro_v22_patch/part03.b64
+          8fe06c95d81899a411461c8275b400f103ff4bb0c7b785237ecd90d617dde3cd  careerpilot_build/pro_v22_patch/part04.b64
+          HASHES
+          sha256sum -c expected-v22-chunks.sha256 | tee -a "$LOG"
+          cat careerpilot_build/pro_v22_patch/part{00..04}.b64 > careerpilot-22.patch.xz.b64
+          echo "a96b940b66a7bfb30a1447eb8d60acf149d2978d1f92dac086f4ecc0655c2811  careerpilot-22.patch.xz.b64" | sha256sum -c - | tee -a "$LOG"
+          base64 -d careerpilot-22.patch.xz.b64 > careerpilot-22.patch.xz
+          echo "0eac18187e9688ad8979c0db32f5e09382332214f87f186b0d404400a1c58320  careerpilot-22.patch.xz" | sha256sum -c - | tee -a "$LOG"
+          xz -dc careerpilot-22.patch.xz > careerpilot-22.patch
+          echo "f3e4a974ce1731ab7f9227bcf7c1f0a37cb0c678ad88f25f3d0783b5a04f13f4  careerpilot-22.patch" | sha256sum -c - | tee -a "$LOG"
+          cd build-src/cp2src
+          patch -p4 --forward --batch < "$GITHUB_WORKSPACE/careerpilot-22.patch" | tee -a "$LOG"
+          grep -q 'versionName = "2.2.0-beta"' app/build.gradle.kts
+          grep -q 'AccountAccess' app/src/main/java/com/careerpilot/ai/ai/AiModels.kt
+          grep -q 'InternetToolbox' app/src/main/java/com/careerpilot/ai/tools/InternetToolbox.kt
+          grep -q 'RemotiveSearchConnector' app/src/main/java/com/careerpilot/ai/discovery/JobDiscovery.kt
+
+      - name: Smoke-test public search routes
+        shell: bash
+        run: |
+          set +e
+          LOG="$GITHUB_WORKSPACE/careerpilot-pro-22-build.log"
+          ok=0
+          for url in \
+            'https://remotive.com/api/remote-jobs?search=mechanical&limit=1' \
+            'https://jobicy.com/api/v2/remote-jobs?count=1&tag=engineering' \
+            'https://remoteok.com/api' \
+            'https://www.arbeitnow.com/api/job-board-api' \
+            'https://www.bing.com/search?format=rss&q=mechanical+engineer+jobs'; do
+            code=$(curl -L --max-time 20 -A 'CareerPilotAI/2.2' -o /tmp/feed.out -s -w '%{http_code}' "$url")
+            bytes=$(wc -c < /tmp/feed.out 2>/dev/null || echo 0)
+            echo "SEARCH_ROUTE http=$code bytes=$bytes url=$url" | tee -a "$LOG"
+            if [[ "$code" == "200" && "$bytes" -gt 50 ]]; then ok=$((ok+1)); fi
+          done
+          echo "SEARCH_ROUTES_AVAILABLE=$ok/5" | tee -a "$LOG"
+          test "$ok" -ge 3
+
+      - name: Build tests and APK
+        working-directory: build-src/cp2src
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-22-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build-src/cp2src/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.2.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro-2.2.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI-Pro-2.2.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI-Pro-2.2.apk
+            echo '=== APK ZIP INTEGRITY ==='
+            unzip -t CareerPilotAI-Pro-2.2.apk | tail -n 2
+          } | tee CareerPilotAI-Pro-2.2.validation.txt | tee -a careerpilot-pro-22-build.log
+          sha256sum CareerPilotAI-Pro-2.2.apk > CareerPilotAI-Pro-2.2.apk.sha256
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.2-build-diagnostics
+          path: careerpilot-pro-22-build.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.2-Functional-APK
+          path: |
+            CareerPilotAI-Pro-2.2.apk
+            CareerPilotAI-Pro-2.2.apk.sha256
+            CareerPilotAI-Pro-2.2.validation.txt
+          if-no-files-found: error
+          retention-days: 1
