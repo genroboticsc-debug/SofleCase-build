@@ -376,9 +376,11 @@ def _engraving_profile_sketch():
 
 def build_top():
     """Build and return the reconstructed top part as one parametric solid."""
-    # Build independent F003-F005 operands before opening the parent context.
-    # This is still a genuine parametric feature tree: each operand is an
-    # identified analytic cylinder clipped by the identified analytic envelope.
+    # Build independent analytic operands before opening the parent context.
+    # Only completed returned shapes are introduced into the feature tree;
+    # internal construction and clipping tools cannot leak into the parent.
+    main_rolling_body = _main_rolling_body()
+    top_right_clipped_cap = _top_right_clipped_cap()
     boss_solids = [
         _clipped_boss_solid(bx, bz, y0, y1)
         for _, bx, bz, y0, y1 in BOSSES
@@ -387,10 +389,10 @@ def build_top():
 
     with BuildPart() as top:
         # F001 — exact main rolling body: lower prism + R2 inset core + sweep
-        add(_main_rolling_body())
+        add(main_rolling_body)
 
         # F002 — exact clipped R4.3 top-right cap and toroidal R2 ledge blend
-        add(_top_right_clipped_cap())
+        add(top_right_clipped_cap)
 
         # F003–F005 — exact independently generated clipped boss operands
         for boss_solid in boss_solids:
