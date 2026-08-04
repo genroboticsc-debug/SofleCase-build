@@ -368,11 +368,32 @@ def _anti_rotation_key_solid():
                 align=(Align.CENTER, Align.MIN),
                 mode=Mode.INTERSECT,
             )
-    if not key_def build_top():
-    """Build the reconstructed top as an explicit ordered solid Boolean tree."""
-    # Explicit ordered solid Boolean feature tree. Each operand is generated
-    # independently from analytic parameters before being applied to `result`.
+    if not key_profile.sketch.faces():
+        raise RuntimeError("Empty anti-rotation key profile")
+    return _solid_from_sketch(
+        key_profile.sketch,
+        Y_BODY_LOW,
+        Y_COUNTERBORE_HIGH,
+    )
 
+
+def _engraving_profile_sketch():
+    """Return the exact standalone parametric underside engraving sketch."""
+    with BuildSketch() as raw_text:
+        Text(
+            ENGRAVING_TEXT,
+            ENGRAVING_FONT_SIZE,
+            font=ENGRAVING_FONT,
+            font_style=FontStyle.REGULAR,
+            align=(Align.MAX, Align.MAX),
+        )
+    return Rot(0.0, 0.0, ENGRAVING_ROTATION_DEG) * (
+        Pos(ENGRAVING_U_MAX, ENGRAVING_V_MAX, 0.0) * raw_text.sketch
+    )
+
+
+def build_top():
+    """Build the reconstructed top as an explicit ordered solid Boolean tree."""
     # F001 — exact main rolling body: lower prism + R2 inset core + sweep
     main_rolling_body = _main_rolling_body()
 
@@ -442,32 +463,6 @@ def _anti_rotation_key_solid():
 
     if len(result.solids()) != 1 or not result.is_valid:
         raise RuntimeError("Final explicit feature-tree solid is invalid")
-    result.label = "top_parametric"
-    return result
-COUNTERBORE_HIGH,
-            Y_TOP,
-        )
-
-        # F009–F011 — three Ø4.6 mounting bores
-        for _, bx, bz, y0, y1 in MOUNT_BORES:
-            _subtract_cylindrical_bore(
-                bx,
-                bz,
-                MOUNT_BORE_RADIUS,
-                y0,
-                y1,
-            )
-
-        # F012 — 1 mm deep, +25° underside engraving
-        with BuildSketch(xz_plane(Y_BODY_LOW)) as engraving_profile:
-            add(engraving_sketch)
-        extrude(
-            engraving_profile.sketch,
-            amount=-ENGRAVING_DEPTH,
-            mode=Mode.SUBTRACT,
-        )
-
-    result = top.part
     result.label = "top_parametric"
     return result
 
