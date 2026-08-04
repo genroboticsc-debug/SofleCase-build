@@ -21,23 +21,31 @@ jobs:
           lfs: true
           path: upstream
 
-      - name: Verify and inventory mechanical sources
+      - name: Verify and inventory mechanical sources and history
         shell: bash
         run: |
           set -euxo pipefail
-          test "$(git -C upstream rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+          PIN=f5cffb4821fe560b095418b71382ac7d8043c61a
+          test "$(git -C upstream rev-parse HEAD)" = "$PIN"
           mkdir -p relay
           git -C upstream rev-parse HEAD > relay/PINNED_COMMIT.txt
           git -C upstream lfs ls-files > relay/GIT_LFS_FILES.txt || true
           find upstream/mechanical -type f -printf '%P\n' | sort > relay/MECHANICAL_FILE_INVENTORY.txt
-          find upstream/mechanical -type f \( -iname '*.step' -o -iname '*.stp' -o -iname '*.stl' -o -iname '*.3mf' -o -iname '*.f3d' -o -iname '*.fcstd' -o -iname '*.scad' -o -iname '*.dxf' -o -iname '*.kicad_pcb' -o -iname '*.json' -o -iname '*.py' \) -printf '%P\n' | sort > relay/CAD_SOURCE_INVENTORY.txt
+          find upstream/mechanical -type f \( -iname '*.step' -o -iname '*.stp' -o -iname '*.stl' -o -iname '*.3mf' -o -iname '*.f3d' -o -iname '*.fcstd' -o -iname '*.sldprt' -o -iname '*.sldasm' -o -iname '*.scad' -o -iname '*.dxf' -o -iname '*.kicad_pcb' -o -iname '*.json' -o -iname '*.py' \) -printf '%P\n' | sort > relay/CAD_SOURCE_INVENTORY.txt
+          git -C upstream log "$PIN" --all --name-only --pretty=format: | sed '/^$/d' | sort -u > relay/ALL_PREPIN_HISTORY_PATHS.txt
+          grep -Ei '\.(step|stp|iges|igs|brep|brp|f3d|fcstd|sldprt|sldasm|scad|3mf|dxf|dwg|kicad_pcb|py)$' relay/ALL_PREPIN_HISTORY_PATHS.txt > relay/NATIVE_CAD_HISTORY_PATHS.txt || true
+          while IFS= read -r p; do
+            c=$(git -C upstream rev-list -n 1 "$PIN" -- "$p" || true)
+            [ -n "$c" ] && printf '%s\t%s\n' "$c" "$p"
+          done < relay/NATIVE_CAD_HISTORY_PATHS.txt > relay/NATIVE_CAD_LAST_COMMIT.tsv
           cp -a upstream/mechanical relay/mechanical
           find relay/mechanical -type f -print0 | sort -z | xargs -0 sha256sum > relay/SHA256SUMS.txt
+          git -C upstream bundle create ../relay/Dilemma_pre_pinned_full_history.bundle --all
 
-      - name: Upload exact pinned mechanical tree
+      - name: Upload exact pinned mechanical tree and history
         uses: actions/upload-artifact@v4
         with:
-          name: dilemma-mechanical-f5cffb4821fe
+          name: dilemma-mechanical-history-f5cffb4821fe
           path: relay/
           if-no-files-found: error
           compression-level: 0
