@@ -1,8 +1,8 @@
 {
-  "strict_srot": false,
-  "generation": false,
+  "strict_srot": true,
+  "generation": true,
   "validation": false,
   "overall_pass": false,
-  "exception": "RuntimeError: BuildPart doesn't have a Text object or operation (Text applies to ['BuildSketch'])",
-  "traceback": "Traceback (most recent call last):\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/remote_runner.py\", line 80, in run\n    step_path, stl_path = export_model(GENERATED)\n                          ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 449, in export_model\n    model = build_top()\n            ^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 425, in build_top\n    * Text(\n      ^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/build123d/objects_sketch.py\", line 619, in __init__\n    validate_inputs(context, self)\n  File \"/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/build123d/build_common.py\", line 836, in validate_inputs\n    context.validate_inputs(validating_class, objects)\n  File \"/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/build123d/build_common.py\", line 774, in validate_inputs\n    raise RuntimeError(\nRuntimeError: BuildPart doesn't have a Text object or operation (Text applies to ['BuildSketch'])\n"
+  "exception": "RuntimeError: Boolean inputs must be watertight: generated=False, reference=False",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/remote_runner.py\", line 85, in run\n    validation_report = validate(REFERENCE, GENERATED)\n                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/validate_top.py\", line 112, in validate\n    symmetric_difference_volume = manifold_symmetric_difference_volume(\n                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/validate_top.py\", line 51, in manifold_symmetric_difference_volume\n    raise RuntimeError(\nRuntimeError: Boolean inputs must be watertight: generated=False, reference=False\n"
 }

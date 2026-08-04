@@ -1,15 +1,10 @@
 {
   "standard": "STRICT-SROT-ANALYTIC-FEATURE-TREE-V1",
-  "pass": false,
-  "violations": [
-    {
-      "rule": "SROT-FEATURE-ORDER-MISSING",
-      "detail": "Missing explicit feature-tree markers: ['F004', 'F010']"
-    }
-  ],
+  "pass": true,
+  "violations": [],
   "evidence": {
-    "source_sha256": "ce5922bd382feb3d3dd9ca982440845bb5486316b69953eb7c459f134223be56",
-    "source_bytes": 14480,
+    "source_sha256": "32cb0db3a357d4a97ee2909dc59ccc0e8432e0cc21af975007bc268302974f31",
+    "source_bytes": 14853,
     "imports": [
       "__future__",
       "math",
@@ -19,6 +14,7 @@
     "top_level_functions": [
       "_circle_point",
       "_clipped_boss_solid",
+      "_engraving_profile_sketch",
       "_main_rolling_body",
       "_outward_quarter_disk",
       "_placed_face",
@@ -35,11 +31,13 @@
       "F001",
       "F002",
       "F003",
+      "F004",
       "F005",
       "F006",
       "F007",
       "F008",
       "F009",
+      "F010",
       "F011",
       "F012"
     ]
