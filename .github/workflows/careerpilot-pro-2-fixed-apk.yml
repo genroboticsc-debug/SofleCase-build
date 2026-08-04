@@ -55,6 +55,14 @@ jobs:
           test -f build-src/CareerPilotAI/settings.gradle.kts
           test -f build-src/CareerPilotAI/app/build.gradle.kts
 
+      - name: Upload reconstructed source
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2-reconstructed-source
+          path: build-src/CareerPilotAI
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Build, test and package APK
         working-directory: build-src/CareerPilotAI
         shell: bash
