@@ -1,0 +1,103 @@
+name: Midplate Revision-Correct Final Validation
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-revisions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Reconstruct and patch exact package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat validation_payload/strict_bundle.part* | base64 --decode > /tmp/strict_bundle.zip
+          echo "6389f7383a5f0f16f40021e455ca8589b0941a8bfff4ce20a9f60126acaa66d3  /tmp/strict_bundle.zip" | sha256sum --check --strict
+          unzip -q /tmp/strict_bundle.zip -d /tmp/strict_extract
+          mv /tmp/strict_extract/Dilemma_Midplate_Strict_SROT validation_run
+          python validation_payload/final_overlay.py
+
+      - name: Fetch revision-correct authoritative sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://raw.githubusercontent.com/Bastardkb/Dilemma/main/mechanical/cases/3x5_3_hotswap/midplate.dxf \
+            --output validation_run/source/midplate.dxf
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://raw.githubusercontent.com/Bastardkb/Dilemma/af0286154cd09af451bc475aabfbe1807123da26/mechanical/cases/3x5_3_hotswap/midplate.dxf \
+            --output validation_run/source/midplate_historical_af028615.dxf
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://raw.githubusercontent.com/Bastardkb/Dilemma/af0286154cd09af451bc475aabfbe1807123da26/mechanical/cases/3x5_3_hotswap/midplate.stl \
+            --output validation_run/source/midplate_official.stl
+          test "$(sha256sum validation_run/source/midplate.dxf | awk '{print $1}')" = "9d69982ed6ff6aa0fd99384820820adf5885e06e0289844d2528d5b10d398d1b"
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          p = Path('validation_run/source/midplate_historical_af028615.dxf')
+          data = p.read_bytes()
+          blob = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+          assert blob == 'ee1d16cfa34f71b3e2e434c5fba1ac9b40346945', blob
+          print('HISTORICAL_DXF_GIT_BLOB_SHA1=PASS')
+          PY
+
+      - name: Install pinned CAD stack
+        working-directory: validation_run
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --requirement requirements.txt
+          python -m pip freeze > validation/dependency_freeze.txt
+
+      - name: Validate current DXF parametric model
+        working-directory: validation_run
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python run_all.py --thickness 3.0 2>&1 | tee validation/complete_run.log
+          grep -Fx "FINAL_RESULT=PASS" validation/complete_run.log
+          grep -Fx "STRICT_SROT=PASS" validation/complete_run.log
+          grep -Fx "GEOMETRY_VALIDATION=PASS" validation/complete_run.log
+
+      - name: Validate historical DXF against historical official STL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p validation_run/historical_reference
+          python validation_run/scripts/midplate_reference.py \
+            --dxf validation_run/source/midplate_historical_af028615.dxf \
+            --thickness 3.0 \
+            --out-dir validation_run/historical_reference
+          python validation_payload/historical_stl_compare.py 2>&1 | tee -a validation_run/validation/complete_run.log
+          grep -Fx "HISTORICAL_OFFICIAL_STL_VALIDATION=PASS" validation_run/validation/complete_run.log
+          echo "REVISION_CORRECT_FINAL_RESULT=PASS" | tee -a validation_run/validation/complete_run.log
+
+      - name: Upload revision-correct PASS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-midplate-revision-correct-pass-evidence
+          path: |
+            validation_run/reference
+            validation_run/generated
+            validation_run/historical_reference
+            validation_run/validation
+            validation_run/scripts
+            validation_run/source
+            validation_run/requirements.txt
+            validation_run/README.md
+          if-no-files-found: error
+          retention-days: 30
