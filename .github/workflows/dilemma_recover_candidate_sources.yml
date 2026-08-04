@@ -7,12 +7,14 @@ on:
     paths:
       - ".github/workflows/dilemma_recover_candidate_sources.yml"
       - "dilemma_tenting_puck/validate_recovered_candidates.py"
+      - "dilemma_tenting_puck/run_recovered_validation.py"
   pull_request:
     branches:
       - master
     paths:
       - ".github/workflows/dilemma_recover_candidate_sources.yml"
       - "dilemma_tenting_puck/validate_recovered_candidates.py"
+      - "dilemma_tenting_puck/run_recovered_validation.py"
   workflow_dispatch:
 
 permissions:
@@ -57,14 +59,14 @@ jobs:
           cp "$integrated" recovered_sources/
           sha256sum recovered_sources/*.py | tee recovered_sources/SHA256SUMS.txt
           wc -l -c recovered_sources/*.py | tee recovered_sources/SIZES.txt
-          python -m py_compile recovered_sources/*.py dilemma_tenting_puck/validate_recovered_candidates.py
+          python -m py_compile recovered_sources/*.py dilemma_tenting_puck/*.py
 
       - name: Build and exact-validate recovered candidates
         shell: bash
         run: |
           set +e
           mkdir -p recovered_validation
-          python dilemma_tenting_puck/validate_recovered_candidates.py 2>&1 | tee recovered_validation/validation.log
+          python dilemma_tenting_puck/run_recovered_validation.py 2>&1 | tee recovered_validation/validation.log
           code=${PIPESTATUS[0]}
           echo "$code" > recovered_validation/validator_exit_code.txt
           exit 0
