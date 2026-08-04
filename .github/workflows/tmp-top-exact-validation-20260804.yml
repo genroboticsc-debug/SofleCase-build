@@ -71,14 +71,14 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Diagnose exact inset sweep, generate, and validate
+      - name: Diagnose exact clipped cap, generate, and validate
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_inset_sweep.py 2>&1 | tee generated/inset_sweep_diagnostic.log
+          python diagnose_clipped_cap_union.py 2>&1 | tee generated/clipped_cap_union_diagnostic.log
           python remote_runner.py 2>&1 | tee generated/workflow.log
           cat generated/run_status.json
           if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
