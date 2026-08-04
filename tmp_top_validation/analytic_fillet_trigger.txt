@@ -1,1 +1,1 @@
-Strict SROT F005 tolerance plus OCCT validation trigger: 2026-08-05T02:36+05:30
+Strict SROT single-pass OCCT validation trigger: 2026-08-05T02:42+05:30
