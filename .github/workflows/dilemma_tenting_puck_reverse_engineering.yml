@@ -21,7 +21,7 @@ permissions:
 jobs:
   exact-brep-analysis:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout isolated branch
         uses: actions/checkout@v4
@@ -35,20 +35,40 @@ jobs:
       - name: Install exact CAD kernel
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "build123d==0.11.1" "cadquery-ocp==7.9.3.1.1"
+          python -m pip install -r dilemma_tenting_puck/requirements.txt
 
-      - name: Analyze STEP B-reps and true boolean delta
+      - name: Materialize auditable Build123d sources
+        run: |
+          python dilemma_tenting_puck/materialize_sources.py
+          python -m py_compile \
+            dilemma_tenting_puck/dilemma_tenting_puck_family.py \
+            dilemma_tenting_puck/validate_dilemma_tenting_puck.py
+
+      - name: Analyze exact reference B-reps
         run: |
           mkdir -p dilemma_tenting_puck/analysis_output
           python dilemma_tenting_puck/analyze_reference.py 2>&1 | tee dilemma_tenting_puck/analysis_output/run.log
-          python dilemma_tenting_puck/render_reference.py
 
-      - name: Upload exact geometry analysis
+      - name: Build and validate genuine parametric feature trees
+        id: validation
+        shell: bash
+        run: |
+          set +e
+          cd dilemma_tenting_puck
+          python validate_dilemma_tenting_puck.py 2>&1 | tee validation_output/validation.log
+          code=${PIPESTATUS[0]}
+          echo "validator_exit_code=$code" | tee validation_output/validator_exit_code.txt
+          exit 0
+
+      - name: Upload exact reverse-engineering package
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dilemma-tenting-puck-exact-analysis
+          name: dilemma-tenting-puck-reconstruction
           path: |
+            dilemma_tenting_puck/dilemma_tenting_puck_family.py
+            dilemma_tenting_puck/validate_dilemma_tenting_puck.py
             dilemma_tenting_puck/analysis_output/**
-          if-no-files-found: warn
+            dilemma_tenting_puck/validation_output/**
+          if-no-files-found: error
           retention-days: 7
