@@ -28,6 +28,7 @@ jobs:
             ocpsvg==0.6.0 \
             ocp_gordon==0.2.0 \
             trianglesolver==1.2 \
+            svgelements==1.9.6 \
             lib3mf==2.4.1
           python - <<'PY'
           from pathlib import Path
