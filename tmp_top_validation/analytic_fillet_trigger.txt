@@ -1,1 +1,1 @@
-Strict SROT corrected source plus OCCT Boolean diagnostic trigger: 2026-08-05T02:08+05:30
+Strict SROT idempotent migration plus explicit-tree repair trigger: 2026-08-05T02:13+05:30
