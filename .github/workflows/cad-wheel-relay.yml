@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - chatgpt/cad-wheel-relay-20260804
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
