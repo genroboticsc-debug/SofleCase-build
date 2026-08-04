@@ -1,0 +1,46 @@
+name: Dilemma pinned upstream source export
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-upstream-source-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned upstream source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+          test "$(git rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+          cd ..
+          mkdir -p exported/source
+          find upstream -type f -not -path '*/.git/*' -printf '%P\n' | sort > exported/tree.txt
+          while IFS= read -r -d '' file; do
+            rel="${file#upstream/}"
+            mkdir -p "exported/source/$(dirname "$rel")"
+            cp "$file" "exported/source/$rel"
+          done < <(find upstream -type f -not -path '*/.git/*' \( \
+            -iname '*.scad' -o -iname '*.py' -o -iname '*.json' -o \
+            -iname '*.yaml' -o -iname '*.yml' -o -iname '*.toml' -o \
+            -iname '*.md' -o -iname '*.txt' -o -iname '*.csv' -o \
+            -iname '*.kicad_pcb' -o -iname '*.kicad_sch' -o -iname '*.dxf' \
+          \) -print0)
+          printf '%s\n' f5cffb4821fe560b095418b71382ac7d8043c61a > exported/commit.txt
+          find exported/source -type f -print0 | sort -z | xargs -0 sha256sum > exported/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-upstream-source
+          path: exported/
+          if-no-files-found: error
+          retention-days: 3
