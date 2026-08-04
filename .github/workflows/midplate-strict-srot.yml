@@ -37,6 +37,33 @@ jobs:
             validation_run/validation/validate.py
           sed -i 's/FEATURE_COUNTS\["inner_wires"\]/(FEATURE_COUNTS["closed_wires"] - 1)/g' \
             validation_run/scripts/midplate_model.py
+          python - <<'PY'
+          from pathlib import Path
+
+          model = Path("validation_run/scripts/midplate_model.py")
+          source = model.read_text(encoding="utf-8")
+          source = source.replace(
+              '''    bbox = body.bounding_box()\n    if abs((bbox.max.Y - bbox.min.Y) - thickness_mm) > 1.0e-9:\n        raise RuntimeError("Generated thickness does not equal 3.000 mm")\n''',
+              '''    vertex_y = [float(vertex.Y) for vertex in body.vertices()]\n    y_min = min(vertex_y)\n    y_max = max(vertex_y)\n    if abs(y_min - float(DESIGN["y_min_mm"])) > 1.0e-9 or abs(y_max - float(DESIGN["y_max_mm"])) > 1.0e-9:\n        raise RuntimeError(\n            f"Generated datum planes differ from exact design: y_min={y_min:.17g}, y_max={y_max:.17g}"\n        )\n''',
+          )
+          model.write_text(source, encoding="utf-8")
+
+          validator = Path("validation_run/validation/validate.py")
+          source = validator.read_text(encoding="utf-8")
+          source = source.replace(
+              '''    bmin = vec(bb.min)\n    bmax = vec(bb.max)\n    return {\n''',
+              '''    bmin = vec(bb.min)\n    bmax = vec(bb.max)\n    vertex_coordinates = np.array(\n        [[float(vertex.X), float(vertex.Y), float(vertex.Z)] for vertex in shape.vertices()],\n        dtype=float,\n    )\n    vertex_min = vertex_coordinates.min(axis=0)\n    vertex_max = vertex_coordinates.max(axis=0)\n    return {\n''',
+          )
+          source = source.replace(
+              '''        "bbox_size_mm": bmax - bmin,\n        "body_count": len(shape.solids()),\n''',
+              '''        "bbox_size_mm": bmax - bmin,\n        "vertex_min_mm": vertex_min,\n        "vertex_max_mm": vertex_max,\n        "body_count": len(shape.solids()),\n''',
+          )
+          source = source.replace(
+              '''        "reference_exact_y_datums": abs(rp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(rp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n        "generated_exact_y_datums": abs(gp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(gp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n''',
+              '''        "reference_exact_y_datums": abs(rp["vertex_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-9 and abs(rp["vertex_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-9,\n        "generated_exact_y_datums": abs(gp["vertex_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-9 and abs(gp["vertex_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-9,\n''',
+          )
+          validator.write_text(source, encoding="utf-8")
+          PY
 
       - name: Fetch immutable authoritative geometry
         shell: bash
