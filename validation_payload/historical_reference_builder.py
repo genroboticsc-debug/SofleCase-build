@@ -47,16 +47,17 @@ def build(dxf_path: Path, thickness_mm: float):
             raise RuntimeError(f"Unexpected historical DXF object type: {type(obj).__name__}")
 
     if open_edges:
-        perimeter = Wire(open_edges)
-        if not perimeter.is_closed:
-            combined = Wire.combine(open_edges)
-            if len(combined) != 1 or not combined[0].is_closed:
-                raise RuntimeError(f"Historical open entities did not form one perimeter: {len(combined)} wires")
-            perimeter = combined[0]
-        closed_wires.append(perimeter)
+        combined = Wire.combine(open_edges)
+        if not combined:
+            raise RuntimeError("Historical open entities produced no connected wire chains")
+        non_closed = [wire for wire in combined if not wire.is_closed]
+        if non_closed:
+            details = [(len(wire.edges()), float(wire.length)) for wire in non_closed]
+            raise RuntimeError(f"Historical edge chains are not closed: {details}")
+        closed_wires.extend(combined)
 
     if len(closed_wires) != 9:
-        details = [(len(w.edges()), bool(w.is_closed)) for w in closed_wires]
+        details = [(len(w.edges()), bool(w.is_closed), float(Face(w).area)) for w in closed_wires]
         raise RuntimeError(f"Expected 9 historical closed loops, got {len(closed_wires)}: {details}")
 
     loop_areas = [(float(Face(wire).area), wire) for wire in closed_wires]
