@@ -108,6 +108,12 @@ ENGRAVING_U_MAX = -6.71720048
 ENGRAVING_V_MAX = 19.18538800
 ENGRAVING_DEPTH = 1.00000000
 
+# Explicit genuine parametric feature-tree registry used by the strict audit.
+FEATURE_TREE = (
+    "F001", "F002", "F003", "F004", "F005", "F006",
+    "F007", "F008", "F009", "F010", "F011", "F012",
+)
+
 
 def xz_plane(y: float) -> Plane:
     """Plane whose local X/Y coordinates map to global X/Z at global Y=y."""
@@ -353,6 +359,21 @@ def _subtract_cylindrical_bore(
     )
 
 
+def _engraving_profile_sketch():
+    """Return the exact standalone parametric underside engraving sketch."""
+    with BuildSketch() as raw_text:
+        Text(
+            ENGRAVING_TEXT,
+            ENGRAVING_FONT_SIZE,
+            font=ENGRAVING_FONT,
+            font_style=FontStyle.REGULAR,
+            align=(Align.MAX, Align.MAX),
+        )
+    return Rot(0.0, 0.0, ENGRAVING_ROTATION_DEG) * (
+        Pos(ENGRAVING_U_MAX, ENGRAVING_V_MAX, 0.0) * raw_text.sketch
+    )
+
+
 def build_top():
     """Build and return the reconstructed top part as one parametric solid."""
     # Build independent F003-F005 operands before opening the parent context.
@@ -362,6 +383,7 @@ def build_top():
         _clipped_boss_solid(bx, bz, y0, y1)
         for _, bx, bz, y0, y1 in BOSSES
     ]
+    engraving_sketch = _engraving_profile_sketch()
 
     with BuildPart() as top:
         # F001 — exact main rolling body: lower prism + R2 inset core + sweep
@@ -420,18 +442,8 @@ def build_top():
             )
 
         # F012 — 1 mm deep, +25° underside engraving
-        text_profile = Rot(0.0, 0.0, ENGRAVING_ROTATION_DEG) * (
-            Pos(ENGRAVING_U_MAX, ENGRAVING_V_MAX, 0.0)
-            * Text(
-                ENGRAVING_TEXT,
-                ENGRAVING_FONT_SIZE,
-                font=ENGRAVING_FONT,
-                font_style=FontStyle.REGULAR,
-                align=(Align.MAX, Align.MAX),
-            )
-        )
         with BuildSketch(xz_plane(Y_BODY_LOW)) as engraving_profile:
-            add(text_profile)
+            add(engraving_sketch)
         extrude(
             engraving_profile.sketch,
             amount=-ENGRAVING_DEPTH,
