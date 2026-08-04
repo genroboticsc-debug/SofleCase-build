@@ -3,6 +3,8 @@ name: CareerPilot Pro 2.4 Core Hotfix APK
 on:
   push:
     branches: [careerpilot-v24-hotfix-20260804]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
