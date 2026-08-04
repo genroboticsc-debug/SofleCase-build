@@ -381,6 +381,9 @@ def build_top():
     # internal construction and clipping tools cannot leak into the parent.
     main_rolling_body = _main_rolling_body()
     top_right_clipped_cap = _top_right_clipped_cap()
+    outer_body = main_rolling_body.fuse(top_right_clipped_cap)
+    if len(outer_body.solids()) != 1 or not outer_body.is_valid:
+        raise RuntimeError("F001-F002 exact outer-body union is invalid")
     boss_solids = [
         _clipped_boss_solid(bx, bz, y0, y1)
         for _, bx, bz, y0, y1 in BOSSES
@@ -389,10 +392,8 @@ def build_top():
 
     with BuildPart() as top:
         # F001 — exact main rolling body: lower prism + R2 inset core + sweep
-        add(main_rolling_body)
-
         # F002 — exact clipped R4.3 top-right cap and toroidal R2 ledge blend
-        add(top_right_clipped_cap)
+        add(outer_body)
 
         # F003–F005 — exact independently generated clipped boss operands
         for boss_solid in boss_solids:
