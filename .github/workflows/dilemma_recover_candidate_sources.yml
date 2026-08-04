@@ -1,0 +1,52 @@
+name: Recover Dilemma Tenting Puck Candidate Sources
+
+on:
+  push:
+    branches:
+      - reverse-engineering/dilemma-tenting-puck
+    paths:
+      - ".github/workflows/dilemma_recover_candidate_sources.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout work branch with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recover historical project archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin dilemma-current-failset-20260803
+          mkdir -p /tmp/recovered recovered_sources
+          : > /tmp/project.tar.xz.b64
+          for part in 00 01 02 03 04 05 06; do
+            git show "origin/dilemma-current-failset-20260803:dilemma-runner/project.tar.xz.b64.part-${part}" >> /tmp/project.tar.xz.b64
+          done
+          base64 --decode /tmp/project.tar.xz.b64 > /tmp/project.tar.xz
+          tar -xJf /tmp/project.tar.xz -C /tmp/recovered
+          find /tmp/recovered -type f -name 'dilemma_case_tenting_puck_opening.py' -print
+          find /tmp/recovered -type f -name 'dilemma_case_integrated_tenting_puck.py' -print
+          opening=$(find /tmp/recovered -type f -name 'dilemma_case_tenting_puck_opening.py' | head -n1)
+          integrated=$(find /tmp/recovered -type f -name 'dilemma_case_integrated_tenting_puck.py' | head -n1)
+          test -n "$opening" && test -n "$integrated"
+          cp "$opening" recovered_sources/
+          cp "$integrated" recovered_sources/
+          sha256sum recovered_sources/*.py | tee recovered_sources/SHA256SUMS.txt
+          wc -l -c recovered_sources/*.py | tee recovered_sources/SIZES.txt
+
+      - name: Upload recovered standalone sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-recovered-candidate-sources
+          path: recovered_sources/**
+          if-no-files-found: error
+          retention-days: 7
