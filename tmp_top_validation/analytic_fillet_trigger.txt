@@ -1,1 +1,1 @@
-Exact inset rolling-ball R2 sweep trigger: 2026-08-05T00:57+05:30
+Exact clipped R4.3 cap and R2 ledge trigger: 2026-08-05T01:15+05:30
