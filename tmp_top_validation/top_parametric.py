@@ -290,13 +290,26 @@ def _top_right_clipped_cap():
     return full_cap & clip
 
 
-def _add_clipped_boss(x: float, z: float, y0: float, y1: float) -> None:
-    """Add a circular boss clipped by the exact outer boundary."""
-    with BuildSketch(xz_plane(y0)):
-        add(outer_profile_sketch())
+def _clipped_boss_solid(x: float, z: float, y0: float, y1: float):
+    """Return an exact cylindrical boss clipped by the outer-profile prism.
+
+    The cylinder and envelope are generated as independent analytic solids
+    before the parent feature tree is opened.  Their 3-D regularized common is
+    geometrically equivalent to the intended profile intersection and remains
+    isolated from BuildPart pending-object state.
+    """
+    with BuildSketch() as circle_profile:
         with Locations((x, z)):
-            Circle(BOSS_RADIUS, mode=Mode.INTERSECT)
-    extrude(amount=-(y1 - y0), mode=Mode.ADD)
+            Circle(BOSS_RADIUS)
+
+    cylinder = _solid_from_sketch(circle_profile.sketch, y0, y1)
+    envelope = _solid_from_sketch(outer_profile_sketch(), y0, y1)
+    clipped_boss = cylinder & envelope
+    if not clipped_boss.solids():
+        raise RuntimeError(f"Empty clipped boss solid at {(x, z, y0, y1)}")
+    if len(clipped_boss.solids()) != 1 or not clipped_boss.is_valid:
+        raise RuntimeError(f"Invalid clipped boss solid at {(x, z, y0, y1)}")
+    return clipped_boss
 
 
 def _subtract_cylindrical_bore(
@@ -306,14 +319,26 @@ def _subtract_cylindrical_bore(
     y0: float,
     y1: float,
 ) -> None:
-    with BuildSketch(xz_plane(y0)):
+    with BuildSketch(xz_plane(y0)) as bore_profile:
         with Locations((x, z)):
             Circle(radius)
-    extrude(amount=-(y1 - y0), mode=Mode.SUBTRACT)
+    extrude(
+        bore_profile.sketch,
+        amount=-(y1 - y0),
+        mode=Mode.SUBTRACT,
+    )
 
 
 def build_top():
     """Build and return the reconstructed top part as one parametric solid."""
+    # Build independent F003-F005 operands before opening the parent context.
+    # This is still a genuine parametric feature tree: each operand is an
+    # identified analytic cylinder clipped by the identified analytic envelope.
+    boss_solids = [
+        _clipped_boss_solid(bx, bz, y0, y1)
+        for _, bx, bz, y0, y1 in BOSSES
+    ]
+
     with BuildPart() as top:
         # F001 — exact main rolling body: lower prism + R2 inset core + sweep
         add(_main_rolling_body())
@@ -321,9 +346,9 @@ def build_top():
         # F002 — exact clipped R4.3 top-right cap and toroidal R2 ledge blend
         add(_top_right_clipped_cap())
 
-        # F003–F005 — clipped cylindrical mounting bosses
-        for _, bx, bz, y0, y1 in BOSSES:
-            _add_clipped_boss(bx, bz, y0, y1)
+        # F003–F005 — exact independently generated clipped boss operands
+        for boss_solid in boss_solids:
+            add(boss_solid, mode=Mode.ADD)
 
         # F006 — Ø43 counterbore from Y=61.0 through Y=64.2
         _subtract_cylindrical_bore(
@@ -335,7 +360,7 @@ def build_top():
         )
 
         # F007 — 2 mm anti-rotation key retained in Ø43/Ø39 annulus
-        with BuildSketch(xz_plane(Y_BODY_LOW)):
+        with BuildSketch(xz_plane(Y_BODY_LOW)) as key_profile:
             with Locations((MAIN_X, MAIN_Z)):
                 Circle(COUNTERBORE_RADIUS)
                 Circle(THROUGH_RADIUS, mode=Mode.SUBTRACT)
@@ -346,6 +371,7 @@ def build_top():
                     mode=Mode.INTERSECT,
                 )
         extrude(
+            key_profile.sketch,
             amount=-(Y_COUNTERBORE_HIGH - Y_BODY_LOW),
             mode=Mode.ADD,
         )
@@ -380,9 +406,13 @@ def build_top():
                 align=(Align.MAX, Align.MAX),
             )
         )
-        with BuildSketch(xz_plane(Y_BODY_LOW)):
+        with BuildSketch(xz_plane(Y_BODY_LOW)) as engraving_profile:
             add(text_profile)
-        extrude(amount=-ENGRAVING_DEPTH, mode=Mode.SUBTRACT)
+        extrude(
+            engraving_profile.sketch,
+            amount=-ENGRAVING_DEPTH,
+            mode=Mode.SUBTRACT,
+        )
 
     result = top.part
     result.label = "top_parametric"
