@@ -83,13 +83,15 @@ jobs:
         run: |
           set -euxo pipefail
           python tmp_top_validation/apply_explicit_boolean_tree_fix.py
+          python tmp_top_validation/apply_f005_boolean_tolerance_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/remote_runner.py \
             tmp_top_validation/validate_top.py \
             tmp_top_validation/diagnose_occt_boolean.py \
-            tmp_top_validation/diagnose_boss_unions.py
+            tmp_top_validation/diagnose_boss_unions.py \
+            tmp_top_validation/apply_f005_boolean_tolerance_fix.py
           git diff --check
 
       - name: Diagnose, audit strict SROT, generate, and validate
