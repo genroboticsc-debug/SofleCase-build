@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
       - ci/P014_ci_payload.tar.xz.b64.part-*
+      - ci/P014_patch_source.py
 
 permissions:
   contents: read
@@ -22,7 +23,7 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Decode and verify isolated P014 payload
+      - name: Decode, verify, and patch isolated P014 payload
         shell: bash
         run: |
           set -euxo pipefail
@@ -34,6 +35,7 @@ jobs:
           rm -rf p014
           mkdir p014
           tar -xJf /tmp/P014_ci_payload.tar.xz -C p014
+          python ci/P014_patch_source.py p014/scripts/dilemma_3x5_3_top.py
 
       - name: Install pinned CAD runtime
         working-directory: p014
