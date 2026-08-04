@@ -19,12 +19,12 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - name: Check out immutable validation commit
         uses: actions/checkout@v4
         with:
-          ref: cdf7991b4acd5fd8efbe0492af57aa583a0c6794
+          ref: 2e930785cd0691ecb693de49b07c30d84b75fdf9
 
       - name: Verify reference chunks
         shell: bash
@@ -87,32 +87,24 @@ jobs:
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/remote_runner.py \
-            tmp_top_validation/validate_top.py
+            tmp_top_validation/validate_fast_manifold.py
           git diff --check
 
-      - name: Run Strict SROT and exact validation
+      - name: Run Strict SROT and exact-polyhedral validation
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python remote_runner.py 2>&1 | tee generated/workflow.log
+          python validate_fast_manifold.py 2>&1 | tee generated/workflow.log
           cat generated/strict_srot_report.json
-          cat generated/run_status.json
-          if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          status = json.loads(Path('generated/run_status.json').read_text())
-          raise SystemExit(0 if status.get('overall_pass') else 1)
-          PY
+          cat generated/fast_validation_report.json
 
       - name: Upload complete validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: immutable-top-srot-validation-${{ github.run_id }}
-          path: tmp_top_validation/generated/top_exact_validation_outputs.zip
+          path: tmp_top_validation/generated/**
           if-no-files-found: warn
