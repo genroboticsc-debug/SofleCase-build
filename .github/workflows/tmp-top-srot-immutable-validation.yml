@@ -1,4 +1,4 @@
-# Direct final-solid native tessellation audit 2026-08-05T05:58+05:30
+# Direct final-solid native tessellation audit 2026-08-05T06:06+05:30
 name: Immutable top direct final-solid tessellation audit
 
 on:
@@ -42,6 +42,7 @@ jobs:
           fc-match Arial | grep -qi Arial
           python -m pip install --upgrade pip
           python -m pip install -r tmp_top_validation/requirements.txt
+          python -m pip install networkx==3.6.1
 
       - name: Reassemble and verify immutable reference STL
         shell: bash
