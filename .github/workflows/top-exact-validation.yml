@@ -11,13 +11,19 @@ on:
       - tmp_top_validation/remote_runner.py
       - tmp_top_validation/requirements.txt
       - tmp_top_validation/reference/top.stl.b64
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/top-exact-validation.yml
+      - tmp_top_validation/**
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: top-exact-validation
+  group: top-exact-validation-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -68,7 +74,6 @@ jobs:
           python remote_runner.py 2>&1 | tee generated/workflow.log
           printf '%s\n' "$GITHUB_RUN_ID_VALUE" > generated/run_id.txt
           cat generated/run_status.json
-          test -f generated/validation_report.json || true
           if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
 
       - name: Upload full validation artifact
@@ -79,6 +84,7 @@ jobs:
           if-no-files-found: error
 
       - name: Commit result records to isolated branch
+        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euxo pipefail
