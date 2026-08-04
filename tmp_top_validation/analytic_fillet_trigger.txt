@@ -1,1 +1,1 @@
-Exact analytic cylinder-prism boss clipping trigger: 2026-08-05T01:31+05:30
+Strict SROT boss-context correction trigger: 2026-08-05T01:34+05:30
