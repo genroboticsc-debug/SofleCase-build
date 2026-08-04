@@ -1,0 +1,56 @@
+{
+  "standard": "STRICT-SROT-ANALYTIC-FEATURE-TREE-V1",
+  "pass": false,
+  "violations": [
+    {
+      "rule": "SROT-FEATURE-ORDER-MISSING",
+      "detail": "Missing explicit feature-tree markers: ['F004', 'F010']"
+    }
+  ],
+  "evidence": {
+    "source_sha256": "ce5922bd382feb3d3dd9ca982440845bb5486316b69953eb7c459f134223be56",
+    "source_bytes": 14480,
+    "imports": [
+      "__future__",
+      "math",
+      "pathlib",
+      "build123d"
+    ],
+    "top_level_functions": [
+      "_circle_point",
+      "_clipped_boss_solid",
+      "_main_rolling_body",
+      "_outward_quarter_disk",
+      "_placed_face",
+      "_solid_from_sketch",
+      "_subtract_cylindrical_bore",
+      "_top_right_clipped_cap",
+      "build_top",
+      "export_model",
+      "outer_profile_sketch",
+      "xz_plane"
+    ],
+    "max_numeric_literal_container": 12,
+    "feature_markers_found": [
+      "F001",
+      "F002",
+      "F003",
+      "F005",
+      "F006",
+      "F007",
+      "F008",
+      "F009",
+      "F011",
+      "F012"
+    ]
+  },
+  "rules": {
+    "reference_import_or_read": "forbidden",
+    "mesh_brep_face_wire_pcurve_replay": "forbidden",
+    "cached_or_serialized_geometry": "forbidden",
+    "sampled_coordinate_profile_tables": "forbidden",
+    "external_generator_dependencies": "build123d-only",
+    "standalone_zero-input_feature_tree": "required",
+    "explicit_F001_to_F012_order": "required"
+  }
+}
