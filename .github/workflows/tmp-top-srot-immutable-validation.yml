@@ -1,5 +1,5 @@
-# Full native absolute-deflection validation matrix 2026-08-05T05:32+05:30
-name: Immutable top absolute-deflection validation matrix
+# Best absolute-deflection residual localization 2026-08-05T05:42+05:30
+name: Immutable top absolute residual localization
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  localize:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -55,7 +55,7 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install and compile final recovered feature tree
+      - name: Install and compile final recovered feature tree plus localizer
         shell: bash
         run: |
           set -euxo pipefail
@@ -66,22 +66,19 @@ jobs:
           python tmp_top_validation/apply_f012_lowercase_v_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
-            tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/validate_fast_manifold.py \
-            tmp_top_validation/validate_feature_tree_manifold.py
+            tmp_top_validation/validate_feature_tree_manifold.py \
+            tmp_top_validation/diagnose_difference_components.py
           git diff --check
 
-      - name: Run full native absolute-deflection matrix
+      - name: Localize best absolute-deflection residual
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
-          rm -rf generated/absolute_matrix
-          mkdir -p generated/absolute_matrix
-          python - <<'PY' 2>&1 | tee generated/absolute_matrix/matrix.log
-          from __future__ import annotations
-
-          import json
+          rm -rf generated/absolute_residual
+          mkdir -p generated/absolute_residual
+          python - <<'PY' 2>&1 | tee generated/absolute_residual/localization.log
           from pathlib import Path
 
           import trimesh
@@ -90,77 +87,42 @@ jobs:
 
           import validate_feature_tree_manifold as vf
 
-          matrix_root = Path("generated/absolute_matrix")
-          candidates = [0.006666666667, 0.006680000000, 0.006695000000]
-          angular = 0.60
-          summaries = []
+          LINEAR = 0.006680000000
+          ANGULAR = 0.60
+          out = Path("generated/absolute_residual")
+          features = out / "feature_meshes"
 
-          def make_tessellator(linear: float, features_dir: Path):
-              def tessellate_shape(shape, name: str):
-                  features_dir.mkdir(parents=True, exist_ok=True)
-                  path = features_dir / f"{name}.stl"
-                  mesher = BRepMesh_IncrementalMesh(shape.wrapped, linear, False, angular, True)
-                  mesher.Perform()
-                  if not mesher.IsDone():
-                      raise RuntimeError(f"OCCT absolute meshing failed for {name}")
-                  writer = StlAPI_Writer()
-                  writer.ASCIIMode = False
-                  if not writer.Write(shape.wrapped, str(path)):
-                      raise RuntimeError(f"OCCT STL write failed for {name}")
-                  mesh = trimesh.load_mesh(path, process=True)
-                  return vf.as_mesh(mesh, name)
-              return tessellate_shape
+          def tessellate_shape(shape, name: str):
+              features.mkdir(parents=True, exist_ok=True)
+              path = features / f"{name}.stl"
+              mesher = BRepMesh_IncrementalMesh(shape.wrapped, LINEAR, False, ANGULAR, True)
+              mesher.Perform()
+              if not mesher.IsDone():
+                  raise RuntimeError(f"OCCT absolute meshing failed for {name}")
+              writer = StlAPI_Writer()
+              writer.ASCIIMode = False
+              if not writer.Write(shape.wrapped, str(path)):
+                  raise RuntimeError(f"OCCT STL write failed for {name}")
+              return vf.as_mesh(trimesh.load_mesh(path, process=True), name)
 
-          for linear in candidates:
-              tag = f"lin_{linear:.12f}".replace(".", "p")
-              out = matrix_root / tag
-              out.mkdir(parents=True, exist_ok=True)
-              vf.GENERATED = out
-              vf.FEATURES = out / "feature_meshes"
-              vf.tessellate_shape = make_tessellator(linear, vf.FEATURES)
-              print(f"=== FULL VALIDATION linear={linear:.12f} angular={angular:.6f} relative=False ===", flush=True)
-              try:
-                  return_code = vf.main()
-                  report_path = out / "feature_tree_validation_report.json"
-                  report = json.loads(report_path.read_text(encoding="utf-8"))
-                  metrics = report.get("metrics", {})
-                  summary = {
-                      "linear_tolerance_mm": linear,
-                      "angular_tolerance_rad": angular,
-                      "relative": False,
-                      "return_code": return_code,
-                      "overall_pass": report.get("overall_pass", False),
-                      "checks": report.get("checks", {}),
-                      "symmetric_difference_volume_mm3": metrics.get("symmetric_difference_volume_mm3"),
-                      "symmetric_difference_percent": metrics.get("symmetric_difference_percent"),
-                      "generated_minus_reference_volume_mm3": metrics.get("generated_minus_reference_volume_mm3"),
-                      "reference_minus_generated_volume_mm3": metrics.get("reference_minus_generated_volume_mm3"),
-                      "generated_stl_volume_mm3": metrics.get("generated_stl_volume_mm3"),
-                      "generated_stl_area_mm2": metrics.get("generated_stl_area_mm2"),
-                  }
-              except Exception as exc:
-                  summary = {
-                      "linear_tolerance_mm": linear,
-                      "angular_tolerance_rad": angular,
-                      "relative": False,
-                      "overall_pass": False,
-                      "exception": repr(exc),
-                  }
-              summaries.append(summary)
-              print(json.dumps(summary, indent=2), flush=True)
+          vf.GENERATED = out
+          vf.FEATURES = features
+          vf.tessellate_shape = tessellate_shape
 
-          summaries.sort(key=lambda item: (not item.get("overall_pass", False), item.get("symmetric_difference_percent", float("inf"))))
-          final = {"candidates": summaries, "best": summaries[0]}
-          (matrix_root / "summary.json").write_text(json.dumps(final, indent=2), encoding="utf-8")
-          print("=== MATRIX SUMMARY ===")
-          print(json.dumps(final, indent=2))
+          import diagnose_difference_components as dd
+          dd.GENERATED = out
+          dd.FEATURES = features
+          dd.OUT = out / "difference_components"
+          dd.OUT.mkdir(parents=True, exist_ok=True)
+          dd.build_feature_mesh_tree = vf.build_feature_mesh_tree
+          raise SystemExit(dd.main())
           PY
-          cat generated/absolute_matrix/summary.json
+          cat generated/absolute_residual/difference_components/report.json
 
-      - name: Upload full absolute-deflection evidence
+      - name: Upload absolute residual evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-absolute-validation-matrix-${{ github.run_id }}
-          path: tmp_top_validation/generated/absolute_matrix/**
+          name: immutable-top-absolute-residual-${{ github.run_id }}
+          path: tmp_top_validation/generated/absolute_residual/**
           if-no-files-found: warn
