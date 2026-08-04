@@ -79,6 +79,7 @@ jobs:
           python tmp_top_validation/apply_top_right_boss_clip_fix.py
           python tmp_top_validation/apply_engraving_context_fix.py
           python tmp_top_validation/apply_outer_operand_context_fix.py
+          python tmp_top_validation/apply_explicit_boolean_tree_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
@@ -124,7 +125,7 @@ jobs:
           git config user.name "openai-cad-validator"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tmp_top_validation/top_parametric.py
-          git commit -m "Complete explicit analytic feature-tree corrections"
+          git commit -m "Use explicit ordered solid Boolean feature tree"
           git reset --hard HEAD
           git clean -fd
           git fetch origin tmp/top-exact-validation-20260804
