@@ -6,6 +6,11 @@ on:
       - reverse-engineering/dilemma-tenting-puck
     paths:
       - ".github/workflows/dilemma_recover_candidate_sources.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/dilemma_recover_candidate_sources.yml"
   workflow_dispatch:
 
 permissions:
@@ -33,8 +38,6 @@ jobs:
           done
           base64 --decode /tmp/project.tar.xz.b64 > /tmp/project.tar.xz
           tar -xJf /tmp/project.tar.xz -C /tmp/recovered
-          find /tmp/recovered -type f -name 'dilemma_case_tenting_puck_opening.py' -print
-          find /tmp/recovered -type f -name 'dilemma_case_integrated_tenting_puck.py' -print
           opening=$(find /tmp/recovered -type f -name 'dilemma_case_tenting_puck_opening.py' | head -n1)
           integrated=$(find /tmp/recovered -type f -name 'dilemma_case_integrated_tenting_puck.py' | head -n1)
           test -n "$opening" && test -n "$integrated"
