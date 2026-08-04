@@ -31,6 +31,10 @@ jobs:
           mkdir -p /tmp/strict_extract
           unzip -q /tmp/strict_bundle.zip -d /tmp/strict_extract
           mv /tmp/strict_extract/Dilemma_Midplate_Strict_SROT validation_run
+          sed -i 's/\.is_valid()/\.is_valid/g' \
+            validation_run/scripts/midplate_reference.py \
+            validation_run/scripts/midplate_model.py \
+            validation_run/validation/validate.py
 
       - name: Fetch immutable authoritative geometry
         shell: bash
