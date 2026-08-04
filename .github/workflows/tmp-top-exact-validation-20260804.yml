@@ -97,6 +97,14 @@ jobs:
           raise SystemExit(0 if status.get('overall_pass') else 1)
           PY
 
+      - name: Upload complete result package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: top-exact-validation-results-${{ github.run_id }}
+          path: tmp_top_validation/generated/top_exact_validation_outputs.zip
+          if-no-files-found: warn
+
       - name: Persist deterministic source transformation
         if: always()
         shell: bash
@@ -109,14 +117,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tmp_top_validation/top_parametric.py
           git commit -m "Use explicit robust operands for downstream CAD features"
+          # The source correction is committed. Remove only reconstructed and
+          # generated working-tree files before rebasing against concurrent
+          # trigger commits; no generated geometry is committed.
+          git reset --hard HEAD
+          git clean -fd
           git fetch origin tmp/top-exact-validation-20260804
           git rebase origin/tmp/top-exact-validation-20260804
           git push origin HEAD:tmp/top-exact-validation-20260804
-
-      - name: Upload complete result package
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: top-exact-validation-results-${{ github.run_id }}
-          path: tmp_top_validation/generated/top_exact_validation_outputs.zip
-          if-no-files-found: warn
