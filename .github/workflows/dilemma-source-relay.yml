@@ -32,7 +32,7 @@ jobs:
           find upstream/mechanical -type f -printf '%P\n' | sort > relay/MECHANICAL_FILE_INVENTORY.txt
           find upstream/mechanical -type f \( -iname '*.step' -o -iname '*.stp' -o -iname '*.stl' -o -iname '*.3mf' -o -iname '*.f3d' -o -iname '*.fcstd' -o -iname '*.scad' -o -iname '*.dxf' -o -iname '*.kicad_pcb' -o -iname '*.json' -o -iname '*.py' \) -printf '%P\n' | sort > relay/CAD_SOURCE_INVENTORY.txt
           cp -a upstream/mechanical relay/mechanical
-          sha256sum $(find relay/mechanical -type f -print) > relay/SHA256SUMS.txt
+          find relay/mechanical -type f -print0 | sort -z | xargs -0 sha256sum > relay/SHA256SUMS.txt
 
       - name: Upload exact pinned mechanical tree
         uses: actions/upload-artifact@v4
