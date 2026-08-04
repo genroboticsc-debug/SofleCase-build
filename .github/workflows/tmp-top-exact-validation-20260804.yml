@@ -84,7 +84,8 @@ jobs:
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/remote_runner.py \
-            tmp_top_validation/validate_top.py
+            tmp_top_validation/validate_top.py \
+            tmp_top_validation/diagnose_occt_boolean.py
           git diff --check
 
       - name: Diagnose, audit strict SROT, generate, and validate
@@ -95,9 +96,11 @@ jobs:
           rm -rf generated
           mkdir -p generated
           python diagnose_clipped_cap_union.py 2>&1 | tee generated/clipped_cap_union_diagnostic.log
+          python diagnose_occt_boolean.py 2>&1 | tee generated/occt_boolean_diagnostic.log || true
           python remote_runner.py 2>&1 | tee generated/workflow.log
           cat generated/strict_srot_report.json
           cat generated/run_status.json
+          if test -f generated/occt_boolean_diagnostic.json; then cat generated/occt_boolean_diagnostic.json; fi
           if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
           python - <<'PY'
           import json
