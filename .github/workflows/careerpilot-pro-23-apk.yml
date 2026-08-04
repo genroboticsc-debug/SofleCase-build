@@ -1,0 +1,149 @@
+name: CareerPilot Pro 2.3 Core Android APK
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reconstruct verified CareerPilot 2.3 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          LOG="$GITHUB_WORKSPACE/careerpilot-pro-23-build.log"
+          SOURCE="CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > "$SOURCE"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c - | tee "$LOG"
+          mkdir -p build-src
+          tar -xJf "$SOURCE" -C build-src
+
+          cat > expected-v23-chunks.sha256 <<'HASHES'
+          8f23d34dccc3d3cd251f6e93fcf19f87f0c699c3fd3de211cc79c4419cb0a1cd  careerpilot_build/pro_v23_patch/part00.b64
+          686ccf7d853f23fbeb77c50ee116ad1ab5c68e6eec8a4af07bae8980dd58d575  careerpilot_build/pro_v23_patch/part01.b64
+          70b41ed35abe58c254f7ef7c7dd608ebb20ef5b6388aebf7243b081c8441eebc  careerpilot_build/pro_v23_patch/part02.b64
+          ef32aae9a43e264cfd498164265af52e0c8bb302c87e4f91b093add95fee477d  careerpilot_build/pro_v23_patch/part03.b64
+          5c1eedf9ba2d621385eef2d817b0c9529459c3775aa6503198a6884782843131  careerpilot_build/pro_v23_patch/part04.b64
+          3fc7006d60f0eea5f05d06bd309c285c2d3cf7deefabe3e05aa7405764237db3  careerpilot_build/pro_v23_patch/part05.b64
+          1185a5d62356584ba080a1a5de32b1f55d26570fd4ec472cbec9977029853580  careerpilot_build/pro_v23_patch/part06.b64
+          c0883803b1627ea22eb4b9c9ac5e821fab211418bc36884360475a3c533c0c11  careerpilot_build/pro_v23_patch/part07.b64
+          223ce65652a4e777d9329bb7087f1236b94013cc5f88fef0a1ba7b1a29fc1cd7  careerpilot_build/pro_v23_patch/part08.b64
+          38e36fc0a5e6453106c7b8d08a5b51bcf8a0196a2ef6bfee42203d35c84be6d9  careerpilot_build/pro_v23_patch/part09.b64
+          d8d015885ebc7b0b4d963c89b7ea61c200f4805f9c0e0348e66784616f45841a  careerpilot_build/pro_v23_patch/part10.b64
+          aad4c6e9f014853fea92fc5002622349553890453705ed75e745fe06b9eab71c  careerpilot_build/pro_v23_patch/part11.b64
+          cdece604c16634c8e8794563475386be602dc4345ecfdc2b3bcff5b756db99ff  careerpilot_build/pro_v23_patch/part12.b64
+          8b8f5bfa66e5ab7390d929aa5dba71c49aaf6cd314c25248a746c0565b01bff0  careerpilot_build/pro_v23_patch/part13.b64
+          7b3fad7d725793af71ba0978649d8ee8619ff1db2c9f2d0edb2ec94046e51e63  careerpilot_build/pro_v23_patch/part14.b64
+          HASHES
+          sha256sum -c expected-v23-chunks.sha256 | tee -a "$LOG"
+          cat careerpilot_build/pro_v23_patch/part{00..14}.b64 > careerpilot-23.patch.xz.b64
+          echo "cc437a59c6f06707b39a453cfe944ca1797bcd4dea0d719671759c51effaee48  careerpilot-23.patch.xz.b64" | sha256sum -c - | tee -a "$LOG"
+          base64 -d careerpilot-23.patch.xz.b64 > careerpilot-23.patch.xz
+          echo "17421d198cffe2504ecfff7f69c42593548100bbabb8a933d89ef85b7e58e5d7  careerpilot-23.patch.xz" | sha256sum -c - | tee -a "$LOG"
+          xz -dc careerpilot-23.patch.xz > careerpilot-23.patch
+          echo "71c68565bf25a27efa1b4a6cc87f79fe79f3c489d6d24c6b55993eaa2db46c5e  careerpilot-23.patch" | sha256sum -c - | tee -a "$LOG"
+          cd build-src/CareerPilotAI
+          patch -p2 --forward --batch < "$GITHUB_WORKSPACE/careerpilot-23.patch" | tee -a "$LOG"
+          grep -q 'versionName = "2.3.0-beta"' app/build.gradle.kts
+          grep -q 'ACTION_PROCESS_QUEUE' app/src/main/java/com/careerpilot/ai/automation/AutomationForegroundService.kt
+          grep -q '04_tailored_resume.pdf' app/src/main/java/com/careerpilot/ai/workflow/WorkflowEngine.kt
+          grep -q 'SecretStore(appContext)' app/src/main/java/com/careerpilot/ai/core/AppContainer.kt
+          grep -q 'JobQualityGate' app/src/main/java/com/careerpilot/ai/discovery/JobDiscovery.kt
+          grep -q 'createShareableZip' app/src/main/java/com/careerpilot/ai/data/ArtifactRepository.kt
+
+      - name: Smoke-test public search routes
+        shell: bash
+        run: |
+          set +e
+          LOG="$GITHUB_WORKSPACE/careerpilot-pro-23-build.log"
+          ok=0
+          for url in \
+            'https://remotive.com/api/remote-jobs?search=mechanical&limit=1' \
+            'https://jobicy.com/api/v2/remote-jobs?count=1&tag=engineering' \
+            'https://remoteok.com/api' \
+            'https://www.arbeitnow.com/api/job-board-api' \
+            'https://www.bing.com/search?format=rss&q=mechanical+engineer+jobs'; do
+            code=$(curl -L --max-time 20 -A 'CareerPilotAI/2.3' -o /tmp/feed.out -s -w '%{http_code}' "$url")
+            bytes=$(wc -c < /tmp/feed.out 2>/dev/null || echo 0)
+            echo "SEARCH_ROUTE http=$code bytes=$bytes url=$url" | tee -a "$LOG"
+            if [[ "$code" == "200" && "$bytes" -gt 50 ]]; then ok=$((ok+1)); fi
+          done
+          echo "SEARCH_ROUTES_AVAILABLE=$ok/5" | tee -a "$LOG"
+          test "$ok" -ge 3
+
+      - name: Build tests and APK
+        working-directory: build-src/CareerPilotAI
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-23-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.3.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro-2.3.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI-Pro-2.3.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI-Pro-2.3.apk
+            echo '=== APK ZIP INTEGRITY ==='
+            unzip -t CareerPilotAI-Pro-2.3.apk | tail -n 2
+          } | tee CareerPilotAI-Pro-2.3.validation.txt | tee -a careerpilot-pro-23-build.log
+          sha256sum CareerPilotAI-Pro-2.3.apk > CareerPilotAI-Pro-2.3.apk.sha256
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.3-build-diagnostics
+          path: careerpilot-pro-23-build.log
+          if-no-files-found: warn
+          retention-days: 2
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.3-Core-APK
+          path: |
+            CareerPilotAI-Pro-2.3.apk
+            CareerPilotAI-Pro-2.3.apk.sha256
+            CareerPilotAI-Pro-2.3.validation.txt
+          if-no-files-found: error
+          retention-days: 2
