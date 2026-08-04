@@ -17,9 +17,10 @@ jobs:
       - name: Decode revised sources
         shell: bash
         run: |
-          set -euxo pipefail
+          set -u
           git fetch --depth=1 origin agent/dilemma-fast-pass-20260804
           mkdir -p recovered-fast-sources
+          : > recovered-fast-sources/RECOVERY_STATUS.txt
           for name in \
             dilemma_3x5_2_tenting_puck_case.py \
             dilemma_3x5_3_top.py \
@@ -27,11 +28,16 @@ jobs:
             dilemma_3x5_3_hotswap_mid.py \
             dilemma_3x5_3_hotswap_plate_left.py \
             dilemma_3x5_3_hotswap_plate_right.py; do
-            git show FETCH_HEAD:dilemma-fast/scripts/${name}.xz.b64 | base64 --decode | xz --decompress > recovered-fast-sources/$name
-            python -m py_compile recovered-fast-sources/$name
+            if git show FETCH_HEAD:dilemma-fast/scripts/${name}.xz.b64 | base64 --decode | xz --decompress > recovered-fast-sources/$name && python -m py_compile recovered-fast-sources/$name; then
+              echo "$name PASS" | tee -a recovered-fast-sources/RECOVERY_STATUS.txt
+            else
+              rm -f recovered-fast-sources/$name
+              echo "$name FAIL" | tee -a recovered-fast-sources/RECOVERY_STATUS.txt
+            fi
           done
-          sha256sum recovered-fast-sources/* > recovered-fast-sources/SHA256SUMS.txt
+          sha256sum recovered-fast-sources/*.py > recovered-fast-sources/SHA256SUMS.txt || true
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: dilemma-revised-fast-sources
           path: recovered-fast-sources/
