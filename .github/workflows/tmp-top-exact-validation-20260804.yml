@@ -78,6 +78,7 @@ jobs:
           python tmp_top_validation/apply_explicit_feature_fix.py
           python tmp_top_validation/apply_top_right_boss_clip_fix.py
           python tmp_top_validation/apply_engraving_context_fix.py
+          python tmp_top_validation/apply_outer_operand_context_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
