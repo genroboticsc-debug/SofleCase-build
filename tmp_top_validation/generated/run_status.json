@@ -1,0 +1,7 @@
+{
+  "generation": false,
+  "validation": false,
+  "overall_pass": false,
+  "exception": "ValueError: Face can only be created with closed wires",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/remote_runner.py\", line 61, in run\n    step_path, stl_path = export_model(GENERATED)\n                          ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 271, in export_model\n    model = build_top()\n            ^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 187, in build_top\n    add(outer_profile_sketch())\n        ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/SofleCase-build/SofleCase-build/tmp_top_validation/top_parametric.py\", line 156, in outer_profile_sketch\n    make_face()\n  File \"/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/build123d/operations_sketch.py\", line 227, in make_face\n    pending_face = Face(Wire.combine(outer_edges)[0])\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/build123d/topology/two_d.py\", line 919, in __init__\n    raise ValueError(\"Face can only be created with closed wires\")\nValueError: Face can only be created with closed wires\n"
+}
