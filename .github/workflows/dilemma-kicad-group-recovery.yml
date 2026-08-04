@@ -1,0 +1,122 @@
+name: Dilemma KiCad group recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install KiCad 9 Python API
+        run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
+          sudo apt-get install -y kicad python3
+      - name: Checkout pinned source
+        run: |
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+      - name: Export group and item metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exports
+          cat > /tmp/groups.py <<'PY'
+          import json
+          from pathlib import Path
+          import pcbnew
+
+          FAMILIES=('3x5_3','3x5_3_procyon','4x6_4')
+          def mm(v): return float(v)/1_000_000.0
+          def point(v): return [mm(v.x),mm(v.y)]
+          def maybe(obj,name,*args):
+              try: return getattr(obj,name)(*args)
+              except Exception: return None
+          def uid(obj):
+              for name in ('m_Uuid','GetUuid'):
+                  try:
+                      v=getattr(obj,name)
+                      v=v() if callable(v) else v
+                      return str(v)
+                  except Exception: pass
+              return ''
+          def bbox(obj):
+              b=maybe(obj,'GetBoundingBox')
+              if b is None: return None
+              try:
+                  p=b.GetPosition(); s=b.GetSize()
+                  return [mm(p.x),mm(p.y),mm(p.x+s.x),mm(p.y+s.y)]
+              except Exception: return None
+          def layer_name(obj):
+              v=maybe(obj,'GetLayerName')
+              if v is not None: return str(v)
+              lid=maybe(obj,'GetLayer')
+              return str(lid) if lid is not None else None
+          def item_record(item):
+              rec={'uuid':uid(item),'class':type(item).__name__,'bbox':bbox(item),'layer':layer_name(item)}
+              for key,name in [('reference','GetReference'),('value','GetValue'),('number','GetNumber'),('name','GetName')]:
+                  v=maybe(item,name)
+                  if v not in (None,''): rec[key]=str(v)
+              pos=maybe(item,'GetPosition')
+              if pos is not None: rec['position']=point(pos)
+              shape=maybe(item,'GetShapeStr') or maybe(item,'GetShape')
+              if shape is not None: rec['shape']=str(shape)
+              start=maybe(item,'GetStart'); end=maybe(item,'GetEnd'); center=maybe(item,'GetCenter'); mid=maybe(item,'GetArcMid')
+              if start is not None: rec['start']=point(start)
+              if end is not None: rec['end']=point(end)
+              if center is not None: rec['center']=point(center)
+              if mid is not None: rec['arc_mid']=point(mid)
+              return rec
+          summary={}
+          for fam in FAMILIES:
+              board=pcbnew.LoadBoard(str(Path('upstream')/fam/'dilemma.kicad_pcb'))
+              all_items={}
+              pools=[]
+              for getter in ('GetDrawings','GetFootprints','Zones'):
+                  v=maybe(board,getter)
+                  if v is not None: pools.extend(list(v))
+              for fp in board.GetFootprints():
+                  try: pools.extend(list(fp.GraphicalItems()))
+                  except Exception: pass
+                  try: pools.extend(list(fp.Pads()))
+                  except Exception: pass
+              for item in pools:
+                  all_items[uid(item)]=item_record(item)
+              groups=[]
+              raw_groups=maybe(board,'Groups') or maybe(board,'GetGroups') or []
+              for idx,g in enumerate(raw_groups):
+                  members=[]
+                  raw=maybe(g,'GetItems') or maybe(g,'GetMembers') or []
+                  for item in raw:
+                      r=item_record(item)
+                      members.append(r)
+                      all_items.setdefault(r['uuid'],r)
+                  groups.append({
+                      'index':idx,
+                      'uuid':uid(g),
+                      'name':str(maybe(g,'GetName') or ''),
+                      'bbox':bbox(g),
+                      'member_count':len(members),
+                      'members':members,
+                  })
+              data={'family':fam,'kicad_version':pcbnew.Version(),'group_count':len(groups),'groups':groups}
+              Path('exports',f'{fam}_groups.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
+              summary[fam]=[{'index':g['index'],'name':g['name'],'bbox':g['bbox'],'member_count':g['member_count'],'classes':{c:sum(1 for x in g['members'] if x['class']==c) for c in sorted({x['class'] for x in g['members']})}} for g in groups]
+          Path('exports/SUMMARY.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          print(json.dumps(summary,indent=2))
+          PY
+          python3 /tmp/groups.py
+          find exports -type f -print0 | sort -z | xargs -0 sha256sum > exports/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-kicad-group-recovery
+          path: exports
+          retention-days: 3
+          if-no-files-found: error
