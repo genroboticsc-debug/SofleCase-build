@@ -1,0 +1,112 @@
+name: Immutable top Strict SROT validation
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/tmp-top-srot-immutable-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out immutable validation commit
+        uses: actions/checkout@v4
+        with:
+          ref: cdf7991b4acd5fd8efbe0492af57aa583a0c6794
+
+      - name: Verify reference chunks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          REF_DIR=tmp_top_validation/reference
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.00 | awk '{print $1}')" = "2a822a1a145f12cd68ce800481d60c185caff3259ed56918fda334b04d68e098"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.01 | awk '{print $1}')" = "99ae218fad8c4c3ffe71c09bc6813eabd9e394e3d28e4aa57a0e5b1059ee33c9"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.02 | awk '{print $1}')" = "0fbfa701c2153280786ee5674611dc9f3544ceb642b1a36668c072b5b693c560"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.03 | awk '{print $1}')" = "3be6d1aa5f87fc8e6f1ea0d69240ffd8ac80b64eca7592dadc57347d5f479964"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.04 | awk '{print $1}')" = "3db88380c26037a5eb6ae5428cb4c0ec582f64d5b52afcd30255fe04f1b5d4c7"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tmp_top_validation/requirements.txt
+
+      - name: Install checksum-verified Arial and pinned CAD stack
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig cabextract curl xz-utils
+          FONT_TMP="$(mktemp -d)"
+          curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 \
+            -o "$FONT_TMP/arial32.exe" \
+            https://downloads.sourceforge.net/corefonts/arial32.exe
+          cabextract -q -d "$FONT_TMP" "$FONT_TMP/arial32.exe"
+          test "$(sha256sum "$FONT_TMP/Arial.TTF" | awk '{print $1}')" = "35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833"
+          install -Dm644 "$FONT_TMP/Arial.TTF" "$HOME/.local/share/fonts/Arial.ttf"
+          fc-cache -f
+          fc-match Arial | grep -qi Arial
+          python -m pip install --upgrade pip
+          python -m pip install -r tmp_top_validation/requirements.txt
+
+      - name: Reassemble immutable reference STL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          REF_DIR=tmp_top_validation/reference
+          cat "$REF_DIR"/top.stl.xz.b64.00 \
+              "$REF_DIR"/top.stl.xz.b64.01 \
+              "$REF_DIR"/top.stl.xz.b64.02 \
+              "$REF_DIR"/top.stl.xz.b64.03 \
+              "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64 | awk '{print $1}')" = "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
+          base64 --decode "$REF_DIR"/top.stl.xz.b64 > "$REF_DIR"/top.stl.xz
+          test "$(sha256sum "$REF_DIR"/top.stl.xz | awk '{print $1}')" = "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
+          xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
+          test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
+
+      - name: Install and compile authoritative feature tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tmp_top_validation/apply_explicit_boolean_tree_fix.py
+          python tmp_top_validation/apply_f005_boolean_tolerance_fix.py
+          python -m py_compile \
+            tmp_top_validation/top_parametric.py \
+            tmp_top_validation/strict_srot_check.py \
+            tmp_top_validation/remote_runner.py \
+            tmp_top_validation/validate_top.py
+          git diff --check
+
+      - name: Run Strict SROT and exact validation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd tmp_top_validation
+          rm -rf generated
+          mkdir -p generated
+          python remote_runner.py 2>&1 | tee generated/workflow.log
+          cat generated/strict_srot_report.json
+          cat generated/run_status.json
+          if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          status = json.loads(Path('generated/run_status.json').read_text())
+          raise SystemExit(0 if status.get('overall_pass') else 1)
+          PY
+
+      - name: Upload complete validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-top-srot-validation-${{ github.run_id }}
+          path: tmp_top_validation/generated/top_exact_validation_outputs.zip
+          if-no-files-found: warn
