@@ -1,0 +1,86 @@
+name: SROT SLDPRT IR decode
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  decode-native-cad:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: cadmpeg/cadmpeg
+          ref: 43ad613b416d96225fef501b08b0a29e6f982fbe
+          path: cadmpeg
+      - name: Recover native SolidWorks sources
+        run: |
+          mkdir native_cad decoded
+          curl -fL --retry 3 \
+            'https://raw.githubusercontent.com/gusmanb/logicanalyzer/e9239a922c3e2c75fbd6ae0bd20aca5fe65bdddd/Enclosure/AnalyzerBoxMain_fork.SLDPRT' \
+            -o native_cad/AnalyzerBoxMain_fork_PR100.SLDPRT
+          curl -fL --retry 3 \
+            'https://raw.githubusercontent.com/gusmanb/logicanalyzer/dec289bb3c92ba27566a877f72d8a6fb7d056f8f/Enclosure/LogicAnalyzer_JasonYANG170/AnalyzerBoxTop_fork.SLDPRT' \
+            -o native_cad/AnalyzerBoxTop_fork_PR102.SLDPRT
+      - name: Add exact IR dump example
+        run: |
+          mkdir -p cadmpeg/crates/cadmpeg-codec-sldprt/examples
+          cat > cadmpeg/crates/cadmpeg-codec-sldprt/examples/dump_ir.rs <<'RS'
+          use std::{env, fs::File, fs};
+          use cadmpeg_codec_sldprt::SldprtCodec;
+          use cadmpeg_ir::{CodecEntry, DecodeOptions};
+
+          fn main() -> Result<(), Box<dyn std::error::Error>> {
+              let args: Vec<String> = env::args().collect();
+              if args.len() != 4 {
+                  return Err("usage: dump_ir input.sldprt output.json report.txt".into());
+              }
+              let mut input = File::open(&args[1])?;
+              let decoded = SldprtCodec.decode(&mut input, &DecodeOptions::default())?;
+              let mut ir = decoded.ir;
+              ir.finalize();
+              fs::write(&args[2], ir.to_canonical_json()?)?;
+              fs::write(&args[3], format!("{:#?}\n", decoded.report))?;
+              eprintln!("bodies={} faces={} features={} sketches={} sketch_entities={} parameters={}",
+                  ir.model.bodies.len(), ir.model.faces.len(), ir.model.features.len(),
+                  ir.model.sketches.len(), ir.model.sketch_entities.len(),
+                  ir.model.parameters.len());
+              Ok(())
+          }
+          RS
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+      - name: Decode both native parts and retain diagnostics
+        working-directory: cadmpeg
+        run: |
+          set +e
+          cargo run --release -p cadmpeg-codec-sldprt --example dump_ir -- \
+            ../native_cad/AnalyzerBoxMain_fork_PR100.SLDPRT \
+            ../decoded/AnalyzerBoxMain_fork_IR.json \
+            ../decoded/AnalyzerBoxMain_fork_report.txt \
+            > ../decoded/AnalyzerBoxMain_fork_stdout.txt \
+            2> ../decoded/AnalyzerBoxMain_fork_stderr.txt
+          MAIN_RC=$?
+          echo "$MAIN_RC" > ../decoded/AnalyzerBoxMain_fork_exit_code.txt
+
+          cargo run --release -p cadmpeg-codec-sldprt --example dump_ir -- \
+            ../native_cad/AnalyzerBoxTop_fork_PR102.SLDPRT \
+            ../decoded/AnalyzerBoxTop_fork_IR.json \
+            ../decoded/AnalyzerBoxTop_fork_report.txt \
+            > ../decoded/AnalyzerBoxTop_fork_stdout.txt \
+            2> ../decoded/AnalyzerBoxTop_fork_stderr.txt
+          TOP_RC=$?
+          echo "$TOP_RC" > ../decoded/AnalyzerBoxTop_fork_exit_code.txt
+
+          sha256sum ../decoded/* > ../decoded/SHA256SUMS_IR.txt
+          ls -lh ../decoded
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emtid000034210-sldprt-ir
+          path: decoded/
+          retention-days: 1

@@ -1,9 +1,12 @@
-name: P014 top strict validation
+name: P014 top strict OpenCascade validation
 
 on:
-  push:
-    branches:
-      - p014-top-strict-validation
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, synchronize]
+    paths:
+      - .github/workflows/tmp-top-srot-immutable-validation.yml
+      - ci/P014_ci_payload.tar.xz
 
 permissions:
   contents: read
@@ -27,7 +30,9 @@ jobs:
 
       - name: Install pinned CAD runtime
         working-directory: p014
+        shell: bash
         run: |
+          set -euxo pipefail
           python -m pip install --upgrade pip
           python -m pip install --only-binary=:all: \
             build123d==0.11.1 \
@@ -36,8 +41,8 @@ jobs:
             numpy==2.3.5
           python - <<'PY'
           import build123d, OCP, numpy, trimesh
-          print('build123d', build123d.__version__)
-          print('OCP', OCP.__version__)
+          print('build123d', getattr(build123d, '__version__', 'unknown'))
+          print('OCP', getattr(OCP, '__version__', 'unknown'))
           print('numpy', numpy.__version__)
           print('trimesh', trimesh.__version__)
           PY
@@ -57,7 +62,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: P014-top-strict-validation
+          name: P014-top-strict-validation-${{ github.run_id }}
           path: |
             p014/generated
             p014/reports

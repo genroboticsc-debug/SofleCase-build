@@ -1,0 +1,61 @@
+name: Dilemma targeted P025 P029
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - dilemma-targeted/**
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install exact CAD toolchain
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build123d==0.11.1 manifold3d==3.5.2 trimesh==4.8.3 networkx==3.5
+      - name: Decode runner and apply fixes
+        run: |
+          cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > dilemma-runner/project.tar.xz
+          tar -xJf dilemma-runner/project.tar.xz -C dilemma-runner
+          python dilemma-runner/apply_current_fixes.py
+      - name: Diagnose P029 exact manual shell
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          python dilemma-runner/diagnose_p029.py | tee dilemma-runner/project/validation/p029_targeted.log
+      - name: Build P029 exact feature tree
+        timeout-minutes: 20
+        continue-on-error: true
+        working-directory: dilemma-runner/project
+        run: |
+          python scripts/dilemma_4x6_4_hotswap_mid.py --output-dir generated | tee validation/p029_targeted_build.log
+      - name: Diagnose P025 exact rib-10 contact
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python dilemma-runner/diagnose_p025.py | tee dilemma-runner/project/validation/p025_rib10_diagnostic.log
+      - name: Build P025 exact feature tree
+        timeout-minutes: 15
+        continue-on-error: true
+        working-directory: dilemma-runner/project
+        run: |
+          python scripts/dilemma_4x6_4_top.py --output-dir generated | tee validation/p025_targeted_build.log
+      - name: Upload targeted evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-targeted-p025-p029
+          path: |
+            dilemma-runner/project/generated/
+            dilemma-runner/project/validation/
+          if-no-files-found: warn
+          retention-days: 3

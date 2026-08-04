@@ -1,0 +1,96 @@
+name: Dilemma KiCad normalized board polygon export
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/dilemma-kicad-centerline-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  export-board-polygons:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install KiCad 9 and Python API
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
+          sudo apt-get install -y kicad python3
+          kicad-cli version
+          python3 -c 'import pcbnew; print(pcbnew.Version())'
+      - name: Checkout pinned upstream source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+      - name: Verify sources and export normalized board polygons
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p exports
+          cat > /tmp/export_board_polygons.py <<'PY'
+          import json
+          from pathlib import Path
+          import pcbnew
+
+          expected = {
+              '3x5_2': 'beb07242dc9ff03ebfbb1042de0e5fdb93db4815514bf22d1e6e6e0d09d5bfe1',
+              '3x5_3': 'e914ce82c793044cecededead74a2af642506f2a6345d758b3c152c649e142c6',
+              '3x5_3_procyon': '79635af892b3a755ffaacccd17307e3f19316687a3b2ab7f95d78a84df6adff1',
+              '4x6_4': '1e22900adffdd4c14adf82420ab2d66558e5f3a44815a7c89627e432300f7262',
+          }
+          def chain_points(chain):
+              return [[chain.CPoint(i).x / 1_000_000.0, chain.CPoint(i).y / 1_000_000.0]
+                      for i in range(chain.PointCount())]
+          summary = {}
+          for family in expected:
+              pcb = Path('upstream') / family / 'dilemma.kicad_pcb'
+              board = pcbnew.LoadBoard(str(pcb))
+              outlines = pcbnew.SHAPE_POLY_SET()
+              ok = bool(board.GetBoardPolygonOutlines(outlines, None, False, False))
+              item = {
+                  'family': family,
+                  'source': str(pcb),
+                  'source_sha256': expected[family],
+                  'kicad_version': pcbnew.Version(),
+                  'success': ok,
+                  'outline_count': int(outlines.OutlineCount()),
+                  'outlines': [],
+              }
+              for oi in range(outlines.OutlineCount()):
+                  item['outlines'].append({
+                      'outline': chain_points(outlines.COutline(oi)),
+                      'holes': [chain_points(outlines.CHole(oi, hi)) for hi in range(outlines.HoleCount(oi))],
+                  })
+              Path('exports', f'{family}_board_polygons.json').write_text(json.dumps(item, indent=2))
+              summary[family] = {'success': ok, 'outline_count': item['outline_count'],
+                                 'hole_counts': [len(x['holes']) for x in item['outlines']],
+                                 'point_counts': [len(x['outline']) for x in item['outlines']]}
+          Path('exports', 'SUMMARY.json').write_text(json.dumps(summary, indent=2))
+          PY
+          declare -A EXPECTED=(
+            [3x5_2]=beb07242dc9ff03ebfbb1042de0e5fdb93db4815514bf22d1e6e6e0d09d5bfe1
+            [3x5_3]=e914ce82c793044cecededead74a2af642506f2a6345d758b3c152c649e142c6
+            [3x5_3_procyon]=79635af892b3a755ffaacccd17307e3f19316687a3b2ab7f95d78a84df6adff1
+            [4x6_4]=1e22900adffdd4c14adf82420ab2d66558e5f3a44815a7c89627e432300f7262
+          )
+          for family in 3x5_2 3x5_3 3x5_3_procyon 4x6_4; do
+            pcb="upstream/${family}/dilemma.kicad_pcb"
+            printf '%s  %s\n' "${EXPECTED[$family]}" "$pcb" | sha256sum -c -
+          done
+          python3 /tmp/export_board_polygons.py
+          find exports -type f -print0 | sort -z | xargs -0 sha256sum > exports/SHA256SUMS.txt
+          cat exports/SUMMARY.json
+      - name: Upload normalized polygons
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-kicad-normalized-board-polygons
+          path: exports/
+          if-no-files-found: error
+          retention-days: 1
