@@ -1,5 +1,5 @@
-# Best absolute-deflection residual localization 2026-08-05T05:42+05:30
-name: Immutable top absolute residual localization
+# Direct final-solid native tessellation audit 2026-08-05T05:58+05:30
+name: Immutable top direct final-solid tessellation audit
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  localize:
+  diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -55,7 +55,7 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install and compile final recovered feature tree plus localizer
+      - name: Install final recovered feature tree
         shell: bash
         run: |
           set -euxo pipefail
@@ -67,62 +67,116 @@ jobs:
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/validate_fast_manifold.py \
-            tmp_top_validation/validate_feature_tree_manifold.py \
-            tmp_top_validation/diagnose_difference_components.py
+            tmp_top_validation/validate_feature_tree_manifold.py
           git diff --check
 
-      - name: Localize best absolute-deflection residual
+      - name: Audit direct final-solid native tessellation matrix
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
-          rm -rf generated/absolute_residual
-          mkdir -p generated/absolute_residual
-          python - <<'PY' 2>&1 | tee generated/absolute_residual/localization.log
+          rm -rf generated/direct_final_solid
+          mkdir -p generated/direct_final_solid
+          python - <<'PY' 2>&1 | tee generated/direct_final_solid/audit.log
+          from __future__ import annotations
+
+          from collections import Counter, defaultdict
+          import json
           from pathlib import Path
 
+          import numpy as np
           import trimesh
           from OCP.BRepMesh import BRepMesh_IncrementalMesh
           from OCP.StlAPI import StlAPI_Writer
 
-          import validate_feature_tree_manifold as vf
+          import top_parametric as tp
+          from validate_fast_manifold import topology_split_reference
+          from validate_feature_tree_manifold import as_mesh, mesh_stats, remove_zero_area_faces
 
-          LINEAR = 0.006680000000
-          ANGULAR = 0.60
-          out = Path("generated/absolute_residual")
-          features = out / "feature_meshes"
+          root = Path("generated/direct_final_solid")
+          reference_raw = as_mesh(trimesh.load_mesh("reference/top.stl", process=True), "reference")
+          reference, ref_audit, ref_checks = topology_split_reference(reference_raw)
+          model = tp.build_top()
+          if not model.is_valid or len(model.solids()) != 1:
+              raise RuntimeError("Final analytic model is not one valid solid")
 
-          def tessellate_shape(shape, name: str):
-              features.mkdir(parents=True, exist_ok=True)
-              path = features / f"{name}.stl"
-              mesher = BRepMesh_IncrementalMesh(shape.wrapped, LINEAR, False, ANGULAR, True)
+          def directional(first, second, label):
+              result = as_mesh(trimesh.boolean.difference([first, second], engine="manifold", check_volume=True), label)
+              return float(abs(result.volume)) if len(result.faces) else 0.0, mesh_stats(result)
+
+          def abnormal_edges(mesh):
+              counts = defaultdict(int)
+              for tri in np.asarray(mesh.faces, dtype=np.int64):
+                  a,b,c=(int(x) for x in tri)
+                  for u,v in ((a,b),(b,c),(c,a)):
+                      if u>v:u,v=v,u
+                      counts[(u,v)] += 1
+              hist=Counter(counts.values())
+              bad={f"{u},{v}":n for (u,v),n in counts.items() if n != 2}
+              return {"histogram": {str(k):int(v) for k,v in sorted(hist.items())}, "abnormal_count":len(bad), "abnormal_sample":dict(list(bad.items())[:30])}
+
+          rows=[]
+          for linear in [0.00660,0.00664,0.006666666667,0.00668,0.006695,0.00672,0.00676]:
+              tag=f"lin_{linear:.12f}".replace(".","p")
+              out=root/tag
+              out.mkdir(parents=True,exist_ok=True)
+              stl=out/"top_direct_native.stl"
+              mesher=BRepMesh_IncrementalMesh(model.wrapped,linear,False,0.60,True)
               mesher.Perform()
-              if not mesher.IsDone():
-                  raise RuntimeError(f"OCCT absolute meshing failed for {name}")
-              writer = StlAPI_Writer()
-              writer.ASCIIMode = False
-              if not writer.Write(shape.wrapped, str(path)):
-                  raise RuntimeError(f"OCCT STL write failed for {name}")
-              return vf.as_mesh(trimesh.load_mesh(path, process=True), name)
+              if not mesher.IsDone(): raise RuntimeError(f"meshing failed {linear}")
+              writer=StlAPI_Writer(); writer.ASCIIMode=False
+              if not writer.Write(model.wrapped,str(stl)): raise RuntimeError(f"write failed {linear}")
+              raw=as_mesh(trimesh.load_mesh(stl,process=True),f"direct {linear}")
+              row={"linear_tolerance_mm":linear,"raw":mesh_stats(raw),"raw_edges":abnormal_edges(raw)}
+              candidates=[]
+              candidates.append(("raw",raw,{"method":"none"}))
+              try:
+                  split,split_audit,split_checks=topology_split_reference(raw)
+                  candidates.append(("single_four_face_split",split,{"audit":split_audit,"checks":split_checks}))
+              except Exception as exc:
+                  row["single_four_face_split_exception"]=repr(exc)
+              try:
+                  zero,zero_audit=remove_zero_area_faces(raw,"direct")
+                  candidates.append(("zero_area_removed",zero,{"audit":zero_audit}))
+                  try:
+                      split2,split2_audit,split2_checks=topology_split_reference(zero)
+                      candidates.append(("zero_area_then_split",split2,{"audit":split2_audit,"checks":split2_checks}))
+                  except Exception as exc:
+                      row["zero_area_then_split_exception"]=repr(exc)
+              except Exception as exc:
+                  row["zero_area_exception"]=repr(exc)
 
-          vf.GENERATED = out
-          vf.FEATURES = features
-          vf.tessellate_shape = tessellate_shape
+              tested=[]
+              for name,mesh,repair in candidates:
+                  item={"name":name,"repair":repair,"stats":mesh_stats(mesh),"edges":abnormal_edges(mesh)}
+                  if mesh.is_watertight and mesh.is_winding_consistent and mesh.is_volume:
+                      try:
+                          gmr,gmr_stats=directional(mesh,reference,f"{tag}_{name}_gmr")
+                          rmg,rmg_stats=directional(reference,mesh,f"{tag}_{name}_rmg")
+                          item.update({"generated_minus_reference_mm3":gmr,"reference_minus_generated_mm3":rmg,"symmetric_difference_mm3":gmr+rmg,"symmetric_difference_percent":(gmr+rmg)/abs(reference_raw.volume)*100.0,"gmr_stats":gmr_stats,"rmg_stats":rmg_stats})
+                          mesh.export(out/f"top_direct_{name}.stl")
+                      except Exception as exc:
+                          item["boolean_exception"]=repr(exc)
+                  tested.append(item)
+              row["candidates"]=tested
+              valid=[x for x in tested if "symmetric_difference_percent" in x]
+              if valid: row["best"]=min(valid,key=lambda x:x["symmetric_difference_percent"])
+              rows.append(row)
+              print(json.dumps(row,indent=2),flush=True)
 
-          import diagnose_difference_components as dd
-          dd.GENERATED = out
-          dd.FEATURES = features
-          dd.OUT = out / "difference_components"
-          dd.OUT.mkdir(parents=True, exist_ok=True)
-          dd.build_feature_mesh_tree = vf.build_feature_mesh_tree
-          raise SystemExit(dd.main())
+          valid_rows=[r for r in rows if "best" in r]
+          valid_rows.sort(key=lambda r:r["best"]["symmetric_difference_percent"])
+          report={"reference_audit":ref_audit,"reference_checks":ref_checks,"rows":rows,"best":valid_rows[0] if valid_rows else None}
+          (root/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
+          print("FINAL")
+          print(json.dumps(report["best"],indent=2))
           PY
-          cat generated/absolute_residual/difference_components/report.json
+          cat generated/direct_final_solid/report.json
 
-      - name: Upload absolute residual evidence
+      - name: Upload direct final-solid audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-absolute-residual-${{ github.run_id }}
-          path: tmp_top_validation/generated/absolute_residual/**
+          name: immutable-top-direct-final-solid-${{ github.run_id }}
+          path: tmp_top_validation/generated/direct_final_solid/**
           if-no-files-found: warn
