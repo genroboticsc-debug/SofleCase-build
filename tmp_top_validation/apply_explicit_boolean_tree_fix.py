@@ -1,9 +1,8 @@
-"""Replace the parent BuildPart accumulator with an explicit solid tree.
+"""Install the explicit F001-F012 solid Boolean feature tree.
 
-Every F001-F012 operation becomes a regularized Boolean on one named result
-solid.  All operands remain independently generated from the identified
-analytic parameters.  This removes implicit builder state while preserving the
-feature order, dimensions, surfaces, and Boolean intent.
+The entire downstream section is replaced between two stable function markers,
+so the transformation is deterministic, offset-safe, and repairs any prior
+partial splice.  Every operand remains analytic and independently generated.
 """
 
 from __future__ import annotations
@@ -13,27 +12,10 @@ from pathlib import Path
 PATH = Path(__file__).with_name("top_parametric.py")
 text = PATH.read_text(encoding="utf-8")
 
-if "Explicit ordered solid Boolean feature tree" in text:
-    print(f"Explicit solid Boolean tree already present in {PATH}")
-    raise SystemExit(0)
+section_start = text.index("def _subtract_cylindrical_bore(")
+section_end = text.index("def export_model(", section_start)
 
-old_bore = '''def _subtract_cylindrical_bore(
-    x: float,
-    z: float,
-    radius: float,
-    y0: float,
-    y1: float,
-) -> None:
-    with BuildSketch(xz_plane(y0)) as bore_profile:
-        with Locations((x, z)):
-            Circle(radius)
-    extrude(
-        bore_profile.sketch,
-        amount=-(y1 - y0),
-        mode=Mode.SUBTRACT,
-    )
-'''
-new_bore = '''def _subtract_cylindrical_bore(
+replacement = '''def _subtract_cylindrical_bore(
     x: float,
     z: float,
     radius: float,
@@ -66,16 +48,25 @@ def _anti_rotation_key_solid():
         Y_BODY_LOW,
         Y_COUNTERBORE_HIGH,
     )
-'''
 
-start = text.index("def build_top():")
-end = text.index("\n\ndef export_model", start)
-old_build = text[start:end]
-new_build = '''def build_top():
+
+def _engraving_profile_sketch():
+    """Return the exact standalone parametric underside engraving sketch."""
+    with BuildSketch() as raw_text:
+        Text(
+            ENGRAVING_TEXT,
+            ENGRAVING_FONT_SIZE,
+            font=ENGRAVING_FONT,
+            font_style=FontStyle.REGULAR,
+            align=(Align.MAX, Align.MAX),
+        )
+    return Rot(0.0, 0.0, ENGRAVING_ROTATION_DEG) * (
+        Pos(ENGRAVING_U_MAX, ENGRAVING_V_MAX, 0.0) * raw_text.sketch
+    )
+
+
+def build_top():
     """Build the reconstructed top as an explicit ordered solid Boolean tree."""
-    # Explicit ordered solid Boolean feature tree. Each operand is generated
-    # independently from analytic parameters before being applied to `result`.
-
     # F001 — exact main rolling body: lower prism + R2 inset core + sweep
     main_rolling_body = _main_rolling_body()
 
@@ -147,12 +138,10 @@ new_build = '''def build_top():
         raise RuntimeError("Final explicit feature-tree solid is invalid")
     result.label = "top_parametric"
     return result
+
+
 '''
 
-count = text.count(old_bore)
-if count != 1:
-    raise RuntimeError(f"Expected one bore helper block, found {count}")
-text = text.replace(old_bore, new_bore)
-text = text[:start] + new_build + text[end:]
+text = text[:section_start] + replacement + text[section_end:]
 PATH.write_text(text, encoding="utf-8")
-print(f"Patched explicit ordered solid Boolean tree in {PATH}")
+print(f"Installed offset-safe explicit solid Boolean tree in {PATH}")
