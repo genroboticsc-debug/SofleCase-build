@@ -1,9 +1,10 @@
 """Parametric reconstruction of top.stl using build123d 0.11.1.
 
 The model is generated only from analytic CAD features recovered from the
-reference mesh: lines, circular arcs, extrusions, cylinders, a constant-radius
-edge fillet, a stepped bore, an anti-rotation key, and a parametric text pocket.
-The reference STL is never imported by this generator.
+reference mesh: lines, circular arcs, extrusions, cylinders, an exact rolling-
+body R2 blend with a clipped toroidal cap, a stepped bore, an anti-rotation key,
+and a parametric text pocket. The reference STL is never imported by this
+generator.
 
 Coordinate convention
 ---------------------
@@ -24,6 +25,7 @@ from build123d import (
     BuildSketch,
     Circle,
     FontStyle,
+    Kind,
     Line,
     Locations,
     Mode,
@@ -33,12 +35,16 @@ from build123d import (
     Rot,
     Text,
     ThreePointArc,
+    Transition,
+    Vector,
     add,
     export_step,
     export_stl,
     extrude,
     fillet,
     make_face,
+    offset,
+    sweep,
 )
 
 # Principal Y planes
@@ -181,6 +187,109 @@ def outer_profile_sketch():
     return profile.sketch
 
 
+def _placed_face(sketch, y: float):
+    """Place a recovered XZ sketch on an exact global-Y plane."""
+    with BuildSketch(xz_plane(y)) as placed:
+        add(sketch)
+    return placed.sketch.faces()[0]
+
+
+def _solid_from_sketch(sketch, y0: float, y1: float):
+    """Extrude an identified XZ profile between two exact Y planes."""
+    return extrude(_placed_face(sketch, y0), amount=-(y1 - y0))
+
+
+def _outward_quarter_disk(path, inset_face):
+    """Return the exact R2 quarter-disk section for the top rolling blend."""
+    start = Vector(path.position_at(0.0))
+    tangent = Vector(path.tangent_at(0.0)).normalized()
+    global_up = Vector(0.0, 1.0, 0.0)
+    left = Vector(-tangent.Z, 0.0, tangent.X).normalized()
+    toward_profile = Vector(inset_face.center()) - start
+    inward = left if left.dot(toward_profile) >= 0.0 else -left
+    outward = -inward
+    section_plane = Plane(
+        origin=start,
+        x_dir=outward,
+        z_dir=outward.cross(global_up),
+    )
+    with BuildSketch(section_plane) as section:
+        Circle(TOP_FILLET_RADIUS)
+        Rectangle(
+            TOP_FILLET_RADIUS,
+            TOP_FILLET_RADIUS,
+            align=(Align.MIN, Align.MIN),
+            mode=Mode.INTERSECT,
+        )
+    return section.sketch.faces()[0]
+
+
+def _main_rolling_body():
+    """Build the exact R2 rolling-body blend for the complete outer profile.
+
+    The body is decomposed into its exact spring-plane prism, exact R2 inward
+    offset core, and a true quarter-disk sweep. Straight profile segments
+    generate cylinders, circular segments generate tori, and ROUND transition
+    patches resolve the identified profile vertices without sampled lofts.
+    """
+    outer = outer_profile_sketch()
+    inset = offset(
+        outer,
+        amount=-TOP_FILLET_RADIUS,
+        kind=Kind.ARC,
+        min_edge_length=1.0e-7,
+    )
+    inset_face = _placed_face(inset, Y_FILLET_LOW)
+    inset_path = inset_face.outer_wire()
+    rim = sweep(
+        sections=_outward_quarter_disk(inset_path, inset_face),
+        path=inset_path,
+        transition=Transition.ROUND,
+        is_frenet=False,
+    )
+    lower = _solid_from_sketch(outer, Y_BODY_LOW, Y_FILLET_LOW)
+    core = _solid_from_sketch(inset, Y_FILLET_LOW, Y_TOP)
+    return lower.fuse(core, rim)
+
+
+def _top_right_clipped_cap():
+    """Build the exact local cap that preserves the 0.076052190114 mm ledge.
+
+    The reference identifies an independently rolled R4.3 circular cap clipped
+    by the Z=12.002760887 plane. Its R2 toroidal roll intersects the adjacent
+    R2 right-wall cylinder and consumes the ledge continuously before Y=67.2.
+    """
+    with BuildPart() as cap_builder:
+        with BuildSketch(xz_plane(Y_BODY_LOW)):
+            with Locations((TR_X, TR_Z)):
+                Circle(OUTER_RADIUS)
+        extrude(amount=-(Y_TOP - Y_BODY_LOW))
+        top_edges = [
+            edge
+            for edge in cap_builder.edges()
+            if abs(edge.center().Y - Y_TOP) <= 1.0e-6
+        ]
+        if len(top_edges) != 1:
+            raise RuntimeError(
+                "Unable to identify the exact circular top-right cap edge"
+            )
+        fillet(top_edges, radius=TOP_FILLET_RADIUS)
+    full_cap = cap_builder.part
+
+    with BuildSketch(xz_plane(Y_BODY_LOW)) as clip_sketch:
+        with Locations((TR_X, TR_STEP_Z)):
+            Rectangle(
+                4.0 * OUTER_RADIUS,
+                4.0 * OUTER_RADIUS,
+                align=(Align.CENTER, Align.MIN),
+            )
+    clip = extrude(
+        clip_sketch.sketch.faces()[0],
+        amount=-(Y_TOP - Y_BODY_LOW),
+    )
+    return full_cap & clip
+
+
 def _add_clipped_boss(x: float, z: float, y0: float, y1: float) -> None:
     """Add a circular boss clipped by the exact outer boundary."""
     with BuildSketch(xz_plane(y0)):
@@ -206,45 +315,11 @@ def _subtract_cylindrical_bore(
 def build_top():
     """Build and return the reconstructed top part as one parametric solid."""
     with BuildPart() as top:
-        # F001 — main outer-profile extrusion
-        with BuildSketch(xz_plane(Y_BODY_LOW)):
-            add(outer_profile_sketch())
-        extrude(amount=-(Y_TOP - Y_BODY_LOW))
+        # F001 — exact main rolling body: lower prism + R2 inset core + sweep
+        add(_main_rolling_body())
 
-        # F002 — exact R2 top fillet. The 0.076052190... mm top-right
-        # transition edge is shorter than the fillet radius and is consumed by
-        # the intersection of the adjacent offset fillet surfaces in the
-        # reference. It is therefore not a seed edge for the OpenCascade
-        # fillet; all remaining maximum-Y outer edges are selected.
-        candidate_top_edges = [
-            edge
-            for edge in top.edges()
-            if abs(edge.center().Y - Y_TOP) <= 1.0e-6
-        ]
-        transition_edges = [
-            edge
-            for edge in candidate_top_edges
-            if abs(edge.length - TR_JUNCTION_EDGE_LENGTH) <= 1.0e-6
-        ]
-        if len(transition_edges) != 1:
-            diagnostics = sorted(edge.length for edge in candidate_top_edges)
-            raise RuntimeError(
-                "Unable to identify the exact top-right transition edge; "
-                f"top edge lengths={diagnostics}"
-            )
-        transition_edge = transition_edges[0]
-        top_edges = [
-            edge for edge in candidate_top_edges if edge is not transition_edge
-        ]
-        if not top_edges:
-            raise RuntimeError("Unable to identify Y=67.2 fillet seed edges")
-        print(
-            "F002 fillet seed lengths:",
-            sorted(round(edge.length, 12) for edge in top_edges),
-            "excluded transition:",
-            round(transition_edge.length, 12),
-        )
-        fillet(top_edges, radius=TOP_FILLET_RADIUS)
+        # F002 — exact clipped R4.3 top-right cap and toroidal R2 ledge blend
+        add(_top_right_clipped_cap())
 
         # F003–F005 — clipped cylindrical mounting bosses
         for _, bx, bz, y0, y1 in BOSSES:
