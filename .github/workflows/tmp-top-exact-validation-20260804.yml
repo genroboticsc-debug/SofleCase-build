@@ -44,14 +44,21 @@ jobs:
           cache: pip
           cache-dependency-path: tmp_top_validation/requirements.txt
 
-      - name: Install Arial and exact CAD dependencies
+      - name: Install checksum-verified Arial and exact CAD dependencies
         shell: bash
         run: |
           set -euxo pipefail
-          echo "msttcorefonts msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig ttf-mscorefonts-installer xz-utils
-          sudo fc-cache -f -v >/dev/null
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig cabextract curl xz-utils
+          FONT_TMP="$(mktemp -d)"
+          curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 \
+            -o "$FONT_TMP/arial32.exe" \
+            https://downloads.sourceforge.net/corefonts/arial32.exe
+          cabextract -q -d "$FONT_TMP" "$FONT_TMP/arial32.exe"
+          test "$(sha256sum "$FONT_TMP/Arial.TTF" | awk '{print $1}')" = "35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833"
+          install -Dm644 "$FONT_TMP/Arial.TTF" "$HOME/.local/share/fonts/Arial.ttf"
+          fc-cache -f
+          fc-match Arial | grep -qi 'Arial'
           python -m pip install --upgrade pip
           python -m pip install -r tmp_top_validation/requirements.txt
 
