@@ -1,4 +1,4 @@
-# Frozen final Strict SROT and bidirectional Boolean trigger 2026-08-05T03:43+05:30
+# Frozen bidirectional difference localization trigger 2026-08-05T03:48+05:30
 name: Immutable top Strict SROT validation
 
 on:
@@ -18,21 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out immutable validation commit
+      - name: Check out immutable localization commit
         uses: actions/checkout@v4
         with:
-          ref: 89cb32f93c54b8a6192739b16cfd6d8af22e27bf
-
-      - name: Verify reference chunks
-        shell: bash
-        run: |
-          set -euxo pipefail
-          REF_DIR=tmp_top_validation/reference
-          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.00 | awk '{print $1}')" = "2a822a1a145f12cd68ce800481d60c185caff3259ed56918fda334b04d68e098"
-          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.01 | awk '{print $1}')" = "99ae218fad8c4c3ffe71c09bc6813eabd9e394e3d28e4aa57a0e5b1059ee33c9"
-          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.02 | awk '{print $1}')" = "0fbfa701c2153280786ee5674611dc9f3544ceb642b1a36668c072b5b693c560"
-          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.03 | awk '{print $1}')" = "3be6d1aa5f87fc8e6f1ea0d69240ffd8ac80b64eca7592dadc57347d5f479964"
-          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.04 | awk '{print $1}')" = "3db88380c26037a5eb6ae5428cb4c0ec582f64d5b52afcd30255fe04f1b5d4c7"
+          ref: 051f70e3da1177f52c358f30e3417c157e6bbbed
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -48,9 +37,7 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig cabextract curl xz-utils
           FONT_TMP="$(mktemp -d)"
-          curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 \
-            -o "$FONT_TMP/arial32.exe" \
-            https://downloads.sourceforge.net/corefonts/arial32.exe
+          curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 -o "$FONT_TMP/arial32.exe" https://downloads.sourceforge.net/corefonts/arial32.exe
           cabextract -q -d "$FONT_TMP" "$FONT_TMP/arial32.exe"
           test "$(sha256sum "$FONT_TMP/Arial.TTF" | awk '{print $1}')" = "35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833"
           install -Dm644 "$FONT_TMP/Arial.TTF" "$HOME/.local/share/fonts/Arial.ttf"
@@ -64,18 +51,14 @@ jobs:
         run: |
           set -euxo pipefail
           REF_DIR=tmp_top_validation/reference
-          cat "$REF_DIR"/top.stl.xz.b64.00 \
-              "$REF_DIR"/top.stl.xz.b64.01 \
-              "$REF_DIR"/top.stl.xz.b64.02 \
-              "$REF_DIR"/top.stl.xz.b64.03 \
-              "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
+          cat "$REF_DIR"/top.stl.xz.b64.00 "$REF_DIR"/top.stl.xz.b64.01 "$REF_DIR"/top.stl.xz.b64.02 "$REF_DIR"/top.stl.xz.b64.03 "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
           test "$(sha256sum "$REF_DIR"/top.stl.xz.b64 | awk '{print $1}')" = "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
           base64 --decode "$REF_DIR"/top.stl.xz.b64 > "$REF_DIR"/top.stl.xz
           test "$(sha256sum "$REF_DIR"/top.stl.xz | awk '{print $1}')" = "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install and compile final authoritative feature tree
+      - name: Install and compile final feature tree plus localizer
         shell: bash
         run: |
           set -euxo pipefail
@@ -88,26 +71,23 @@ jobs:
             tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
-            tmp_top_validation/apply_f005_boolean_tolerance_fix.py \
-            tmp_top_validation/apply_f012_all_faces_fix.py \
-            tmp_top_validation/apply_f012_font_size_fix.py
+            tmp_top_validation/diagnose_difference_components.py
           git diff --check
 
-      - name: Run Strict SROT, STEP/STL congruence, and exact Boolean validation
+      - name: Localize bidirectional Boolean differences
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python validate_feature_tree_manifold.py 2>&1 | tee generated/workflow.log
-          cat generated/strict_srot_report.json
-          cat generated/feature_tree_validation_report.json
+          python diagnose_difference_components.py 2>&1 | tee generated/difference_localization.log
+          cat generated/difference_components/report.json
 
-      - name: Upload complete final evidence
+      - name: Upload localization evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-final-validation-${{ github.run_id }}
+          name: immutable-top-difference-localization-${{ github.run_id }}
           path: tmp_top_validation/generated/**
           if-no-files-found: warn
