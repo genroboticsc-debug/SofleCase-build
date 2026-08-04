@@ -71,14 +71,14 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Diagnose exact fillet chain, generate, and validate
+      - name: Diagnose exact analytic fillet, generate, and validate
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
           rm -rf generated
           mkdir -p generated
-          python diagnose_fillet.py 2>&1 | tee generated/fillet_diagnostic.log
+          python diagnose_analytic_fillet.py 2>&1 | tee generated/analytic_fillet_diagnostic.log
           python remote_runner.py 2>&1 | tee generated/workflow.log
           cat generated/run_status.json
           if test -f generated/validation_report.json; then cat generated/validation_report.json; fi
