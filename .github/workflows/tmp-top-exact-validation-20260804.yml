@@ -22,6 +22,21 @@ jobs:
         with:
           ref: tmp/top-exact-validation-20260804
 
+      - name: Verify individual reference chunks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          REF_DIR=tmp_top_validation/reference
+          for file in "$REF_DIR"/top.stl.xz.b64.0*; do
+            wc -c "$file"
+            sha256sum "$file"
+          done
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.00 | awk '{print $1}')" = "2a822a1a145f12cd68ce800481d60c185caff3259ed56918fda334b04d68e098"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.01 | awk '{print $1}')" = "99ae218fad8c4c3ffe71c09bc6813eabd9e394e3d28e4aa57a0e5b1059ee33c9"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.02 | awk '{print $1}')" = "0fbfa701c2153280786ee5674611dc9f3544ceb642b1a36668c072b5b693c560"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.03 | awk '{print $1}')" = "3be6d1aa5f87fc8e6f1ea0d69240ffd8ac80b64eca7592dadc57347d5f479964"
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64.04 | awk '{print $1}')" = "3db88380c26037a5eb6ae5428cb4c0ec582f64d5b52afcd30255fe04f1b5d4c7"
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
