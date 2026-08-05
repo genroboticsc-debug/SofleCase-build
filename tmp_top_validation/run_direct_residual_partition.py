@@ -1,4 +1,4 @@
-"""Partition the best direct-solid Boolean residual by feature slabs and XZ cells."""
+"""Partition the best direct-solid Boolean residual by exact feature boxes."""
 
 from __future__ import annotations
 
@@ -19,98 +19,81 @@ ROOT.mkdir(parents=True, exist_ok=True)
 validator.OUTPUT = CANDIDATE
 validator.ANGULAR_TOLERANCE = ANGULAR
 
-reference_raw = as_mesh(
-    trimesh.load_mesh(validator.REFERENCE, process=True),
-    "reference",
-)
+reference_raw = as_mesh(trimesh.load_mesh(validator.REFERENCE, process=True), "reference")
 reference, topology_audit, topology_checks = topology_split_reference(reference_raw)
 if not all(topology_checks.values()):
     raise RuntimeError("Reference topology audit failed")
 
 candidate = validator.validate_candidate(LINEAR, reference_raw, reference)
 result_dir = CANDIDATE / f"linear_{LINEAR:.12f}".replace(".", "p")
-gmr = as_mesh(
-    trimesh.load_mesh(result_dir / "generated_minus_reference.stl", process=True),
-    "generated minus reference",
-)
-rmg = as_mesh(
-    trimesh.load_mesh(result_dir / "reference_minus_generated.stl", process=True),
-    "reference minus generated",
-)
+gmr = as_mesh(trimesh.load_mesh(result_dir / "generated_minus_reference.stl", process=True), "generated minus reference")
+rmg = as_mesh(trimesh.load_mesh(result_dir / "reference_minus_generated.stl", process=True), "reference minus generated")
 
 
-def physical_volume(mesh: trimesh.Trimesh) -> float:
-    """Return summed absolute component volume for a possibly touching shell set."""
+def aggregate_volume(mesh: trimesh.Trimesh | None) -> float:
+    """Use the oriented aggregate volume retained by Manifold's closed shell set."""
     if mesh is None or len(mesh.faces) == 0:
         return 0.0
-    try:
-        components = list(mesh.split(only_watertight=False))
-    except Exception:
-        components = [mesh]
-    volumes = [abs(float(component.volume)) for component in components if len(component.faces)]
-    return float(sum(volumes))
+    return float(abs(mesh.volume))
 
 
 def clipped_volume(mesh: trimesh.Trimesh, lower, upper, label: str) -> float:
-    lower = np.asarray(lower, dtype=float)
-    upper = np.asarray(upper, dtype=float)
+    lower_array = np.asarray(lower, dtype=float)
+    upper_array = np.asarray(upper, dtype=float)
     box = trimesh.creation.box(
-        extents=upper - lower,
-        transform=trimesh.transformations.translation_matrix((upper + lower) / 2.0),
+        extents=upper_array - lower_array,
+        transform=trimesh.transformations.translation_matrix(
+            (upper_array + lower_array) / 2.0
+        ),
     )
-    # The Boolean residual is a valid collection of closed shells, but several
-    # shells touch at zero-area seams. Skip Trimesh's single-volume precheck and
-    # let Manifold perform the exact clipping; validate the returned components.
     clipped = trimesh.boolean.intersection(
         [mesh, box],
         engine="manifold",
         check_volume=False,
     )
     if clipped is None:
-        return 0.0
-    if isinstance(clipped, trimesh.Scene):
-        clipped = clipped.to_mesh()
-    clipped = trimesh.Trimesh(
-        vertices=np.asarray(clipped.vertices, dtype=float),
-        faces=np.asarray(clipped.faces, dtype=np.int64),
-        process=True,
-        validate=False,
-    )
-    volume = physical_volume(clipped)
+        volume = 0.0
+    else:
+        if isinstance(clipped, trimesh.Scene):
+            clipped = clipped.to_mesh()
+        volume = aggregate_volume(clipped)
     print(json.dumps({"clip": label, "volume_mm3": volume}), flush=True)
     return volume
 
 
 def partition(mesh: trimesh.Trimesh, direction: str) -> dict:
     y_bins = [55.9, 57.5, 61.0, 62.5, 63.5, 64.2, 65.2, 67.3]
-    y_slabs = []
-    for low, high in zip(y_bins[:-1], y_bins[1:]):
-        volume = clipped_volume(
-            mesh,
-            [-26.4, low, -34.8],
-            [17.8, high, 15.0],
-            f"{direction} y {low} {high}",
-        )
-        y_slabs.append({"y_low": low, "y_high": high, "volume_mm3": volume})
+    y_slabs = [
+        {
+            "y_low": low,
+            "y_high": high,
+            "volume_mm3": clipped_volume(
+                mesh,
+                [-26.4, low, -34.8],
+                [17.8, high, 15.0],
+                f"{direction} y {low} {high}",
+            ),
+        }
+        for low, high in zip(y_bins[:-1], y_bins[1:])
+    ]
 
     x_bins = [-26.4, -20.0, -13.0, -6.0, 1.0, 8.0, 17.8]
     z_bins = [-34.8, -27.0, -19.0, -11.0, -3.0, 5.0, 15.0]
     xz_cells = []
     for x_low, x_high in zip(x_bins[:-1], x_bins[1:]):
         for z_low, z_high in zip(z_bins[:-1], z_bins[1:]):
-            volume = clipped_volume(
-                mesh,
-                [x_low, 55.9, z_low],
-                [x_high, 67.3, z_high],
-                f"{direction} x {x_low} {x_high} z {z_low} {z_high}",
-            )
             xz_cells.append(
                 {
                     "x_low": x_low,
                     "x_high": x_high,
                     "z_low": z_low,
                     "z_high": z_high,
-                    "volume_mm3": volume,
+                    "volume_mm3": clipped_volume(
+                        mesh,
+                        [x_low, 55.9, z_low],
+                        [x_high, 67.3, z_high],
+                        f"{direction} x {x_low} {x_high} z {z_low} {z_high}",
+                    ),
                 }
             )
 
@@ -129,7 +112,7 @@ def partition(mesh: trimesh.Trimesh, direction: str) -> dict:
     }
 
     return {
-        "total_volume_mm3": physical_volume(mesh),
+        "total_volume_mm3": aggregate_volume(mesh),
         "y_slabs": y_slabs,
         "y_slab_sum_mm3": float(sum(item["volume_mm3"] for item in y_slabs)),
         "xz_cells": xz_cells,
