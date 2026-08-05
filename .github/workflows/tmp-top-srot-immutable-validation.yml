@@ -1,4 +1,4 @@
-name: Immutable top direct final-solid fine sweep
+name: Immutable top direct final-solid angular sweep
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
       - tmp_top_validation/validate_direct_final_solid.py
-      - tmp_top_validation/run_direct_fine_sweep.py
+      - tmp_top_validation/run_direct_angular_sweep.py
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
           git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
-          git show FETCH_HEAD:tmp_top_validation/run_direct_fine_sweep.py > tmp_top_validation/run_direct_fine_sweep.py
+          git show FETCH_HEAD:tmp_top_validation/run_direct_angular_sweep.py > tmp_top_validation/run_direct_angular_sweep.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -82,24 +82,24 @@ jobs:
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
             tmp_top_validation/validate_direct_final_solid.py \
-            tmp_top_validation/run_direct_fine_sweep.py
+            tmp_top_validation/run_direct_angular_sweep.py
           python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Run fine bidirectional Boolean sweep
+      - name: Run angular bidirectional Boolean sweep
         shell: bash
         run: |
           set -o pipefail
-          rm -rf tmp_top_validation/generated/direct_final_solid_validation
-          python tmp_top_validation/run_direct_fine_sweep.py 2>&1 | tee tmp_top_validation/direct_final_solid_validation.log
+          rm -rf tmp_top_validation/generated/direct_angular_sweep
+          python tmp_top_validation/run_direct_angular_sweep.py 2>&1 | tee tmp_top_validation/direct_angular_sweep.log
 
-      - name: Upload fine-sweep evidence
+      - name: Upload angular-sweep evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-direct-fine-sweep-${{ github.run_id }}
+          name: immutable-top-direct-angular-sweep-${{ github.run_id }}
           path: |
-            tmp_top_validation/generated/direct_final_solid_validation/**
-            tmp_top_validation/direct_final_solid_validation.log
+            tmp_top_validation/generated/direct_angular_sweep/**
+            tmp_top_validation/direct_angular_sweep.log
             tmp_top_validation/strict_srot_report.json
           if-no-files-found: warn
