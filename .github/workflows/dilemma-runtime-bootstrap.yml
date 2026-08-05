@@ -1,10 +1,6 @@
 name: Temporary Dilemma exact-runtime bootstrap
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - .github/workflows/dilemma-runtime-bootstrap.yml
   pull_request:
     branches: [master]
     paths:
@@ -18,6 +14,7 @@ permissions:
 jobs:
   bundle:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - name: Check out bootstrap repository
         uses: actions/checkout@v4
@@ -27,50 +24,84 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Download exact locked Python wheels
+      - name: Build complete offline CAD wheelhouse
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p bundle/wheels
-          python -m pip download --only-binary=:all: --no-deps \
-            build123d==0.11.1 manifold3d==3.5.2 \
-            --dest bundle/wheels
+          set -uo pipefail
+          mkdir -p bundle/wheels bundle/logs
+          python -m pip install --upgrade pip wheel setuptools 2>&1 | tee bundle/logs/bootstrap.log
 
-          BUILD123D_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'build123d-0.11.1-*.whl' -print -quit)"
-          MANIFOLD_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'manifold3d-3.5.2-*.whl' -print -quit)"
-          test -n "$BUILD123D_WHEEL"
-          test -n "$MANIFOLD_WHEEL"
+          status=0
+          python -m pip wheel --wheel-dir bundle/wheels \
+            build123d==0.11.1 \
+            manifold3d==3.5.2 \
+            trimesh==4.11.1 \
+            numpy==2.3.5 \
+            2>&1 | tee bundle/logs/wheelhouse.log || status=$?
+          printf '%s\n' "$status" > bundle/WHEELHOUSE_STATUS.txt
 
-          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  '"$BUILD123D_WHEEL" | sha256sum --check --strict
-          echo 'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45  '"$MANIFOLD_WHEEL" | sha256sum --check --strict
+          if [ "$status" -eq 0 ]; then
+            python -m venv runtime-smoke
+            runtime-smoke/bin/python -m pip install --no-index --find-links bundle/wheels \
+              build123d==0.11.1 manifold3d==3.5.2 trimesh==4.11.1 numpy==2.3.5 \
+              2>&1 | tee bundle/logs/offline_install.log || status=$?
+          fi
 
-      - name: Fetch pinned Dilemma reference commit
+          if [ "$status" -eq 0 ]; then
+            runtime-smoke/bin/python - <<'PY' 2>&1 | tee bundle/logs/import_test.log || status=$?
+          import build123d, OCP, manifold3d, numpy, scipy, trimesh
+          from pathlib import Path
+          print('build123d', getattr(build123d, '__version__', 'unknown'))
+          print('OCP import OK')
+          print('manifold3d', getattr(manifold3d, '__version__', 'unknown'))
+          print('numpy', numpy.__version__)
+          print('scipy', scipy.__version__)
+          print('trimesh', trimesh.__version__)
+          Path('bundle/RUNTIME_IMPORT_PASS.txt').write_text('build123d OCP manifold3d trimesh imports PASS\n')
+          PY
+          fi
+          printf '%s\n' "$status" > bundle/RUNTIME_STATUS.txt
+          exit 0
+
+      - name: Fetch exact pinned Dilemma references
         shell: bash
         run: |
-          set -euo pipefail
-          git init dilemma-reference
-          git -C dilemma-reference remote add origin https://github.com/Bastardkb/Dilemma.git
-          git -C dilemma-reference fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a
-          git -C dilemma-reference checkout --detach FETCH_HEAD
+          set -uo pipefail
+          mkdir -p bundle/reference bundle/logs
+          status=0
+          git init dilemma-reference 2>&1 | tee bundle/logs/reference_fetch.log
+          git -C dilemma-reference remote add origin https://github.com/Bastardkb/Dilemma.git 2>&1 | tee -a bundle/logs/reference_fetch.log
+          git -C dilemma-reference fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a 2>&1 | tee -a bundle/logs/reference_fetch.log || status=$?
+          if [ "$status" -eq 0 ]; then
+            git -C dilemma-reference checkout --detach FETCH_HEAD 2>&1 | tee -a bundle/logs/reference_fetch.log || status=$?
+          fi
 
-          mkdir -p bundle/reference
-          while IFS= read -r relative_path; do
-            mkdir -p "bundle/reference/$(dirname "$relative_path")"
-            cp "dilemma-reference/$relative_path" "bundle/reference/$relative_path"
-          done <<'EOF'
+          if [ "$status" -eq 0 ]; then
+            while IFS= read -r relative_path; do
+              mkdir -p "bundle/reference/$(dirname "$relative_path")"
+              cp "dilemma-reference/$relative_path" "bundle/reference/$relative_path" || status=$?
+            done <<'EOF'
           mechanical/cases/3x5_2/tenting_puck/tenting_puck_v3_26.stl
+          mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Integrated Tenting Puck.STL
+          mechanical/cases/3x5_2/tenting_puck_hex/Dilemma Case Tenting Puck Opening.STL
           mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Integrated Tenting Puck.STEP
           mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Tenting Puck Opening.STEP
           mechanical/cases/3x5_2/thin/dilemma_nuts v27.step
+          mechanical/cases/3x5_2/thin/thin_v1_26.stl
           mechanical/cases/3x5_3_hotswap/mid.stl
           mechanical/cases/4x6_4/top.stl
           mechanical/cases/4x6_4_hotswap/mid.stl
           EOF
+          fi
 
+          printf '%s\n' "$status" > bundle/REFERENCE_STATUS.txt
           printf '%s\n' 'f5cffb4821fe560b095418b71382ac7d8043c61a' > bundle/DILEMMA_REFERENCE_COMMIT.txt
-          find bundle -type f -print0 | sort -z | xargs -0 sha256sum > bundle/SHA256SUMS.txt
+          find bundle/reference -type f -print0 | sort -z | xargs -0 -r sha256sum > bundle/REFERENCE_SHA256SUMS.txt
+          find bundle/wheels -type f -print0 | sort -z | xargs -0 -r sha256sum > bundle/WHEEL_SHA256SUMS.txt
+          exit 0
 
       - name: Upload exact runtime and references
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dilemma-exact-runtime-and-references
