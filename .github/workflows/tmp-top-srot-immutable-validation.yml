@@ -1,4 +1,4 @@
-name: Immutable top relative final-solid tessellation diagnostic
+name: Immutable top split mounting-bore history sweep
 
 on:
   pull_request:
@@ -6,15 +6,16 @@ on:
     types: [opened, reopened, synchronize]
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
-      - tmp_top_validation/diagnose_relative_final_solid_tessellation.py
+      - tmp_top_validation/validate_direct_final_solid.py
+      - tmp_top_validation/run_split_mount_bore_history_sweep.py
 
 permissions:
   contents: read
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Check out immutable recovered source commit
         uses: actions/checkout@v4
@@ -22,12 +23,13 @@ jobs:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen relative tessellation diagnostic
+      - name: Inject frozen direct validator and split-bore sweep
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
-          git show FETCH_HEAD:tmp_top_validation/diagnose_relative_final_solid_tessellation.py > tmp_top_validation/diagnose_relative_final_solid_tessellation.py
+          git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
+          git show FETCH_HEAD:tmp_top_validation/run_split_mount_bore_history_sweep.py > tmp_top_validation/run_split_mount_bore_history_sweep.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -53,6 +55,18 @@ jobs:
           python -m pip install -r tmp_top_validation/requirements.txt
           python -m pip install networkx==3.6.1
 
+      - name: Reassemble and verify immutable reference STL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          REF_DIR=tmp_top_validation/reference
+          cat "$REF_DIR"/top.stl.xz.b64.00 "$REF_DIR"/top.stl.xz.b64.01 "$REF_DIR"/top.stl.xz.b64.02 "$REF_DIR"/top.stl.xz.b64.03 "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64 | awk '{print $1}')" = "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
+          base64 --decode "$REF_DIR"/top.stl.xz.b64 > "$REF_DIR"/top.stl.xz
+          test "$(sha256sum "$REF_DIR"/top.stl.xz | awk '{print $1}')" = "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
+          xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
+          test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
+
       - name: Install recovered feature-tree migrations and run strict SROT
         shell: bash
         run: |
@@ -65,24 +79,27 @@ jobs:
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
             tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/diagnose_relative_final_solid_tessellation.py
+            tmp_top_validation/validate_fast_manifold.py \
+            tmp_top_validation/validate_feature_tree_manifold.py \
+            tmp_top_validation/validate_direct_final_solid.py \
+            tmp_top_validation/run_split_mount_bore_history_sweep.py
           python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Run relative final-solid topology matrix
+      - name: Run split mounting-bore history Boolean sweep
         shell: bash
         run: |
           set -o pipefail
-          rm -rf tmp_top_validation/generated/relative_tessellation_diagnostic
-          python tmp_top_validation/diagnose_relative_final_solid_tessellation.py 2>&1 | tee tmp_top_validation/relative_tessellation_diagnostic.log
+          rm -rf tmp_top_validation/generated/split_mount_bore_history_sweep
+          python tmp_top_validation/run_split_mount_bore_history_sweep.py 2>&1 | tee tmp_top_validation/split_mount_bore_history_sweep.log
 
-      - name: Upload relative tessellation evidence
+      - name: Upload split-bore history evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-relative-tessellation-${{ github.run_id }}
+          name: immutable-top-split-mount-bore-history-${{ github.run_id }}
           path: |
-            tmp_top_validation/generated/relative_tessellation_diagnostic/**
-            tmp_top_validation/relative_tessellation_diagnostic.log
+            tmp_top_validation/generated/split_mount_bore_history_sweep/**
+            tmp_top_validation/split_mount_bore_history_sweep.log
             tmp_top_validation/strict_srot_report.json
           if-no-files-found: warn
