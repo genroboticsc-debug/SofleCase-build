@@ -174,7 +174,9 @@ PY
 
 (
   cd "$PKG"
-  find . -type f -print0 | sort -z | xargs -0 sha256sum > checksums.sha256
+  find . -type f ! -name checksums.sha256 -print0 \
+    | sort -z | xargs -0 sha256sum > checksums.sha256
+  sha256sum -c checksums.sha256
 )
 (
   cd "$ROOT"
