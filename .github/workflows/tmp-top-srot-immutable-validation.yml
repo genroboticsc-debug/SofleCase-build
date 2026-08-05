@@ -1,5 +1,5 @@
-# Direct final-solid native tessellation audit 2026-08-05T06:06+05:30
-name: Immutable top direct final-solid tessellation audit
+# Patched direct final-solid exact Boolean matrix 2026-08-05T06:22+05:30
+name: Immutable top patched direct-solid Boolean matrix
 
 on:
   pull_request:
@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Check out immutable lowercase-v source commit
         uses: actions/checkout@v4
@@ -56,7 +56,7 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install final recovered feature tree
+      - name: Install final recovered feature tree and run strict SROT
         shell: bash
         run: |
           set -euxo pipefail
@@ -67,117 +67,405 @@ jobs:
           python tmp_top_validation/apply_f012_lowercase_v_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
+            tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py
+          python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Audit direct final-solid native tessellation matrix
+      - name: Run patched direct-solid Boolean matrix
         shell: bash
         run: |
           set -euxo pipefail
           cd tmp_top_validation
-          rm -rf generated/direct_final_solid
-          mkdir -p generated/direct_final_solid
-          python - <<'PY' 2>&1 | tee generated/direct_final_solid/audit.log
+          rm -rf generated/patched_direct_matrix
+          mkdir -p generated/patched_direct_matrix
+          python - <<'PY' 2>&1 | tee generated/patched_direct_matrix/matrix.log
           from __future__ import annotations
 
           from collections import Counter, defaultdict
           import json
+          import math
           from pathlib import Path
 
           import numpy as np
           import trimesh
           from OCP.BRepMesh import BRepMesh_IncrementalMesh
           from OCP.StlAPI import StlAPI_Writer
+          from shapely.geometry import LineString
+          from shapely.ops import polygonize, unary_union
 
           import top_parametric as tp
           from validate_fast_manifold import topology_split_reference
-          from validate_feature_tree_manifold import as_mesh, mesh_stats, remove_zero_area_faces
+          from validate_feature_tree_manifold import as_mesh, mesh_stats
 
-          root = Path("generated/direct_final_solid")
+          ROOT = Path("generated/patched_direct_matrix")
+          ANGULAR = 0.60
+          PLANE_Z = tp.TR_STEP_Z
           reference_raw = as_mesh(trimesh.load_mesh("reference/top.stl", process=True), "reference")
-          reference, ref_audit, ref_checks = topology_split_reference(reference_raw)
+          reference, reference_audit, reference_checks = topology_split_reference(reference_raw)
           model = tp.build_top()
-          if not model.is_valid or len(model.solids()) != 1:
-              raise RuntimeError("Final analytic model is not one valid solid")
+          if len(model.solids()) != 1 or not model.is_valid:
+              raise RuntimeError("Analytic feature tree is not one valid solid")
 
-          def directional(first, second, label):
-              result = as_mesh(trimesh.boolean.difference([first, second], engine="manifold", check_volume=True), label)
-              return float(abs(result.volume)) if len(result.faces) else 0.0, mesh_stats(result)
+          def edge_incidence(faces):
+              result = defaultdict(list)
+              for face_index, triangle in enumerate(np.asarray(faces, dtype=np.int64)):
+                  for first, second in ((0, 1), (1, 2), (2, 0)):
+                      a = int(triangle[first]); b = int(triangle[second])
+                      result[(a, b) if a < b else (b, a)].append(face_index)
+              return result
 
-          def abnormal_edges(mesh):
-              counts = defaultdict(int)
-              for tri in np.asarray(mesh.faces, dtype=np.int64):
-                  a,b,c=(int(x) for x in tri)
-                  for u,v in ((a,b),(b,c),(c,a)):
-                      if u>v:u,v=v,u
-                      counts[(u,v)] += 1
-              hist=Counter(counts.values())
-              bad={f"{u},{v}":n for (u,v),n in counts.items() if n != 2}
-              return {"histogram": {str(k):int(v) for k,v in sorted(hist.items())}, "abnormal_count":len(bad), "abnormal_sample":dict(list(bad.items())[:30])}
+          def signed_area(points):
+              return 0.5 * sum(
+                  points[index][0] * points[(index + 1) % len(points)][1]
+                  - points[(index + 1) % len(points)][0] * points[index][1]
+                  for index in range(len(points))
+              )
 
-          rows=[]
-          for linear in [0.00660,0.00664,0.006666666667,0.00668,0.006695,0.00672,0.00676]:
-              tag=f"lin_{linear:.12f}".replace(".","p")
-              out=root/tag
-              out.mkdir(parents=True,exist_ok=True)
-              stl=out/"top_direct_native.stl"
-              mesher=BRepMesh_IncrementalMesh(model.wrapped,linear,False,0.60,True)
+          def cross(first, second, third):
+              return (
+                  (second[0] - first[0]) * (third[1] - first[1])
+                  - (second[1] - first[1]) * (third[0] - first[0])
+              )
+
+          def point_in_triangle(point, first, second, third, epsilon=1.0e-12):
+              values = (
+                  cross(first, second, point),
+                  cross(second, third, point),
+                  cross(third, first, point),
+              )
+              return all(value >= -epsilon for value in values) or all(
+                  value <= epsilon for value in values
+              )
+
+          def ear_clip(points):
+              indices = list(range(len(points)))
+              triangles = []
+              orientation = 1.0 if signed_area(points) > 0.0 else -1.0
+              guard = 0
+              while len(indices) > 3:
+                  found = False
+                  for position, current in enumerate(indices):
+                      previous = indices[position - 1]
+                      following = indices[(position + 1) % len(indices)]
+                      if orientation * cross(
+                          points[previous], points[current], points[following]
+                      ) <= 1.0e-12:
+                          continue
+                      if any(
+                          point_in_triangle(
+                              points[candidate],
+                              points[previous],
+                              points[current],
+                              points[following],
+                          )
+                          for candidate in indices
+                          if candidate not in (previous, current, following)
+                      ):
+                          continue
+                      triangles.append((previous, current, following))
+                      del indices[position]
+                      found = True
+                      break
+                  if not found:
+                      collinearity = [
+                          abs(
+                              cross(
+                                  points[indices[position - 1]],
+                                  points[indices[position]],
+                                  points[indices[(position + 1) % len(indices)]],
+                              )
+                          )
+                          for position in range(len(indices))
+                      ]
+                      remove_position = int(np.argmin(collinearity))
+                      if collinearity[remove_position] < 1.0e-8:
+                          del indices[remove_position]
+                          continue
+                      raise RuntimeError(
+                          f"Analytic planar ear clipping stalled with {len(indices)} vertices"
+                      )
+                  guard += 1
+                  if guard > 1000:
+                      raise RuntimeError("Analytic planar ear clipping guard exceeded")
+              triangles.append(tuple(indices))
+              return triangles
+
+          def close_generated_planar_crack(mesh):
+              source_vertices = np.asarray(mesh.vertices, dtype=np.float64)
+              source_faces = np.asarray(mesh.faces, dtype=np.int64)
+              source_triangle_coordinates = source_vertices[source_faces]
+              source_volume = float(mesh.volume)
+              source_bounds = np.asarray(mesh.bounds, dtype=float)
+
+              area_faces = np.asarray(mesh.area_faces, dtype=float)
+              zero_faces = np.where(area_faces <= 1.0e-14)[0]
+              if len(zero_faces) != 1:
+                  raise RuntimeError(f"Expected one zero-area face, found {len(zero_faces)}")
+              keep = np.ones(len(source_faces), dtype=bool)
+              keep[zero_faces] = False
+              faces = source_faces[keep].copy()
+              vertices = source_vertices.copy()
+
+              incidence = edge_incidence(faces)
+              boundary_edges = [edge for edge, owners in incidence.items() if len(owners) == 1]
+              abnormal_nonboundary = [
+                  (edge, len(owners))
+                  for edge, owners in incidence.items()
+                  if len(owners) not in (1, 2)
+              ]
+              if abnormal_nonboundary:
+                  raise RuntimeError(f"Unexpected non-boundary edge incidence: {abnormal_nonboundary[:5]}")
+              if len(boundary_edges) != 38:
+                  raise RuntimeError(f"Expected 38 planar crack edges, found {len(boundary_edges)}")
+              boundary_z = vertices[np.unique(np.asarray(boundary_edges).reshape(-1)), 2]
+              if float(np.max(np.abs(boundary_z - PLANE_Z))) > 2.0e-6:
+                  raise RuntimeError("Generated crack is not on recovered analytic ledge plane")
+
+              crossings = []
+              for first_index, first_edge in enumerate(boundary_edges):
+                  first_line = LineString(vertices[list(first_edge), :2])
+                  for second_edge in boundary_edges[first_index + 1 :]:
+                      if set(first_edge).intersection(second_edge):
+                          continue
+                      intersection = first_line.intersection(
+                          LineString(vertices[list(second_edge), :2])
+                      )
+                      if intersection.geom_type != "Point" or intersection.is_empty:
+                          continue
+                      point = np.asarray(intersection.coords[0], dtype=float)
+                      endpoints = (*first_edge, *second_edge)
+                      if all(
+                          np.linalg.norm(point - vertices[index, :2]) > 1.0e-8
+                          for index in endpoints
+                      ):
+                          crossings.append((first_edge, second_edge, point))
+              if len(crossings) != 1:
+                  raise RuntimeError(f"Expected one proper planar crossing, found {len(crossings)}")
+
+              first_edge, second_edge, crossing_xy = crossings[0]
+              crossing_vertex = np.array(
+                  [crossing_xy[0], crossing_xy[1], PLANE_Z], dtype=float
+              )
+              crossing_index = len(vertices)
+              vertices = np.vstack([vertices, crossing_vertex])
+
+              replacement_faces = []
+              removed_faces = set()
+              for edge in (first_edge, second_edge):
+                  face_index = incidence[tuple(sorted(edge))][0]
+                  removed_faces.add(face_index)
+                  triangle = [int(value) for value in faces[face_index]]
+                  replaced = False
+                  for local_index in range(3):
+                      first = triangle[local_index]
+                      second = triangle[(local_index + 1) % 3]
+                      third = triangle[(local_index + 2) % 3]
+                      if {first, second} == set(edge):
+                          replacement_faces.extend(
+                              ([first, crossing_index, third], [crossing_index, second, third])
+                          )
+                          replaced = True
+                          break
+                  if not replaced:
+                      raise RuntimeError("Unable to split generated crossing edge")
+              faces = np.vstack(
+                  [
+                      faces[[index for index in range(len(faces)) if index not in removed_faces]],
+                      np.asarray(replacement_faces, dtype=np.int64),
+                  ]
+              )
+
+              incidence = edge_incidence(faces)
+              boundary_edges = [edge for edge, owners in incidence.items() if len(owners) == 1]
+              linework = unary_union(
+                  [LineString(vertices[list(edge), :2]) for edge in boundary_edges]
+              )
+              polygons = sorted(
+                  list(polygonize(linework)),
+                  key=lambda polygon: (-polygon.area, polygon.bounds),
+              )
+              if len(polygons) != 2:
+                  raise RuntimeError(f"Expected two analytic crack polygons, found {len(polygons)}")
+
+              coordinate_map = defaultdict(list)
+              for index, point in enumerate(vertices):
+                  coordinate_map[(round(float(point[0]), 8), round(float(point[1]), 8))].append(index)
+
+              def vertex_index(point):
+                  point_array = np.asarray(point, dtype=float)
+                  if np.linalg.norm(point_array - crossing_xy) < 1.0e-7:
+                      return crossing_index
+                  candidates = coordinate_map[
+                      (round(float(point_array[0]), 8), round(float(point_array[1]), 8))
+                  ]
+                  if not candidates:
+                      raise RuntimeError(f"No generated vertex for planar point {point}")
+                  return min(candidates, key=lambda index: abs(vertices[index, 2] - PLANE_Z))
+
+              patch_faces = []
+              polygon_audit = []
+              for polygon in polygons:
+                  points = [tuple(value) for value in list(polygon.exterior.coords)[:-1]]
+                  local_triangles = ear_clip(points)
+                  indices = [vertex_index(point) for point in points]
+                  local_area = sum(
+                      abs(cross(points[first], points[second], points[third])) / 2.0
+                      for first, second, third in local_triangles
+                  )
+                  if abs(local_area - polygon.area) > 1.0e-9:
+                      raise RuntimeError("Analytic crack triangulation area mismatch")
+                  patch_faces.extend(
+                      [indices[first], indices[second], indices[third]]
+                      for first, second, third in local_triangles
+                  )
+                  polygon_audit.append(
+                      {
+                          "area_mm2": float(polygon.area),
+                          "vertex_count": len(points),
+                          "triangle_count": len(local_triangles),
+                          "bounds_xy_mm": [float(value) for value in polygon.bounds],
+                      }
+                  )
+
+              closed_faces = np.vstack([faces, np.asarray(patch_faces, dtype=np.int64)])
+              closed = trimesh.Trimesh(
+                  vertices=vertices,
+                  faces=closed_faces,
+                  process=False,
+                  validate=False,
+              )
+              final_incidence = edge_incidence(closed.faces)
+              final_abnormal = {
+                  edge: len(owners)
+                  for edge, owners in final_incidence.items()
+                  if len(owners) != 2
+              }
+              if final_abnormal:
+                  raise RuntimeError(f"Crack closure left abnormal edges: {list(final_abnormal.items())[:5]}")
+              trimesh.repair.fix_winding(closed)
+              if not (closed.is_watertight and closed.is_winding_consistent and closed.is_volume):
+                  raise RuntimeError("Crack-closed direct mesh is not a valid volume")
+              if len(closed.split(only_watertight=False)) != 1:
+                  raise RuntimeError("Crack-closed direct mesh is not one component")
+
+              retained_triangle_delta = float(
+                  np.max(
+                      np.abs(
+                          source_triangle_coordinates[keep]
+                          - source_vertices[source_faces[keep]]
+                      )
+                  )
+              )
+              audit = {
+                  "method": "generated zero-coordinate planar crossing split and analytic ear triangulation",
+                  "removed_zero_area_face_indices": [int(value) for value in zero_faces],
+                  "removed_zero_area_mm2": float(np.sum(area_faces[zero_faces])),
+                  "original_vertices": int(len(source_vertices)),
+                  "final_vertices": int(len(closed.vertices)),
+                  "original_faces": int(len(source_faces)),
+                  "final_faces": int(len(closed.faces)),
+                  "original_boundary_edges_after_zero_face_removal": 38,
+                  "crossing_edges": [list(map(int, first_edge)), list(map(int, second_edge))],
+                  "crossing_coordinate_mm": crossing_vertex.tolist(),
+                  "analytic_plane_z_mm": float(PLANE_Z),
+                  "polygon_audit": polygon_audit,
+                  "patch_area_mm2": float(sum(item["area_mm2"] for item in polygon_audit)),
+                  "existing_retained_triangle_coordinate_max_abs_delta_mm": retained_triangle_delta,
+                  "volume_delta_from_planar_patch_mm3": float(closed.volume - source_volume),
+                  "bounds_max_abs_delta_mm": float(
+                      np.max(np.abs(np.asarray(closed.bounds) - source_bounds))
+                  ),
+                  "final_watertight": bool(closed.is_watertight),
+                  "final_winding_consistent": bool(closed.is_winding_consistent),
+                  "final_is_volume": bool(closed.is_volume),
+                  "final_component_count": int(len(closed.split(only_watertight=False))),
+              }
+              return closed, audit
+
+          def directional(first, second, label, output_dir):
+              difference = as_mesh(
+                  trimesh.boolean.difference(
+                      [first, second], engine="manifold", check_volume=True
+                  ),
+                  label,
+              )
+              difference.export(output_dir / f"{label}.stl")
+              return float(abs(difference.volume)), mesh_stats(difference)
+
+          rows = []
+          for linear in [0.00656, 0.00660, 0.00664, 0.006666666667, 0.00668, 0.006695, 0.00672, 0.00676, 0.00680]:
+              tag = f"lin_{linear:.12f}".replace(".", "p")
+              output = ROOT / tag
+              output.mkdir(parents=True, exist_ok=True)
+              raw_path = output / "top_direct_raw.stl"
+              mesher = BRepMesh_IncrementalMesh(model.wrapped, linear, False, ANGULAR, True)
               mesher.Perform()
-              if not mesher.IsDone(): raise RuntimeError(f"meshing failed {linear}")
-              writer=StlAPI_Writer(); writer.ASCIIMode=False
-              if not writer.Write(model.wrapped,str(stl)): raise RuntimeError(f"write failed {linear}")
-              raw=as_mesh(trimesh.load_mesh(stl,process=True),f"direct {linear}")
-              row={"linear_tolerance_mm":linear,"raw":mesh_stats(raw),"raw_edges":abnormal_edges(raw)}
-              candidates=[]
-              candidates.append(("raw",raw,{"method":"none"}))
-              try:
-                  split,split_audit,split_checks=topology_split_reference(raw)
-                  candidates.append(("single_four_face_split",split,{"audit":split_audit,"checks":split_checks}))
-              except Exception as exc:
-                  row["single_four_face_split_exception"]=repr(exc)
-              try:
-                  zero,zero_audit=remove_zero_area_faces(raw,"direct")
-                  candidates.append(("zero_area_removed",zero,{"audit":zero_audit}))
-                  try:
-                      split2,split2_audit,split2_checks=topology_split_reference(zero)
-                      candidates.append(("zero_area_then_split",split2,{"audit":split2_audit,"checks":split2_checks}))
-                  except Exception as exc:
-                      row["zero_area_then_split_exception"]=repr(exc)
-              except Exception as exc:
-                  row["zero_area_exception"]=repr(exc)
+              if not mesher.IsDone():
+                  raise RuntimeError(f"OCCT meshing failed at {linear}")
+              writer = StlAPI_Writer(); writer.ASCIIMode = False
+              if not writer.Write(model.wrapped, str(raw_path)):
+                  raise RuntimeError(f"OCCT STL write failed at {linear}")
+              raw = as_mesh(trimesh.load_mesh(raw_path, process=True), f"raw {linear}")
+              generated, repair_audit = close_generated_planar_crack(raw)
+              generated_path = output / "top_direct_repaired.stl"
+              generated.export(generated_path)
 
-              tested=[]
-              for name,mesh,repair in candidates:
-                  item={"name":name,"repair":repair,"stats":mesh_stats(mesh),"edges":abnormal_edges(mesh)}
-                  if mesh.is_watertight and mesh.is_winding_consistent and mesh.is_volume:
-                      try:
-                          gmr,gmr_stats=directional(mesh,reference,f"{tag}_{name}_gmr")
-                          rmg,rmg_stats=directional(reference,mesh,f"{tag}_{name}_rmg")
-                          item.update({"generated_minus_reference_mm3":gmr,"reference_minus_generated_mm3":rmg,"symmetric_difference_mm3":gmr+rmg,"symmetric_difference_percent":(gmr+rmg)/abs(reference_raw.volume)*100.0,"gmr_stats":gmr_stats,"rmg_stats":rmg_stats})
-                          mesh.export(out/f"top_direct_{name}.stl")
-                      except Exception as exc:
-                          item["boolean_exception"]=repr(exc)
-                  tested.append(item)
-              row["candidates"]=tested
-              valid=[x for x in tested if "symmetric_difference_percent" in x]
-              if valid: row["best"]=min(valid,key=lambda x:x["symmetric_difference_percent"])
+              generated_minus_reference, gmr_stats = directional(
+                  generated, reference, "generated_minus_reference", output
+              )
+              reference_minus_generated, rmg_stats = directional(
+                  reference, generated, "reference_minus_generated", output
+              )
+              symmetric = generated_minus_reference + reference_minus_generated
+              generated_stats = mesh_stats(generated)
+              row = {
+                  "linear_tolerance_mm": linear,
+                  "angular_tolerance_rad": ANGULAR,
+                  "relative": False,
+                  "repair_audit": repair_audit,
+                  "generated_stats": generated_stats,
+                  "generated_minus_reference_mm3": generated_minus_reference,
+                  "reference_minus_generated_mm3": reference_minus_generated,
+                  "symmetric_difference_mm3": symmetric,
+                  "symmetric_difference_percent": symmetric / abs(reference_raw.volume) * 100.0,
+                  "volume_difference_percent": abs(generated.volume - reference_raw.volume) / abs(reference_raw.volume) * 100.0,
+                  "area_difference_percent": abs(generated.area - reference_raw.area) / abs(reference_raw.area) * 100.0,
+                  "com_shift_mm": float(np.linalg.norm(np.asarray(generated.center_mass) - np.asarray(reference_raw.center_mass))),
+                  "gmr_stats": gmr_stats,
+                  "rmg_stats": rmg_stats,
+              }
+              row["strict_pass"] = bool(
+                  row["symmetric_difference_percent"] < 0.01
+                  and row["volume_difference_percent"] < 0.1
+                  and row["area_difference_percent"] < 0.1
+                  and row["com_shift_mm"] / np.linalg.norm(reference_raw.extents) * 100.0 < 0.1
+                  and generated.is_watertight
+                  and generated.is_winding_consistent
+                  and generated.is_volume
+              )
               rows.append(row)
-              print(json.dumps(row,indent=2),flush=True)
+              print(json.dumps(row, indent=2), flush=True)
 
-          valid_rows=[r for r in rows if "best" in r]
-          valid_rows.sort(key=lambda r:r["best"]["symmetric_difference_percent"])
-          report={"reference_audit":ref_audit,"reference_checks":ref_checks,"rows":rows,"best":valid_rows[0] if valid_rows else None}
-          (root/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
-          print("FINAL")
-          print(json.dumps(report["best"],indent=2))
+          rows.sort(key=lambda item: (not item["strict_pass"], item["symmetric_difference_percent"]))
+          report = {
+              "reference_topology_audit": reference_audit,
+              "reference_topology_checks": reference_checks,
+              "candidates": rows,
+              "best": rows[0],
+              "overall_pass": bool(rows[0]["strict_pass"]),
+          }
+          (ROOT / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+          print("=== FINAL MATRIX RESULT ===")
+          print(json.dumps(report, indent=2), flush=True)
           PY
-          cat generated/direct_final_solid/report.json
+          cat generated/patched_direct_matrix/report.json
 
-      - name: Upload direct final-solid audit
+      - name: Upload patched direct-solid validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-direct-final-solid-${{ github.run_id }}
-          path: tmp_top_validation/generated/direct_final_solid/**
+          name: immutable-top-patched-direct-matrix-${{ github.run_id }}
+          path: tmp_top_validation/generated/patched_direct_matrix/**
           if-no-files-found: warn
