@@ -1,0 +1,37 @@
+name: Dilemma exact runtime wheel fetch
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download locked runtime wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            build123d==0.11.1 \
+            cadquery-ocp-novtk==7.9.3.1.1 \
+            cadquery-ocp-proxy==7.9.3.1.1 \
+            manifold3d==3.5.2 \
+            trimesh==4.8.3 \
+            networkx==3.5
+          find wheelhouse -type f -print0 | sort -z | xargs -0 sha256sum > wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-exact-runtime-wheels
+          path: wheelhouse
+          retention-days: 3

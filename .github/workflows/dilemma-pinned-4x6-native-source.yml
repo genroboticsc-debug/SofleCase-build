@@ -1,0 +1,37 @@
+name: Dilemma pinned 4x6 native source
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact upstream mechanical sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p recovery/upstream recovery/inventory
+          git -C recovery/upstream init
+          git -C recovery/upstream remote add origin https://github.com/Bastardkb/Dilemma.git
+          git -C recovery/upstream fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a
+          git -C recovery/upstream checkout --detach FETCH_HEAD
+          test "$(git -C recovery/upstream rev-parse HEAD)" = "f5cffb4821fe560b095418b71382ac7d8043c61a"
+          mkdir -p recovery/pinned
+          cp -a recovery/upstream/mechanical/cases/4x6_4 recovery/pinned/
+          cp -a recovery/upstream/mechanical/cases/4x6_4_hotswap recovery/pinned/
+          cp -a recovery/upstream/4x6_4/3d recovery/pinned/pcb_4x6_4_3d
+          find recovery/pinned -type f -printf '%P\n' | sort > recovery/inventory/files.txt
+          find recovery/pinned -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-4x6-native-source
+          path: recovery
+          retention-days: 3

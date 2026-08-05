@@ -1,0 +1,32 @@
+name: Dilemma all branch source recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode exact current fail-set payload
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p recovery/extracted recovery/inventory
+          cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > recovery/project.tar.xz
+          xz -t recovery/project.tar.xz
+          tar -xJf recovery/project.tar.xz -C recovery/extracted
+          find recovery/extracted -type f | sort > recovery/inventory/files.txt
+          find recovery/extracted -type f -path '*/scripts/*.py' | sort > recovery/inventory/scripts.txt
+          sha256sum recovery/project.tar.xz > recovery/project.tar.xz.sha256
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-current-failset-source
+          path: recovery
+          retention-days: 3

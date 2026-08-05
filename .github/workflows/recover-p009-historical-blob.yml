@@ -1,0 +1,40 @@
+name: Recover historical P009 blob
+
+on:
+  push:
+    branches: [dilemma-current-failset-20260803]
+    paths:
+      - .github/workflows/recover-p009-historical-blob.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout full repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Recover deleted compressed P009 script
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p recovery
+          git cat-file -e 45487b7efd814b058839817d55b122eadf425f98^{blob}
+          git cat-file blob 45487b7efd814b058839817d55b122eadf425f98 > recovery/dilemma_3x5_2_tenting_puck_case.py.xz.b64
+          base64 --decode recovery/dilemma_3x5_2_tenting_puck_case.py.xz.b64 > recovery/dilemma_3x5_2_tenting_puck_case.py.xz
+          xz --decompress --keep recovery/dilemma_3x5_2_tenting_puck_case.py.xz
+          python -m py_compile recovery/dilemma_3x5_2_tenting_puck_case.py
+          sha256sum recovery/* > recovery/SHA256SUMS.txt
+          wc -l recovery/dilemma_3x5_2_tenting_puck_case.py
+          grep -nE 'CELL_TRANSLATIONS|PHYSICAL_GUARD_TRANSLATIONS|support|guard|build_part' recovery/dilemma_3x5_2_tenting_puck_case.py | head -100 || true
+      - name: Upload recovered P009 source
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-historical-p009-source
+          path: recovery/
+          if-no-files-found: error
+          retention-days: 3

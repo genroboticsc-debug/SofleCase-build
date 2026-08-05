@@ -1,0 +1,123 @@
+name: Dilemma KiCad board geometry recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install KiCad 9 Python API
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
+          sudo apt-get install -y kicad python3
+          kicad-cli version
+          python3 -c 'import pcbnew; print(pcbnew.Version())'
+      - name: Checkout pinned Dilemma source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+      - name: Export normalized outlines and drills
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p exports
+          cat > /tmp/export.py <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import pcbnew
+
+          expected = {
+              '3x5_2': 'beb07242dc9ff03ebfbb1042de0e5fdb93db4815514bf22d1e6e6e0d09d5bfe1',
+              '3x5_3': 'e914ce82c793044cecededead74a2af642506f2a6345d758b3c152c649e142c6',
+              '3x5_3_procyon': '79635af892b3a755ffaacccd17307e3f19316687a3b2ab7f95d78a84df6adff1',
+              '4x6_4': '1e22900adffdd4c14adf82420ab2d66558e5f3a44815a7c89627e432300f7262',
+          }
+
+          def mm(value):
+              return float(value) / 1_000_000.0
+
+          def point(p):
+              return [mm(p.x), mm(p.y)]
+
+          def chain_points(chain):
+              return [point(chain.CPoint(i)) for i in range(chain.PointCount())]
+
+          summary = {}
+          for family, sha in expected.items():
+              pcb = Path('upstream') / family / 'dilemma.kicad_pcb'
+              actual = hashlib.sha256(pcb.read_bytes()).hexdigest()
+              if actual != sha:
+                  raise RuntimeError(f'{family} source hash mismatch: {actual}')
+              board = pcbnew.LoadBoard(str(pcb))
+              outlines = pcbnew.SHAPE_POLY_SET()
+              ok = bool(board.GetBoardPolygonOutlines(outlines, None, False, False))
+              pads = []
+              for fp in board.GetFootprints():
+                  for pad in fp.Pads():
+                      drill = pad.GetDrillSize()
+                      if drill.x <= 0 or drill.y <= 0:
+                          continue
+                      pos = pad.GetPosition()
+                      pads.append({
+                          'reference': str(fp.GetReference()),
+                          'number': str(pad.GetNumber()),
+                          'position': point(pos),
+                          'drill': [mm(drill.x), mm(drill.y)],
+                          'orientation_degrees': float(pad.GetOrientation().AsDegrees()),
+                          'attribute': int(pad.GetAttribute()),
+                          'shape': int(pad.GetShape()),
+                      })
+              item = {
+                  'family': family,
+                  'source': str(pcb),
+                  'source_sha256': actual,
+                  'kicad_version': pcbnew.Version(),
+                  'success': ok,
+                  'board_thickness_mm': mm(board.GetDesignSettings().GetBoardThickness()),
+                  'outline_count': int(outlines.OutlineCount()),
+                  'outlines': [],
+                  'through_drills': pads,
+              }
+              for oi in range(outlines.OutlineCount()):
+                  item['outlines'].append({
+                      'outline': chain_points(outlines.COutline(oi)),
+                      'holes': [
+                          chain_points(outlines.CHole(oi, hi))
+                          for hi in range(outlines.HoleCount(oi))
+                      ],
+                  })
+              out = Path('exports', f'{family}_board_geometry.json')
+              out.write_text(json.dumps(item, indent=2), encoding='utf-8')
+              summary[family] = {
+                  'success': ok,
+                  'thickness_mm': item['board_thickness_mm'],
+                  'outline_count': item['outline_count'],
+                  'hole_counts': [len(x['holes']) for x in item['outlines']],
+                  'point_counts': [len(x['outline']) for x in item['outlines']],
+                  'through_drill_count': len(pads),
+              }
+          Path('exports/SUMMARY.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+          PY
+          python3 /tmp/export.py
+          cat exports/SUMMARY.json
+          find exports -type f -print0 | sort -z | xargs -0 sha256sum > exports/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-kicad-board-geometry-recovery
+          path: exports
+          retention-days: 3
+          if-no-files-found: error

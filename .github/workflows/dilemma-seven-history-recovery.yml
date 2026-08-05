@@ -1,0 +1,115 @@
+name: Dilemma seven-part history recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch all refs
+        run: git fetch --all --prune --tags --force
+      - name: Recover unique source/output pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery/checkpoints recovery/inventory
+          cat > /tmp/recover.py <<'PY'
+          import base64, hashlib, json, os, re, shutil, subprocess, tarfile, tempfile
+          from pathlib import Path
+
+          targets = {
+              'P009': 'dilemma_3x5_2_tenting_puck_case',
+              'P010': 'dilemma_case_integrated_tenting_puck',
+              'P011': 'dilemma_case_tenting_puck_opening',
+              'P012': 'dilemma_3x5_2_thin_case',
+              'P019': 'dilemma_3x5_3_hotswap_mid',
+              'P025': 'dilemma_4x6_4_top',
+              'P029': 'dilemma_4x6_4_hotswap_mid',
+          }
+          out = Path('recovery/checkpoints')
+          inventory = []
+          seen_payloads = set()
+          seen_pairs = set()
+
+          def git(*args, text=True):
+              return subprocess.check_output(['git', *args], text=text)
+
+          commits = git('rev-list', '--all').splitlines()
+          for commit in commits:
+              paths = git('ls-tree', '-r', '--name-only', commit).splitlines()
+              parts = sorted(p for p in paths if re.search(r'\.b64\.part-\d+$', p))
+              stems = sorted({re.sub(r'\.part-\d+$', '', p) for p in parts})
+              for stem in stems:
+                  group = [p for p in parts if p.startswith(stem + '.part-')]
+                  encoded = b''.join(git('show', f'{commit}:{p}', text=False) for p in group)
+                  encoded = b''.join(encoded.split())
+                  try:
+                      payload = base64.b64decode(encoded, validate=True)
+                  except Exception:
+                      continue
+                  payload_sha = hashlib.sha256(payload).hexdigest()
+                  if payload_sha in seen_payloads:
+                      continue
+                  seen_payloads.add(payload_sha)
+                  with tempfile.TemporaryDirectory() as td:
+                      td = Path(td)
+                      archive = td / 'payload'
+                      archive.write_bytes(payload)
+                      extracted = td / 'extracted'
+                      extracted.mkdir()
+                      try:
+                          with tarfile.open(archive, 'r:*') as tf:
+                              tf.extractall(extracted, filter='data')
+                      except Exception:
+                          continue
+                      files = [p for p in extracted.rglob('*') if p.is_file()]
+                      for part_id, name in targets.items():
+                          scripts = [p for p in files if p.name == name + '.py' and 'script' in str(p.parent).lower()]
+                          generated = [p for p in files if p.name in {name + '.step', name + '.stp', name + '.stl'} and ('generated' in str(p.parent).lower() or 'xyz/generated' in str(p).lower())]
+                          if not scripts and not generated:
+                              continue
+                          script_hashes = tuple(sorted(hashlib.sha256(p.read_bytes()).hexdigest() for p in scripts))
+                          output_hashes = tuple(sorted(hashlib.sha256(p.read_bytes()).hexdigest() for p in generated))
+                          key = (part_id, script_hashes, output_hashes)
+                          if key in seen_pairs:
+                              continue
+                          seen_pairs.add(key)
+                          dest = out / part_id / f'{commit[:12]}_{payload_sha[:12]}'
+                          dest.mkdir(parents=True, exist_ok=True)
+                          copied = []
+                          for p in scripts + generated:
+                              rel = p.relative_to(extracted)
+                              safe = '__'.join(rel.parts)
+                              target = dest / safe
+                              shutil.copy2(p, target)
+                              copied.append({'source_path': str(rel), 'copied_name': safe, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'size': p.stat().st_size})
+                          record = {'part_id': part_id, 'name': name, 'commit': commit, 'payload_sha256': payload_sha, 'stem': stem, 'files': copied}
+                          (dest / 'record.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
+                          inventory.append(record)
+
+          Path('recovery/inventory/inventory.json').write_text(json.dumps(inventory, indent=2), encoding='utf-8')
+          Path('recovery/inventory/summary.json').write_text(json.dumps({
+              'payloads_scanned': len(seen_payloads),
+              'unique_pairs': len(seen_pairs),
+              'counts': {pid: sum(1 for r in inventory if r['part_id'] == pid) for pid in targets},
+          }, indent=2), encoding='utf-8')
+          PY
+          python /tmp/recover.py
+          cat recovery/inventory/summary.json
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-seven-history-recovery
+          path: recovery
+          retention-days: 3
+          if-no-files-found: error

@@ -1,0 +1,52 @@
+name: Dilemma P009 upstream history recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-p009-upstream-history.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone complete upstream history
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/Bastardkb/Dilemma.git upstream
+          git -C upstream fetch --all --tags --prune
+      - name: Extract every tenting-puck historical blob
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p recovery/blobs recovery/inventory
+          git -C upstream rev-list --all --objects > recovery/inventory/all_objects.txt
+          grep -Ei '3x5_2/.{0,80}(tenting|puck)|tenting.{0,40}puck|puck.{0,40}tenting' recovery/inventory/all_objects.txt > recovery/inventory/matching_objects.txt || true
+          git -C upstream log --all --full-history --date=iso --name-status -- mechanical/cases/3x5_2 > recovery/inventory/path_history.txt
+          git -C upstream log --all --full-history --date=iso --name-status -- '*.FCStd' '*.f3d' '*.F3D' '*.scad' '*.py' > recovery/inventory/native_and_generator_history.txt
+          while read -r oid path; do
+            test -n "${oid:-}" || continue
+            test -n "${path:-}" || continue
+            safe="$(printf '%s' "$path" | sed 's#[/ ]#_#g; s#[^A-Za-z0-9._-]#_#g')"
+            if git -C upstream cat-file -e "$oid" 2>/dev/null; then
+              git -C upstream cat-file blob "$oid" > "recovery/blobs/${oid}_${safe}" 2>/dev/null || true
+            fi
+          done < recovery/inventory/matching_objects.txt
+          find recovery/blobs -type f -size +100M -delete
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+          find recovery/blobs -type f -printf '%s %p\n' | sort -n > recovery/inventory/recovered_files.txt
+          cat recovery/inventory/matching_objects.txt
+          cat recovery/inventory/recovered_files.txt
+      - name: Upload P009 history recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-p009-upstream-history
+          path: recovery
+          if-no-files-found: error
+          retention-days: 3
