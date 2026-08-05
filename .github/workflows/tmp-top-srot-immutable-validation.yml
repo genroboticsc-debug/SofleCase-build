@@ -9,33 +9,31 @@ on:
       - tmp_top_validation/top_production_export.py
       - tmp_top_validation/validate_final_production_package.py
       - tmp_top_validation/validate_direct_final_solid.py
+      - tmp_top_validation/run_final_production_package.sh
 
 permissions:
   contents: read
 
 jobs:
-  build-validate-package:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Check out immutable recovered source
+      - name: Check out immutable recovered source commit
         uses: actions/checkout@v4
         with:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen final-stage files
+      - name: Inject frozen final production files
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
-          for file in \
-            top_production_export.py \
-            validate_final_production_package.py \
-            validate_direct_final_solid.py
-          do
-            git show "FETCH_HEAD:tmp_top_validation/$file" > "tmp_top_validation/$file"
-          done
+          git show FETCH_HEAD:tmp_top_validation/top_production_export.py > tmp_top_validation/top_production_export.py
+          git show FETCH_HEAD:tmp_top_validation/validate_final_production_package.py > tmp_top_validation/validate_final_production_package.py
+          git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
+          git show FETCH_HEAD:tmp_top_validation/run_final_production_package.sh > tmp_top_validation/run_final_production_package.sh
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -44,19 +42,16 @@ jobs:
           cache: pip
           cache-dependency-path: tmp_top_validation/requirements.txt
 
-      - name: Install pinned CAD stack and verified Arial
+      - name: Install checksum-verified Arial and pinned CAD stack
         shell: bash
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig cabextract curl xz-utils zip
           FONT_TMP="$(mktemp -d)"
-          curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 \
-            -o "$FONT_TMP/arial32.exe" \
-            https://downloads.sourceforge.net/corefonts/arial32.exe
+          curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 -o "$FONT_TMP/arial32.exe" https://downloads.sourceforge.net/corefonts/arial32.exe
           cabextract -q -d "$FONT_TMP" "$FONT_TMP/arial32.exe"
-          test "$(sha256sum "$FONT_TMP/Arial.TTF" | awk '{print $1}')" = \
-            "35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833"
+          test "$(sha256sum "$FONT_TMP/Arial.TTF" | awk '{print $1}')" = "35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833"
           install -Dm644 "$FONT_TMP/Arial.TTF" "$HOME/.local/share/fonts/Arial.ttf"
           fc-cache -f
           fc-match Arial | grep -qi Arial
@@ -64,199 +59,23 @@ jobs:
           python -m pip install -r tmp_top_validation/requirements.txt
           python -m pip install networkx==3.6.1
 
-      - name: Reassemble and verify immutable reference
+      - name: Reassemble and verify immutable reference STL
         shell: bash
         run: |
           set -euxo pipefail
-          REF=tmp_top_validation/reference
-          cat "$REF"/top.stl.xz.b64.00 "$REF"/top.stl.xz.b64.01 \
-              "$REF"/top.stl.xz.b64.02 "$REF"/top.stl.xz.b64.03 \
-              "$REF"/top.stl.xz.b64.04 > "$REF"/top.stl.xz.b64
-          test "$(sha256sum "$REF"/top.stl.xz.b64 | awk '{print $1}')" = \
-            "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
-          base64 --decode "$REF"/top.stl.xz.b64 > "$REF"/top.stl.xz
-          test "$(sha256sum "$REF"/top.stl.xz | awk '{print $1}')" = \
-            "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
-          xz --decompress --stdout "$REF"/top.stl.xz > "$REF"/top.stl
-          test "$(sha256sum "$REF"/top.stl | awk '{print $1}')" = \
-            "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
+          REF_DIR=tmp_top_validation/reference
+          cat "$REF_DIR"/top.stl.xz.b64.00 "$REF_DIR"/top.stl.xz.b64.01 "$REF_DIR"/top.stl.xz.b64.02 "$REF_DIR"/top.stl.xz.b64.03 "$REF_DIR"/top.stl.xz.b64.04 > "$REF_DIR"/top.stl.xz.b64
+          test "$(sha256sum "$REF_DIR"/top.stl.xz.b64 | awk '{print $1}')" = "562abd14f9e3bfdfebac2fcb8c4d2fc8806c007f540f04b3a2aaa319f7a31924"
+          base64 --decode "$REF_DIR"/top.stl.xz.b64 > "$REF_DIR"/top.stl.xz
+          test "$(sha256sum "$REF_DIR"/top.stl.xz | awk '{print $1}')" = "e646f4a8013e6fe9c31ff379311719f74fb1e6b405fd273c66b6b504258312d0"
+          xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
+          test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Materialize source and run strict SROT audits
+      - name: Build validate and package final production outputs
         shell: bash
         run: |
-          set -euxo pipefail
-          python tmp_top_validation/apply_explicit_boolean_tree_fix.py
-          python tmp_top_validation/apply_f005_boolean_tolerance_fix.py
-          python tmp_top_validation/apply_f012_all_faces_fix.py
-          python tmp_top_validation/apply_f012_font_size_fix.py
-          python tmp_top_validation/apply_f012_lowercase_v_fix.py
-          python -m py_compile \
-            tmp_top_validation/top_parametric.py \
-            tmp_top_validation/top_production_export.py \
-            tmp_top_validation/strict_srot_check.py \
-            tmp_top_validation/validate_fast_manifold.py \
-            tmp_top_validation/validate_feature_tree_manifold.py \
-            tmp_top_validation/validate_direct_final_solid.py \
-            tmp_top_validation/validate_final_production_package.py
-          python tmp_top_validation/strict_srot_check.py
-          python - <<'PY'
-          import ast, json
-          from pathlib import Path
-          path = Path('tmp_top_validation/top_production_export.py')
-          source = path.read_text(encoding='utf-8')
-          tree = ast.parse(source)
-          imports = set()
-          for node in ast.walk(tree):
-              if isinstance(node, ast.Import):
-                  imports.update(alias.name for alias in node.names)
-              elif isinstance(node, ast.ImportFrom):
-                  imports.add(node.module or '')
-          names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-          checks = {
-              'no_validation_imports': not bool(imports & {
-                  'validate_direct_final_solid',
-                  'validate_fast_manifold',
-                  'validate_feature_tree_manifold',
-              }),
-              'no_reference_identifiers': not bool(names & {
-                  'REFERENCE', 'REFERENCE_STL', 'reference_mesh'
-              }),
-              'no_geometry_import_calls': (
-                  'import_step(' not in source and 'import_stl(' not in source
-              ),
-              'no_serialized_brep': (
-                  '.brep' not in source.lower() and 'pickle' not in source.lower()
-              ),
-              'analytic_feature_tree_dependency': (
-                  'import top_parametric as tp' in source
-              ),
-              'formula_based_adaptive_bores': (
-                  'analytic_strip' in source and 'ADAPTIVE_BORE_NAMES' in source
-              ),
-          }
-          report = {'checks': checks, 'pass': all(checks.values())}
-          Path('tmp_top_validation/strict_production_export_report.json').write_text(
-              json.dumps(report, indent=2), encoding='utf-8'
-          )
-          if not report['pass']:
-              raise SystemExit(report)
-          print(json.dumps(report, indent=2))
-          PY
-          git diff --check
-
-      - name: Export final STEP and STL
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf \
-            tmp_top_validation/generated/final_top \
-            tmp_top_validation/generated/final_authoritative_validation
-          python tmp_top_validation/top_production_export.py
-
-      - name: Run authoritative clean-build validation
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python tmp_top_validation/validate_final_production_package.py \
-            | tee tmp_top_validation/final_validation.log
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          path = Path(
-              'tmp_top_validation/generated/final_top/final_validation_report.json'
-          )
-          report = json.loads(path.read_text(encoding='utf-8'))
-          validation = report['authoritative_validation']
-          assert report['overall_pass'] is True, report
-          assert validation['strict_pass'] is True, validation
-          assert validation['symmetric_difference_percent'] < 0.01, validation
-          print(json.dumps({
-              'overall_pass': report['overall_pass'],
-              'symmetric_difference_mm3': validation['symmetric_difference_mm3'],
-              'symmetric_difference_percent': validation['symmetric_difference_percent'],
-              'volume_difference_percent': validation['volume_difference_percent'],
-              'area_difference_percent': validation['area_difference_percent'],
-              'com_shift_percent_bbox_diagonal': (
-                  validation['com_shift_percent_bbox_diagonal']
-              ),
-          }, indent=2))
-          PY
-
-      - name: Assemble reproducible final package
-        shell: bash
-        run: |
-          set -euxo pipefail
-          ROOT=tmp_top_validation
-          NAME=Dilemma_top_STRICT_SROT_PASS_2026-08-05
-          PKG="$ROOT/$NAME"
-          rm -rf "$PKG" "$ROOT/$NAME.zip" "$ROOT/$NAME.zip.sha256"
-          mkdir -p \
-            "$PKG/source" "$PKG/output" "$PKG/validation" "$PKG/provenance"
-          cp "$ROOT/top_parametric.py" "$PKG/source/"
-          cp "$ROOT/top_production_export.py" "$PKG/source/"
-          cp "$ROOT/strict_srot_check.py" "$PKG/source/"
-          cp "$ROOT/requirements.txt" "$PKG/source/"
-          cp "$ROOT/generated/final_top/top_parametric.step" "$PKG/output/"
-          cp "$ROOT/generated/final_top/top_parametric.stl" "$PKG/output/"
-          cp "$ROOT/generated/final_top/top_native_raw.stl" "$PKG/output/"
-          cp "$ROOT/generated/final_top/top_export_audit.json" "$PKG/validation/"
-          cp "$ROOT/generated/final_top/final_validation_report.json" "$PKG/validation/"
-          cp "$ROOT/strict_srot_report.json" "$PKG/validation/"
-          cp "$ROOT/strict_production_export_report.json" "$PKG/validation/"
-          cp "$ROOT/final_validation.log" "$PKG/validation/"
-          cp -r "$ROOT/generated/final_authoritative_validation" \
-            "$PKG/validation/authoritative_evidence"
-          printf '%s\n' \
-            'cc3523043a98f97d5a7938e48cdbb947990f4a09' \
-            > "$PKG/provenance/immutable_source_commit.txt"
-          printf '%s\n' '${{ github.sha }}' \
-            > "$PKG/provenance/workflow_commit.txt"
-          python - <<'PY'
-          import json, platform
-          from pathlib import Path
-          import build123d, manifold3d, numpy, scipy, shapely, trimesh
-          pkg = Path(
-              'tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05'
-          )
-          env = {
-              'python': platform.python_version(),
-              'build123d': getattr(build123d, '__version__', '0.11.1'),
-              'ocp': 'cadquery-ocp-novtk 7.9.3.1.1',
-              'manifold3d': getattr(manifold3d, '__version__', '3.5.2'),
-              'numpy': numpy.__version__,
-              'scipy': scipy.__version__,
-              'shapely': shapely.__version__,
-              'trimesh': trimesh.__version__,
-              'font': 'Arial Regular',
-              'font_sha256': (
-                  '35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833'
-              ),
-          }
-          (pkg / 'provenance/environment.json').write_text(
-              json.dumps(env, indent=2), encoding='utf-8'
-          )
-          report = json.loads((
-              Path('tmp_top_validation/generated/final_top')
-              / 'final_validation_report.json'
-          ).read_text(encoding='utf-8'))
-          v = report['authoritative_validation']
-          readme = f'''# Dilemma top — Strict SROT PASS
-
-- Strict SROT: PASS
-- Bidirectional symmetric difference: {v['symmetric_difference_mm3']:.12f} mm³ ({v['symmetric_difference_percent']:.12f}%)
-- Volume difference: {v['volume_difference_percent']:.12f}%
-- Surface-area difference: {v['area_difference_percent']:.12f}%
-- COM shift / bbox diagonal: {v['com_shift_percent_bbox_diagonal']:.12f}%
-- Production STL canonical congruence: {report['final_checks']['production_stl_canonical_triangle_congruent']}
-
-The STEP is generated by the analytic Build123d F001–F012 feature tree. The production exporter reads no reference geometry; the reference STL is used only by the validation workflow.
-'''
-          (pkg / 'README.md').write_text(readme, encoding='utf-8')
-          PY
-          (cd "$PKG" && find . -type f -print0 | sort -z \
-            | xargs -0 sha256sum > checksums.sha256)
-          (cd "$ROOT" && zip -q -9 -r "$NAME.zip" "$NAME")
-          sha256sum "$ROOT/$NAME.zip" > "$ROOT/$NAME.zip.sha256"
+          set -o pipefail
+          bash tmp_top_validation/run_final_production_package.sh 2>&1 | tee tmp_top_validation/final_package_workflow.log
 
       - name: Upload final strict SROT package
         if: always()
@@ -267,4 +86,5 @@ The STEP is generated by the analytic Build123d F001–F012 feature tree. The pr
             tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip
             tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip.sha256
             tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05/**
+            tmp_top_validation/final_package_workflow.log
           if-no-files-found: warn
