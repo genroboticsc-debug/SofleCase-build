@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - careerpilot-apk-build-20260805
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -113,7 +116,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .careerpilot-build-result/status.txt .careerpilot-build-result/gradle-tail.log
           git commit -m "[skip ci] Record CareerPilot APK build ${GITHUB_RUN_ID}" || true
-          git push origin HEAD:careerpilot-apk-build-20260805
+          git push origin HEAD:careerpilot-apk-build-20260805 || true
 
       - name: Fail workflow when APK was not verified and uploaded
         if: always() && (steps.build_apk.outcome != 'success' || steps.package_apk.outcome != 'success' || steps.upload_apk.outcome != 'success')
