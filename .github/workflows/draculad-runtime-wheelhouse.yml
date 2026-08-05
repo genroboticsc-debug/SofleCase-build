@@ -1,0 +1,58 @@
+name: DracuLad runtime wheelhouse
+
+on:
+  push:
+    branches:
+      - runtime-wheel-recovery-20260726
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  wheelhouse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download locked CAD runtime and validation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            'build123d==0.9.1' \
+            'cadquery-ocp==7.8.1.1.post1' \
+            'trimesh>=4.11,<5' \
+            'manifold3d>=3' \
+            'numpy>=2' \
+            'shapely>=2.1' \
+            'sexpdata>=1.0' \
+            'matplotlib>=3.10' \
+            'svgpathtools>=1.7' \
+            'networkx>=3.6,<4'
+          (cd wheelhouse && sha256sum * | sort > SHA256SUMS)
+          python - <<'PY'
+          import json, pathlib, platform, sys
+          root = pathlib.Path('wheelhouse')
+          files = sorted(p.name for p in root.iterdir() if p.is_file() and p.name != 'RUNTIME_METADATA.json')
+          metadata = {
+              'python': sys.version,
+              'platform': platform.platform(),
+              'files': files,
+              'purpose': 'DracuLad isolated offline Build123d/OpenCascade validation runtime',
+          }
+          (root / 'RUNTIME_METADATA.json').write_text(json.dumps(metadata, indent=2))
+          PY
+      - name: Upload exact wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: draculad-runtime-wheelhouse
+          path: wheelhouse/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error

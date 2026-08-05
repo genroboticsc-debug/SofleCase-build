@@ -1,0 +1,42 @@
+name: DracuLad CADMPEG source corpus
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/draculad-cadmpeg-source.yml
+      - .github/draculad-cadmpeg-source-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact CADMPEG source and corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/cadmpeg/cadmpeg.git cadmpeg-source
+          cd cadmpeg-source
+          git checkout 43ad613b416d96225fef501b08b0a29e6f982fbe
+          git submodule update --init --recursive || true
+          git rev-parse HEAD > ../CADMPEG_COMMIT
+          cd ..
+          tar --exclude='.git' -czf cadmpeg-source-43ad613b.tar.gz cadmpeg-source
+          sha256sum cadmpeg-source-43ad613b.tar.gz CADMPEG_COMMIT > SHA256SUMS
+      - name: Upload exact source corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: cadmpeg-source-43ad613b
+          path: |
+            cadmpeg-source-43ad613b.tar.gz
+            CADMPEG_COMMIT
+            SHA256SUMS
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error

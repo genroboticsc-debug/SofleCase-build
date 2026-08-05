@@ -1,0 +1,59 @@
+name: DracuLad historical source recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/draculad-foostan-history.yml
+      - .github/draculad-foostan-history-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact historical foostan/kbd tree and all CAD-source blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/foostan/kbd.git historical-kbd
+          cd historical-kbd
+          git checkout 230c6d634a8d409cbd1c506ec0260420a08a1c83
+          git submodule update --init --recursive || true
+          find . -type f \( -iname '*.f3d' -o -iname '*.f3z' -o -iname '*.step' -o -iname '*.stp' -o -iname '*.smt' -o -iname '*.sat' \) -print | sort > ../historical-cad-inventory.txt
+          git log --all --format='COMMIT %H %cI %s' --name-only -- '*.f3d' '*.f3z' '*.smt' '*.sat' > ../historical-cad-source-log.txt
+          mkdir -p ../historical-cad-blobs
+          git rev-list --objects --all | while read -r oid path; do
+            case "${path:-}" in
+              *.f3d|*.F3D|*.f3z|*.F3Z|*.smt|*.SMT|*.sat|*.SAT)
+                safe=$(printf '%s' "$path" | tr '/ ' '__')
+                git cat-file blob "$oid" > "../historical-cad-blobs/${oid}_${safe}"
+                printf '%s\t%s\t%s\n' "$oid" "$path" "$(git cat-file -s "$oid")" >> ../historical-cad-blob-inventory.tsv
+                ;;
+            esac
+          done
+          cd ..
+          sort -u historical-cad-blob-inventory.tsv -o historical-cad-blob-inventory.tsv || true
+          tar --exclude='.git' -czf historical-kbd-230c6d.tar.gz historical-kbd historical-cad-inventory.txt
+          tar -czf historical-cad-blobs.tar.gz historical-cad-blobs historical-cad-blob-inventory.tsv historical-cad-source-log.txt
+          sha256sum historical-kbd-230c6d.tar.gz historical-cad-blobs.tar.gz historical-cad-inventory.txt historical-cad-blob-inventory.tsv historical-cad-source-log.txt > SHA256SUMS
+          cat historical-cad-blob-inventory.tsv
+      - name: Upload exact historical source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: foostan-kbd-history-all-cad-blobs
+          path: |
+            historical-kbd-230c6d.tar.gz
+            historical-cad-blobs.tar.gz
+            historical-cad-inventory.txt
+            historical-cad-blob-inventory.tsv
+            historical-cad-source-log.txt
+            SHA256SUMS
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
