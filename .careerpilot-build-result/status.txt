@@ -1,0 +1,6 @@
+run_id=30999621564
+run_attempt=1
+workflow_sha=bceed968a93698911382cf6bbc6a70c372244e0f
+build_outcome=failure
+package_outcome=skipped
+upload_outcome=skipped
