@@ -1,4 +1,4 @@
-name: Immutable top split mounting-bore history sweep
+name: Immutable top remaining feature sensitivity
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
       - tmp_top_validation/validate_direct_final_solid.py
-      - tmp_top_validation/run_split_mount_bore_history_sweep.py
+      - tmp_top_validation/run_remaining_feature_sensitivity.py
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - name: Check out immutable recovered source commit
         uses: actions/checkout@v4
@@ -23,13 +23,13 @@ jobs:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen direct validator and split-bore sweep
+      - name: Inject frozen direct validator and sensitivity sweep
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
           git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
-          git show FETCH_HEAD:tmp_top_validation/run_split_mount_bore_history_sweep.py > tmp_top_validation/run_split_mount_bore_history_sweep.py
+          git show FETCH_HEAD:tmp_top_validation/run_remaining_feature_sensitivity.py > tmp_top_validation/run_remaining_feature_sensitivity.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -82,24 +82,24 @@ jobs:
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
             tmp_top_validation/validate_direct_final_solid.py \
-            tmp_top_validation/run_split_mount_bore_history_sweep.py
+            tmp_top_validation/run_remaining_feature_sensitivity.py
           python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Run split mounting-bore history Boolean sweep
+      - name: Run remaining feature sensitivity matrix
         shell: bash
         run: |
           set -o pipefail
-          rm -rf tmp_top_validation/generated/split_mount_bore_history_sweep
-          python tmp_top_validation/run_split_mount_bore_history_sweep.py 2>&1 | tee tmp_top_validation/split_mount_bore_history_sweep.log
+          rm -rf tmp_top_validation/generated/remaining_feature_sensitivity
+          python tmp_top_validation/run_remaining_feature_sensitivity.py 2>&1 | tee tmp_top_validation/remaining_feature_sensitivity.log
 
-      - name: Upload split-bore history evidence
+      - name: Upload feature sensitivity evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-split-mount-bore-history-${{ github.run_id }}
+          name: immutable-top-remaining-feature-sensitivity-${{ github.run_id }}
           path: |
-            tmp_top_validation/generated/split_mount_bore_history_sweep/**
-            tmp_top_validation/split_mount_bore_history_sweep.log
+            tmp_top_validation/generated/remaining_feature_sensitivity/**
+            tmp_top_validation/remaining_feature_sensitivity.log
             tmp_top_validation/strict_srot_report.json
           if-no-files-found: warn
