@@ -1,6 +1,6 @@
-run_id=30999621564
+run_id=31000315439
 run_attempt=1
-workflow_sha=bceed968a93698911382cf6bbc6a70c372244e0f
-build_outcome=failure
-package_outcome=skipped
-upload_outcome=skipped
+workflow_sha=3dcbf20c3e5c3184a303248fe640999acfc95e90
+build_outcome=success
+package_outcome=success
+upload_outcome=success
