@@ -1,4 +1,4 @@
-name: Immutable top direct final-solid validation
+name: Immutable top direct final-solid fine sweep
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
       - tmp_top_validation/validate_direct_final_solid.py
+      - tmp_top_validation/run_direct_fine_sweep.py
 
 permissions:
   contents: read
@@ -22,13 +23,13 @@ jobs:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen direct-solid validator only
+      - name: Inject frozen direct-solid validators only
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
           git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
-          python -m py_compile tmp_top_validation/validate_direct_final_solid.py
+          git show FETCH_HEAD:tmp_top_validation/run_direct_fine_sweep.py > tmp_top_validation/run_direct_fine_sweep.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -80,22 +81,23 @@ jobs:
             tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
-            tmp_top_validation/validate_direct_final_solid.py
+            tmp_top_validation/validate_direct_final_solid.py \
+            tmp_top_validation/run_direct_fine_sweep.py
           python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Run fault-tolerant bidirectional Boolean validation
+      - name: Run fine bidirectional Boolean sweep
         shell: bash
         run: |
           set -o pipefail
           rm -rf tmp_top_validation/generated/direct_final_solid_validation
-          python tmp_top_validation/validate_direct_final_solid.py 2>&1 | tee tmp_top_validation/direct_final_solid_validation.log
+          python tmp_top_validation/run_direct_fine_sweep.py 2>&1 | tee tmp_top_validation/direct_final_solid_validation.log
 
-      - name: Upload direct final-solid evidence
+      - name: Upload fine-sweep evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-direct-final-validation-${{ github.run_id }}
+          name: immutable-top-direct-fine-sweep-${{ github.run_id }}
           path: |
             tmp_top_validation/generated/direct_final_solid_validation/**
             tmp_top_validation/direct_final_solid_validation.log
