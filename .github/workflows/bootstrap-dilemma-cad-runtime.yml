@@ -1,9 +1,6 @@
 name: Bootstrap Dilemma CAD Runtime
 
 on:
-  push:
-    paths:
-      - .github/workflows/bootstrap-dilemma-cad-runtime.yml
   pull_request:
     paths:
       - .github/bootstrap-dilemma-cad-runtime.trigger
@@ -13,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  package-runtime:
+  package-runtime-and-references:
     runs-on: ubuntu-22.04
     steps:
       - name: Set up CPython 3.13
@@ -27,17 +24,26 @@ jobs:
             'cadquery-ocp==7.8.1.1.post1' \
             'build123d==0.10.0' \
             'manifold3d==3.2.1'
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib
-          for path in sorted(Path('wheelhouse').glob('*')):
-              h = hashlib.sha256(path.read_bytes()).hexdigest()
-              print(f'{h}  {path.name}')
-          PY
+      - name: Fetch exact pinned Dilemma reference family
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/Bastardkb/Dilemma.git pinned-dilemma
+          cd pinned-dilemma
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a -- mechanical/cases/3x5_3 mechanical/cases/3x5_3_hotswap mechanical/cases/4x6_4 mechanical/cases/4x6_4_hotswap
+          cd ..
+          mkdir -p pinned-reference-family
+          cp -a pinned-dilemma/mechanical pinned-reference-family/
+          find pinned-reference-family -type f -print0 | sort -z | xargs -0 sha256sum > pinned-reference-family/SHA256SUMS.txt
       - name: Upload runtime wheelhouse
         uses: actions/upload-artifact@v4
         with:
           name: dilemma-cad-runtime-cp313
           path: wheelhouse
+          compression-level: 0
+          retention-days: 1
+      - name: Upload pinned reference family
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-reference-family-f5cffb
+          path: pinned-reference-family
           compression-level: 0
           retention-days: 1
