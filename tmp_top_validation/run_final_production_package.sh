@@ -114,7 +114,7 @@ cp "$ROOT/generated/final_top/top_parametric.stl" "$PKG/output/"
 cp "$ROOT/generated/final_top/top_native_raw.stl" "$PKG/output/"
 cp "$ROOT/generated/final_top/top_export_audit.json" "$PKG/validation/"
 cp "$ROOT/generated/final_top/final_validation_report.json" "$PKG/validation/"
-cp "$ROOT/strict_srot_report.json" "$PKG/validation/"
+cp "$ROOT/generated/strict_srot_report.json" "$PKG/validation/"
 cp "$ROOT/strict_production_export_report.json" "$PKG/validation/"
 cp "$ROOT/final_validation.log" "$PKG/validation/"
 cp -r "$ROOT/generated/final_authoritative_validation" \
