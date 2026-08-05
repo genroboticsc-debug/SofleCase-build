@@ -1,0 +1,81 @@
+name: SROT AnalyzerBox crate decode
+on:
+  pull_request:
+    paths:
+      - 'srot_analyzerbox_crate_marker.txt'
+permissions:
+  contents: read
+jobs:
+  decode:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Recover historical native revisions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/gusmanb/logicanalyzer.git public_repo
+          mkdir -p native decoded decoder/src
+          cd public_repo
+          commits=$(git log --all --format='%H' -- 'Enclosure/AnalyzerBox.SLDPRT')
+          printf '%s\n' "$commits" > ../decoded/commits.txt
+          n=0
+          while read -r c; do
+            n=$((n+1))
+            git show "$c:Enclosure/AnalyzerBox.SLDPRT" > "../native/AnalyzerBox_${n}_${c}.SLDPRT"
+          done <<< "$commits"
+          cd ..
+      - name: Build clean-room decoder from published crates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > decoder/Cargo.toml <<'EOF'
+          [package]
+          name = "srot-analyzerbox-decode"
+          version = "0.1.0"
+          edition = "2021"
+          [dependencies]
+          cadmpeg-codec-sldprt = "0.3.0"
+          cadmpeg-ir = "0.3.0"
+          serde_json = "1"
+          EOF
+          cat > decoder/src/main.rs <<'EOF'
+          use std::{env,fs::File,io::BufWriter,path::PathBuf};
+          use cadmpeg_codec_sldprt::SldprtCodec;
+          use cadmpeg_ir::{CodecEntry,DecodeOptions};
+          fn main() -> Result<(),Box<dyn std::error::Error>> {
+              let args: Vec<String> = env::args().collect();
+              if args.len()!=4 { return Err("usage: decode INPUT IR_JSON REPORT_JSON".into()); }
+              let mut input=File::open(&args[1])?;
+              let decoded=SldprtCodec.decode(&mut input,&DecodeOptions::default())?;
+              serde_json::to_writer_pretty(BufWriter::new(File::create(&args[2])?),&decoded.ir)?;
+              serde_json::to_writer_pretty(BufWriter::new(File::create(&args[3])?),&decoded.report)?;
+              let summary=serde_json::json!({
+                  "input":PathBuf::from(&args[1]).file_name().unwrap().to_string_lossy(),
+                  "bodies":decoded.ir.model.bodies.len(),
+                  "faces":decoded.ir.model.faces.len(),
+                  "features":decoded.ir.model.features.len(),
+                  "losses":decoded.report.losses.len()
+              });
+              println!("{}",serde_json::to_string_pretty(&summary)?);
+              Ok(())
+          }
+          EOF
+          cargo build --release --manifest-path decoder/Cargo.toml
+      - name: Decode typed IR and inspect source strings
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for f in native/*.SLDPRT; do
+            b=$(basename "$f" .SLDPRT)
+            decoder/target/release/srot-analyzerbox-decode "$f" "decoded/${b}_IR.json" "decoded/${b}_report.json" > "decoded/${b}_summary.json" 2> "decoded/${b}_stderr.txt" || echo $? > "decoded/${b}_exit_code.txt"
+            strings -a -el "$f" | grep -Ei 'font|arial|century|gothic|logic|analyzer|sketch|extrude|cut' > "decoded/${b}_utf16_strings.txt" || true
+            strings -a "$f" | grep -Ei 'font|arial|century|gothic|logic|analyzer|sketch|extrude|cut' > "decoded/${b}_ascii_strings.txt" || true
+          done
+          sha256sum decoded/* > decoded/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: srot-analyzerbox-crate-ir
+          path: decoded
+          retention-days: 1

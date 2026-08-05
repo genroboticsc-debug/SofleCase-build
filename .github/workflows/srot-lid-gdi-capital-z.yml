@@ -1,0 +1,92 @@
+name: SROT lid exact GDI capital-Z outlines
+on:
+  pull_request:
+    paths:
+      - 'srot_lid_gdi_capital_z_marker.txt'
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Microsoft 365 Century Gothic
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force odt | Out-Null
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
+          @'
+          <Configuration><Add OfficeClientEdition="64" Channel="Current"><Product ID="O365ProPlusRetail"><Language ID="en-us" /><ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" /><ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" /><ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" /><ExcludeApp ID="Word" /></Product></Add><Display Level="None" AcceptEULA="TRUE" /><Property Name="AUTOACTIVATE" Value="0" /></Configuration>
+          '@ | Set-Content -Encoding utf8 odt/config.xml
+          Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
+          if (-not (Test-Path 'C:\Windows\Fonts\GOTHIC.TTF')) { throw 'Century Gothic unavailable' }
+      - name: Extract GDI native outlines for Logic AnalyZer
+        shell: pwsh
+        run: |
+          @'
+          import ctypes, json, struct
+          from pathlib import Path
+          from ctypes import wintypes
+          OUT=Path('lid_gdi_capital_z'); OUT.mkdir(exist_ok=True)
+          gdi=ctypes.WinDLL('gdi32',use_last_error=True)
+          GGO_NATIVE=2; GGO_UNHINTED=0x100; TT_POLYGON_TYPE=24; TT_PRIM_LINE=1; TT_PRIM_QSPLINE=2; TT_PRIM_CSPLINE=3
+          class FIXED(ctypes.Structure): _fields_=[('fract',wintypes.WORD),('value',ctypes.c_short)]
+          class MAT2(ctypes.Structure): _fields_=[('eM11',FIXED),('eM12',FIXED),('eM21',FIXED),('eM22',FIXED)]
+          class POINT(ctypes.Structure): _fields_=[('x',wintypes.LONG),('y',wintypes.LONG)]
+          class GLYPHMETRICS(ctypes.Structure): _fields_=[('gmBlackBoxX',wintypes.UINT),('gmBlackBoxY',wintypes.UINT),('gmptGlyphOrigin',POINT),('gmCellIncX',ctypes.c_short),('gmCellIncY',ctypes.c_short)]
+          gdi.CreateCompatibleDC.restype=wintypes.HDC
+          gdi.CreateFontW.restype=wintypes.HFONT
+          gdi.SelectObject.restype=wintypes.HGDIOBJ
+          gdi.GetGlyphOutlineW.restype=wintypes.DWORD
+          def fixed(v): return FIXED(0,v)
+          mat=MAT2(fixed(1),fixed(0),fixed(0),fixed(1))
+          def fx(data,off):
+              fract,val=struct.unpack_from('<Hh',data,off); return val+fract/65536.0
+          def pointfx(data,off): return fx(data,off),fx(data,off+4)
+          def glyph_path(data):
+              paths=[]; pos=0
+              while pos<len(data):
+                  cb,typ=struct.unpack_from('<II',data,pos); start=pointfx(data,pos+8); cur=start; cmds=[f'M {start[0]:.8f} {-start[1]:.8f}']; p=pos+16; end=pos+cb
+                  while p<end:
+                      wtype,cpfx=struct.unpack_from('<HH',data,p); pts=[pointfx(data,p+4+8*i) for i in range(cpfx)]; p+=4+8*cpfx
+                      if wtype==TT_PRIM_LINE:
+                          for q in pts: cmds.append(f'L {q[0]:.8f} {-q[1]:.8f}'); cur=q
+                      elif wtype==TT_PRIM_QSPLINE:
+                          for i,c in enumerate(pts[:-1]):
+                              q=pts[-1] if i==len(pts)-2 else ((c[0]+pts[i+1][0])/2,(c[1]+pts[i+1][1])/2)
+                              cmds.append(f'Q {c[0]:.8f} {-c[1]:.8f} {q[0]:.8f} {-q[1]:.8f}');cur=q
+                      elif wtype==TT_PRIM_CSPLINE:
+                          for i in range(0,len(pts)-2,3):
+                              a,b,q=pts[i:i+3];cmds.append(f'C {a[0]:.8f} {-a[1]:.8f} {b[0]:.8f} {-b[1]:.8f} {q[0]:.8f} {-q[1]:.8f}');cur=q
+                  cmds.append('Z');paths.append(' '.join(cmds));pos=end
+              return ' '.join(paths)
+          text='LogicAnalyZer'
+          rows=[]
+          for weight in range(500,651,5):
+            for unhinted in (False,True):
+              hdc=gdi.CreateCompatibleDC(0)
+              font=gdi.CreateFontW(-2048,0,0,0,weight,0,0,0,1,0,0,0,0,'Century Gothic')
+              old=gdi.SelectObject(hdc,font); folder=OUT/f'w{weight:03d}_{"u" if unhinted else "h"}';folder.mkdir()
+              metrics=[]
+              for i,ch in enumerate(text):
+                gm=GLYPHMETRICS(); flags=GGO_NATIVE|(GGO_UNHINTED if unhinted else 0)
+                size=gdi.GetGlyphOutlineW(hdc,ord(ch),flags,ctypes.byref(gm),0,None,ctypes.byref(mat))
+                if size==0xFFFFFFFF: raise ctypes.WinError(ctypes.get_last_error())
+                buf=(ctypes.c_ubyte*size)(); gdi.GetGlyphOutlineW(hdc,ord(ch),flags,ctypes.byref(gm),size,buf,ctypes.byref(mat))
+                path=glyph_path(bytes(buf)); svg=f'<svg xmlns="http://www.w3.org/2000/svg"><path fill="black" fill-rule="evenodd" d="{path}"/></svg>'
+                (folder/f'g{i:02d}_{ord(ch):04x}.svg').write_text(svg,encoding='utf-8')
+                metrics.append({'char':ch,'black_box':[gm.gmBlackBoxX,gm.gmBlackBoxY],'origin':[gm.gmptGlyphOrigin.x,gm.gmptGlyphOrigin.y],'advance':[gm.gmCellIncX,gm.gmCellIncY]})
+              gdi.SelectObject(hdc,old);gdi.DeleteObject(font);gdi.DeleteDC(hdc)
+              rows.append({'weight':weight,'unhinted':unhinted,'metrics':metrics})
+          (OUT/'manifest.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+          '@ | Set-Content -Encoding utf8 extract.py
+          python extract.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-lid-gdi-capital-z-outlines
+          path: lid_gdi_capital_z
+          retention-days: 1

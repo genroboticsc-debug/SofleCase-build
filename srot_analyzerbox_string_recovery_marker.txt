@@ -1,0 +1,1 @@
+Extract exact text and font metadata strings from the historical AnalyzerBox SolidWorks revisions.

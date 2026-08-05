@@ -1,0 +1,41 @@
+name: SROT Onshape Box feature recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_onshape_box_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch public native Part Studio feature data
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p recovered
+          DID='85d09ede43b764d4b2e54127'
+          WID='f09e60fc7c65904ef0845270'
+          for item in 'box:b202b4343e85b04ef52f7987' 'box_orig:3d125c0e85239facf935d056' 'logic_analyzer:77c1e0c4757f6c54272b072f'; do
+            name=${item%%:*}; eid=${item##*:}
+            base="https://cad.onshape.com/api/v10/partstudios/d/$DID/w/$WID/e/$eid"
+            curl -L --fail --retry 5 -o "recovered/${name}_features.json" "$base/features"
+            for endpoint in bodydetails massproperties; do
+              curl -L --retry 2 -sS -o "recovered/${name}_${endpoint}.json" -w '%{http_code}\n' "$base/$endpoint" > "recovered/${name}_${endpoint}.status" || true
+            done
+          done
+          python - <<'PY'
+          import json, pathlib
+          out=[]
+          for p in pathlib.Path('recovered').glob('*_features.json'):
+              d=json.loads(p.read_text())
+              out.append({'file':p.name,'bytes':p.stat().st_size,'feature_count':len(d.get('features',[])),'serializationVersion':d.get('serializationVersion'),'sourceMicroversion':d.get('sourceMicroversion')})
+          pathlib.Path('recovered/summary.json').write_text(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: srot-onshape-box-features
+          path: recovered
+          retention-days: 1

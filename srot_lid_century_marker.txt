@@ -1,0 +1,1 @@
+Extract exact Windows GDI Century Gothic glyph outlines for local lid fit — run 4.

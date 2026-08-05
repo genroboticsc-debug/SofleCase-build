@@ -1,0 +1,62 @@
+name: SROT lid geometric-font candidates
+on:
+  pull_request:
+    paths:
+      - 'srot_lid_geometric_fonts_marker.txt'
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Microsoft 365 font resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force odt | Out-Null
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile 'odt/setup.exe'
+          @'
+          <Configuration><Add OfficeClientEdition="64" Channel="Current"><Product ID="O365ProPlusRetail"><Language ID="en-us" /><ExcludeApp ID="Access" /><ExcludeApp ID="Excel" /><ExcludeApp ID="Groove" /><ExcludeApp ID="Lync" /><ExcludeApp ID="OneDrive" /><ExcludeApp ID="OneNote" /><ExcludeApp ID="Outlook" /><ExcludeApp ID="Publisher" /><ExcludeApp ID="Teams" /><ExcludeApp ID="Word" /></Product></Add><Display Level="None" AcceptEULA="TRUE" /><Property Name="AUTOACTIVATE" Value="0" /></Configuration>
+          '@ | Set-Content -Encoding utf8 odt/config.xml
+          Start-Process -FilePath "$PWD/odt/setup.exe" -ArgumentList '/configure', "$PWD/odt/config.xml" -Wait -NoNewWindow
+          New-Item -ItemType Directory -Force output | Out-Null
+          $reg='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+          (Get-ItemProperty $reg).PSObject.Properties | Where-Object { $_.Name -match 'Tw Cen|Century Gothic|Futura|Avant|Avenir|Gill Sans|Eras|Gothic|Bauhaus|Eurostile' } | ForEach-Object { "$($_.Name)`t$($_.Value)" } | Set-Content output/font_registry.tsv
+          Get-Content output/font_registry.tsv
+      - name: Install CAD runtime
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build123d==0.11.1
+      - name: Generate exact installed-font candidates
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from build123d import Align, FontStyle, Text, export_stl, extrude
+          out=Path('output'); rows=[]
+          for line in (out/'font_registry.tsv').read_text(errors='ignore').splitlines():
+              if '\t' not in line: continue
+              display,filename=line.split('\t',1)
+              filename=filename.strip(); path=Path(r'C:\Windows\Fonts')/filename
+              if not path.exists() or path.suffix.lower() not in ('.ttf','.otf','.ttc'): continue
+              key=''.join(c if c.isalnum() else '_' for c in display)[:80]
+              try:
+                  face=Text('Logic AnalyZer',10.0,font_path=str(path),font_style=FontStyle.REGULAR,align=(Align.MIN,Align.MIN))
+                  solid=extrude(face,1.0); name=f'{key}.stl'
+                  export_stl(solid,out/name,tolerance=0.002,angular_tolerance=0.04)
+                  bb=solid.bounding_box(); rows.append(f'{name},{display},{filename},{solid.volume:.12f},{bb.size.X:.12f},{bb.size.Y:.12f}')
+              except Exception as exc:
+                  rows.append(f'ERROR,{display},{filename},0,0,0,{type(exc).__name__}')
+          (out/'inventory.csv').write_text('file,display,filename,volume,width,height\n'+'\n'.join(rows)+'\n',encoding='utf-8')
+          '@ | Set-Content -Encoding utf8 generate.py
+          python generate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-lid-geometric-font-candidates
+          path: output
+          retention-days: 1

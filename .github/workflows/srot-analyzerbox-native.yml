@@ -1,0 +1,48 @@
+name: SROT AnalyzerBox native recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_analyzerbox_native_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Recover historical AnalyzerBox SolidWorks source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p native decoded
+          git clone https://github.com/gusmanb/logicanalyzer.git public_repo
+          cd public_repo
+          commits=$(git log --all --format='%H' -- 'Enclosure/AnalyzerBox.SLDPRT')
+          test -n "$commits"
+          printf '%s\n' "$commits" > ../native/commits.txt
+          n=0
+          while read -r c; do
+            n=$((n+1))
+            git show "$c:Enclosure/AnalyzerBox.SLDPRT" > "../native/AnalyzerBox_${n}_${c}.SLDPRT"
+          done <<< "$commits"
+          cd ..
+          sha256sum native/*.SLDPRT > native/SHA256SUMS.txt
+      - name: Decode every native revision to typed feature IR
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for f in native/*.SLDPRT; do
+            b=$(basename "$f" .SLDPRT)
+            cargo run --release --manifest-path cadmpeg/Cargo.toml -p cadmpeg-codec-sldprt --example dump_ir -- "$f" "decoded/${b}_IR.json" "decoded/${b}_report.txt" > "decoded/${b}_stdout.txt" 2> "decoded/${b}_stderr.txt" || echo $? > "decoded/${b}_exit_code.txt"
+          done
+          sha256sum decoded/* > decoded/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: srot-analyzerbox-native-ir
+          path: |
+            native/commits.txt
+            native/SHA256SUMS.txt
+            decoded
+          retention-days: 1

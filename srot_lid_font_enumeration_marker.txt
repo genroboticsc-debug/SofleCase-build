@@ -1,0 +1,1 @@
+Enumerate normalized geometry for every installed Windows/Office font to identify the exact lid text face.

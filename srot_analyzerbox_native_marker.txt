@@ -1,0 +1,1 @@
+Recover and decode every historical Enclosure/AnalyzerBox.SLDPRT revision.

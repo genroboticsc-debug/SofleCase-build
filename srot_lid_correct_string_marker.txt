@@ -1,0 +1,1 @@
+Generate exact Century Gothic lid text candidates with unique case-safe filenames — retry 2.

@@ -1,0 +1,23 @@
+name: SROT Adventor font recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_adventor_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download CTAN TeX Gyre Adventor OTF files
+        run: |
+          set -euxo pipefail
+          mkdir -p recovered
+          curl -L --fail --retry 5 -o recovered/texgyreadventor-regular.otf 'https://tug.ctan.org/fonts/tex-gyre/opentype/texgyreadventor-regular.otf'
+          curl -L --fail --retry 5 -o recovered/texgyreadventor-bold.otf 'https://tug.ctan.org/fonts/tex-gyre/opentype/texgyreadventor-bold.otf'
+          sha256sum recovered/* > recovered/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-adventor-fonts
+          path: recovered
+          retention-days: 1

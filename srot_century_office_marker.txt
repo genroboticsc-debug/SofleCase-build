@@ -1,0 +1,1 @@
+Install official Office font resources and generate Century Gothic Bold engraving geometry only.

@@ -1,0 +1,1 @@
+Extract exact Century Gothic GDI outlines for the recovered Logic AnalyZer sketch text.

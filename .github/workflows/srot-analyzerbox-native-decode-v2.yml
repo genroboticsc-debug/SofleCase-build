@@ -1,0 +1,72 @@
+name: SROT AnalyzerBox native decode v2
+on:
+  pull_request:
+    paths:
+      - 'srot_analyzerbox_native_decode_v2_marker.txt'
+permissions:
+  contents: read
+jobs:
+  decode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Recover historical native sources
+        run: |
+          set -euxo pipefail
+          mkdir -p native decoded
+          git clone https://github.com/gusmanb/logicanalyzer.git public_repo
+          cd public_repo
+          commits=$(git log --all --format='%H' -- 'Enclosure/AnalyzerBox.SLDPRT')
+          test -n "$commits"
+          n=0
+          while read -r c; do
+            n=$((n+1))
+            git show "$c:Enclosure/AnalyzerBox.SLDPRT" > "../native/AnalyzerBox_${n}_${c}.SLDPRT"
+          done <<< "$commits"
+          cd ..
+          sha256sum native/* > decoded/native_sha256.txt
+      - name: Build clean-room cadmpeg decoder
+        run: |
+          set -euxo pipefail
+          mkdir -p decoder/src
+          cat > decoder/Cargo.toml <<'EOF'
+          [package]
+          name = "decode_analyzerbox"
+          version = "0.1.0"
+          edition = "2021"
+          [dependencies]
+          cadmpeg-codec-sldprt = "0.3.0"
+          cadmpeg-ir = "0.3.0"
+          EOF
+          cat > decoder/src/main.rs <<'EOF'
+          use std::{env,fs::File,path::Path};
+          use cadmpeg_codec_sldprt::SldprtCodec;
+          use cadmpeg_ir::{CodecEntry,DecodeOptions};
+          fn main() -> Result<(),Box<dyn std::error::Error>> {
+              let args:Vec<String>=env::args().collect();
+              let input=&args[1]; let output=&args[2];
+              let mut file=File::open(input)?;
+              let decoded=SldprtCodec.decode(&mut file,&DecodeOptions::default())?;
+              let text=decoded.ir.to_canonical_json()?;
+              std::fs::write(output,text)?;
+              std::fs::write(Path::new(output).with_extension("report.txt"),format!("{:#?}",decoded.report))?;
+              Ok(())
+          }
+          EOF
+          cargo build --release --manifest-path decoder/Cargo.toml
+      - name: Decode exact native revisions
+        run: |
+          set -euxo pipefail
+          for f in native/*.SLDPRT; do
+            n=$(basename "$f" .SLDPRT)
+            decoder/target/release/decode_analyzerbox "$f" "decoded/${n}.json" || true
+          done
+          grep -RniaE 'font|text|Logic|Analyzer|sketch|extrude|cut|fillet|draft|dimension|feature|Resolved' decoded > decoded/feature_strings.txt || true
+          wc -c decoded/*
+          sed -n '1,400p' decoded/feature_strings.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: srot-analyzerbox-native-decoded-v2
+          path: decoded
+          retention-days: 1

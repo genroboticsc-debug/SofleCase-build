@@ -1,0 +1,24 @@
+name: SROT font analysis bundle
+on:
+  pull_request:
+    paths:
+      - 'srot_font_analysis_marker.txt'
+permissions:
+  contents: read
+jobs:
+  fonts:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download analysis-only fonts
+        run: |
+          mkdir -p fonts
+          curl -L --fail -o 'fonts/Comic Sans MS Bold.ttf' 'https://raw.githubusercontent.com/justrajdeep/fonts/master/Comic%20Sans%20MS%20Bold.ttf'
+          curl -L --fail -o 'fonts/Comic Sans MS.ttf' 'https://raw.githubusercontent.com/justrajdeep/fonts/master/Comic%20Sans%20MS.ttf'
+          curl -L --fail -o 'fonts/Arial.ttf' 'https://raw.githubusercontent.com/justrajdeep/fonts/master/Arial.ttf'
+          curl -L --fail -o 'fonts/Arial Bold.ttf' 'https://raw.githubusercontent.com/justrajdeep/fonts/master/Arial%20Bold.ttf'
+          sha256sum fonts/* > fonts/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-font-analysis-only
+          path: fonts
+          retention-days: 1

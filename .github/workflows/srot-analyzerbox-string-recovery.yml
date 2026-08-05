@@ -1,0 +1,37 @@
+name: SROT AnalyzerBox exact string recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_analyzerbox_string_recovery_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Recover native historical strings
+        run: |
+          set -euxo pipefail
+          mkdir -p recovered repo
+          git clone https://github.com/gusmanb/logicanalyzer.git repo
+          cd repo
+          commits=$(git log --all --format='%H' -- 'Enclosure/AnalyzerBox.SLDPRT')
+          n=0
+          while read -r c; do
+            n=$((n+1)); git show "$c:Enclosure/AnalyzerBox.SLDPRT" > "../recovered/rev${n}_${c}.SLDPRT"
+          done <<< "$commits"
+          cd ..
+          for f in recovered/*.SLDPRT; do
+            b=${f%.SLDPRT}
+            strings -a -n 3 "$f" > "${b}_ascii_strings.txt" || true
+            strings -a -e l -n 3 "$f" > "${b}_utf16le_strings.txt" || true
+            strings -a -e b -n 3 "$f" > "${b}_utf16be_strings.txt" || true
+          done
+          grep -RniE 'Logic|Analy|font|Gothic|Arial|Futura|Century|Tw Cen|Avant|Segoe|Calibri|Tahoma|Verdana|Trebuchet|Helvetica|Impact|Gill|Bauhaus|Eurostile|size|height|bold|italic' recovered/*.txt > recovered/relevant_strings.txt || true
+          sed -n '1,1000p' recovered/relevant_strings.txt
+          rm -f recovered/*.SLDPRT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-analyzerbox-exact-strings
+          path: recovered
+          retention-days: 1

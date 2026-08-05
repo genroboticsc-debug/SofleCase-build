@@ -1,0 +1,30 @@
+name: SROT exact Windows core-font recovery
+on:
+  pull_request:
+    paths:
+      - 'srot_mscorefonts_marker.txt'
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install extractor
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cabextract
+      - name: Download and extract exact system fonts
+        run: |
+          set -euxo pipefail
+          mkdir -p recovered
+          curl -L --fail --retry 5 -o comic32.exe 'https://downloads.sourceforge.net/corefonts/comic32.exe'
+          curl -L --fail --retry 5 -o arial32.exe 'https://downloads.sourceforge.net/corefonts/arial32.exe'
+          cabextract -q -d recovered comic32.exe
+          cabextract -q -d recovered arial32.exe
+          find recovered -maxdepth 1 -type f -printf '%f\n' | sort > recovered/INVENTORY.txt
+          sha256sum recovered/* > recovered/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srot-exact-windows-core-fonts
+          path: recovered
+          retention-days: 1

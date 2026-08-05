@@ -1,0 +1,1 @@
+Generate exact normalized logicAnalyzer cutout candidates for the lid.
