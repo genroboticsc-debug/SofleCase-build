@@ -1,0 +1,30 @@
+name: Dilemma build123d dependency relay
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-build123d-deps-relay.yml
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download Build123d runtime dependencies
+        run: |
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --dest wheelhouse build123d==0.11.1
+          rm -f wheelhouse/build123d-* wheelhouse/cadquery_ocp_* wheelhouse/numpy-* wheelhouse/scipy-* wheelhouse/scikit_learn-*
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-build123d-runtime-deps
+          path: wheelhouse/
+          retention-days: 3

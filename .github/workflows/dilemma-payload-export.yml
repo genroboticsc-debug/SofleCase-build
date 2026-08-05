@@ -1,0 +1,44 @@
+name: Dilemma revised source payload export
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - dilemma-fast/scripts/**
+      - .github/workflows/dilemma-payload-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and verify revised standalone scripts
+        shell: bash
+        run: |
+          set -u
+          mkdir -p exported/raw exported/decoded
+          cp dilemma-fast/scripts/*.py.xz.b64 exported/raw/
+          : > exported/decode_status.txt
+          for payload in dilemma-fast/scripts/*.py.xz.b64; do
+            name="$(basename "$payload" .xz.b64)"
+            if base64 --decode "$payload" | xz --decompress > "exported/decoded/$name"; then
+              python -m py_compile "exported/decoded/$name"
+              sha256sum "$payload" "exported/decoded/$name" >> exported/decode_status.txt
+              echo "$name OK" >> exported/decode_status.txt
+            else
+              rm -f "exported/decoded/$name"
+              sha256sum "$payload" >> exported/decode_status.txt
+              echo "$name CORRUPT" >> exported/decode_status.txt
+            fi
+          done
+          cat exported/decode_status.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dilemma-revised-source-payloads
+          path: exported/
+          if-no-files-found: error
+          retention-days: 3

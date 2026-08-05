@@ -1,0 +1,27 @@
+name: Dilemma networkx relay
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-networkx-relay.yml
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse networkx==3.5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-networkx-runtime
+          path: wheelhouse/
+          retention-days: 3

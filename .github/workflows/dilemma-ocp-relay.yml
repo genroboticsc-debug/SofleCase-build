@@ -1,0 +1,29 @@
+name: Dilemma OCP runtime relay
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/dilemma-ocp-relay.yml
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact OCP runtime wheels
+        run: |
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse cadquery-ocp-novtk==7.9.3.1.1 cadquery-ocp-proxy==7.9.3.1.1
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-ocp-runtime
+          path: wheelhouse/
+          retention-days: 3
