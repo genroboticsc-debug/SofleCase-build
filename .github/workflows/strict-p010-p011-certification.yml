@@ -32,12 +32,12 @@ jobs:
           curl --fail --location --retry 3 -o 'reference/Dilemma Case Integrated Tenting Puck.STEP' 'https://raw.githubusercontent.com/Bastardkb/Dilemma/f5cffb4821fe560b095418b71382ac7d8043c61a/mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma%20Case%20Integrated%20Tenting%20Puck.STEP'
           curl --fail --location --retry 3 -o 'reference/Dilemma Case Tenting Puck Opening.STEP' 'https://raw.githubusercontent.com/Bastardkb/Dilemma/f5cffb4821fe560b095418b71382ac7d8043c61a/mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma%20Case%20Tenting%20Puck%20Opening.STEP'
           sha256sum reference/*.STEP
-      - name: Fresh clean Build123d generation
+      - name: Fresh clean exact Build123d generation
         working-directory: strict_puck
-        run: python production.py --output-dir generated
-      - name: Strict SROT and native two-direction BRep validation
+        run: python exact_build.py --output-dir generated
+      - name: Strict SROT source-closure and native two-direction BRep validation
         working-directory: strict_puck
-        run: python certify.py
+        run: python certify_v2.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
