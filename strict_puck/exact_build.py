@@ -5,8 +5,10 @@ from pathlib import Path
 
 from build123d import Compound, Face, ShapeList, Solid
 
+import exact_domain_patch
 import exact_feature_patch
 import exact_floor_patch
+import exact_mount_patch
 import production
 
 
@@ -67,6 +69,8 @@ def main() -> int:
     install_boolean_compatibility_adapters()
     exact_feature_patch.install()
     exact_floor_patch.install()
+    exact_mount_patch.install()
+    exact_domain_patch.install()
     production.export_both(args.output_dir)
     return 0
 
