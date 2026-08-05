@@ -1,4 +1,4 @@
-name: Immutable top individual mounting-bore radius subsets
+name: Immutable top mounting-bore coordinate descent
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
       - tmp_top_validation/validate_direct_final_solid.py
-      - tmp_top_validation/run_individual_mount_bore_radius_subsets.py
+      - tmp_top_validation/run_mount_bore_coordinate_descent.py
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - name: Check out immutable recovered source commit
         uses: actions/checkout@v4
@@ -23,13 +23,13 @@ jobs:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen direct validator and individual bore sweep
+      - name: Inject frozen direct validator and coordinate descent
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
           git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
-          git show FETCH_HEAD:tmp_top_validation/run_individual_mount_bore_radius_subsets.py > tmp_top_validation/run_individual_mount_bore_radius_subsets.py
+          git show FETCH_HEAD:tmp_top_validation/run_mount_bore_coordinate_descent.py > tmp_top_validation/run_mount_bore_coordinate_descent.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -82,24 +82,24 @@ jobs:
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
             tmp_top_validation/validate_direct_final_solid.py \
-            tmp_top_validation/run_individual_mount_bore_radius_subsets.py
+            tmp_top_validation/run_mount_bore_coordinate_descent.py
           python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Run individual mounting-bore subset matrix
+      - name: Run independent mounting-bore radius descent
         shell: bash
         run: |
           set -o pipefail
-          rm -rf tmp_top_validation/generated/individual_mount_bore_radius_subsets
-          python tmp_top_validation/run_individual_mount_bore_radius_subsets.py 2>&1 | tee tmp_top_validation/individual_mount_bore_radius_subsets.log
+          rm -rf tmp_top_validation/generated/mount_bore_coordinate_descent
+          python tmp_top_validation/run_mount_bore_coordinate_descent.py 2>&1 | tee tmp_top_validation/mount_bore_coordinate_descent.log
 
-      - name: Upload individual bore-radius evidence
+      - name: Upload coordinate-descent evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-individual-mount-bore-radius-${{ github.run_id }}
+          name: immutable-top-mount-bore-coordinate-descent-${{ github.run_id }}
           path: |
-            tmp_top_validation/generated/individual_mount_bore_radius_subsets/**
-            tmp_top_validation/individual_mount_bore_radius_subsets.log
+            tmp_top_validation/generated/mount_bore_coordinate_descent/**
+            tmp_top_validation/mount_bore_coordinate_descent.log
             tmp_top_validation/strict_srot_report.json
           if-no-files-found: warn
