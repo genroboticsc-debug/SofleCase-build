@@ -37,7 +37,7 @@ jobs:
         run: python exact_build.py --output-dir generated
       - name: Strict SROT source-closure and native two-direction BRep validation
         working-directory: strict_puck
-        run: python certify_v2.py
+        run: python certify_v3.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
