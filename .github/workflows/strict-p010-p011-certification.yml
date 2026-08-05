@@ -58,6 +58,7 @@ jobs:
         with:
           name: strict-p010-p011-certification
           path: |
+            strict_puck/*.py
             strict_puck/reports/
             strict_puck/generated/
             strict_puck/runtime_wheels/
