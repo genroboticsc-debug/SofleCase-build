@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import trimesh
@@ -40,6 +39,18 @@ rmg = as_mesh(
 )
 
 
+def physical_volume(mesh: trimesh.Trimesh) -> float:
+    """Return summed absolute component volume for a possibly touching shell set."""
+    if mesh is None or len(mesh.faces) == 0:
+        return 0.0
+    try:
+        components = list(mesh.split(only_watertight=False))
+    except Exception:
+        components = [mesh]
+    volumes = [abs(float(component.volume)) for component in components if len(component.faces)]
+    return float(sum(volumes))
+
+
 def clipped_volume(mesh: trimesh.Trimesh, lower, upper, label: str) -> float:
     lower = np.asarray(lower, dtype=float)
     upper = np.asarray(upper, dtype=float)
@@ -47,17 +58,27 @@ def clipped_volume(mesh: trimesh.Trimesh, lower, upper, label: str) -> float:
         extents=upper - lower,
         transform=trimesh.transformations.translation_matrix((upper + lower) / 2.0),
     )
+    # The Boolean residual is a valid collection of closed shells, but several
+    # shells touch at zero-area seams. Skip Trimesh's single-volume precheck and
+    # let Manifold perform the exact clipping; validate the returned components.
     clipped = trimesh.boolean.intersection(
         [mesh, box],
         engine="manifold",
-        check_volume=True,
+        check_volume=False,
     )
     if clipped is None:
         return 0.0
-    clipped = as_mesh(clipped, label)
-    if len(clipped.faces) == 0:
-        return 0.0
-    return float(abs(clipped.volume))
+    if isinstance(clipped, trimesh.Scene):
+        clipped = clipped.to_mesh()
+    clipped = trimesh.Trimesh(
+        vertices=np.asarray(clipped.vertices, dtype=float),
+        faces=np.asarray(clipped.faces, dtype=np.int64),
+        process=True,
+        validate=False,
+    )
+    volume = physical_volume(clipped)
+    print(json.dumps({"clip": label, "volume_mm3": volume}), flush=True)
+    return volume
 
 
 def partition(mesh: trimesh.Trimesh, direction: str) -> dict:
@@ -102,12 +123,13 @@ def partition(mesh: trimesh.Trimesh, direction: str) -> dict:
         "main_opening_right_half": ([-4.78930378, 60.9, -32.3], [16.8, 67.3, 11.0]),
         "top_fillet_full": ([-26.4, 65.19, -34.8], [17.8, 67.3, 15.0]),
     }
-    features = {}
-    for name, (lower, upper) in feature_boxes.items():
-        features[name] = clipped_volume(mesh, lower, upper, f"{direction} {name}")
+    features = {
+        name: clipped_volume(mesh, lower, upper, f"{direction} {name}")
+        for name, (lower, upper) in feature_boxes.items()
+    }
 
     return {
-        "total_volume_mm3": float(abs(mesh.volume)),
+        "total_volume_mm3": physical_volume(mesh),
         "y_slabs": y_slabs,
         "y_slab_sum_mm3": float(sum(item["volume_mm3"] for item in y_slabs)),
         "xz_cells": xz_cells,
