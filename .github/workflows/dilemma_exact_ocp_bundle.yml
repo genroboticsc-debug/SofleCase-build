@@ -1,0 +1,35 @@
+name: Dilemma exact OCP bundle
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  ocp-wheel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download and verify exact OCP runtime wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir wheelhouse
+          python -m pip download --no-deps --only-binary=:all: --dest wheelhouse \
+            cadquery-ocp==7.9.3.1.1 \
+            cadquery-ocp-proxy==7.9.3.1.1 \
+            vtk==9.6.2
+          wheel="wheelhouse/cadquery_ocp-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl"
+          test -f "$wheel"
+          echo "0e70ab790910b6d81080a6d0df26a0cd0f1fd08984c447585c74be9b6d58c6c8  $wheel" | sha256sum -c -
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS_OCP_RUNTIME.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-cadquery-ocp-runtime-7.9.3.1.1-cp313-linux-x86_64
+          path: wheelhouse/
+          retention-days: 1

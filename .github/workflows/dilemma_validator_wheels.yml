@@ -1,0 +1,31 @@
+name: Dilemma validator wheels
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  validator-wheels:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact validator wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir wheelhouse
+          python -m pip download --no-deps --only-binary=:all: --dest wheelhouse \
+            trimesh==4.11.1 \
+            shapely==2.1.2
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS_VALIDATOR.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-python313-validator-wheels
+          path: wheelhouse/
+          retention-days: 1

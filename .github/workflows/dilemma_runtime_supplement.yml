@@ -1,0 +1,32 @@
+name: Dilemma runtime supplement
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  supplemental-wheels:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact supplemental runtime wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir wheelhouse
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            svgelements==1.9.6 \
+            webcolors==24.8.0 \
+            matplotlib==3.10.5
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS_SUPPLEMENT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-python313-runtime-supplement
+          path: wheelhouse/
+          retention-days: 1

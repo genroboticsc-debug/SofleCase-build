@@ -1,0 +1,5 @@
+Trigger exact Python 3.13 SROT wheelhouse recovery for the Dilemma reverse-engineering checkpoint.
+Required primary packages: build123d 0.11.1, cadquery-ocp 7.9.3.1.1, manifold3d 3.5.2.
+Required OCP runtime dependencies: cadquery-ocp-proxy 7.9.3.1.1 and vtk 9.6.2.
+No CAD geometry changes are included in this branch.
+Trigger sequence: 3.
