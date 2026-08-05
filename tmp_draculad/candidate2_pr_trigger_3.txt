@@ -1,0 +1,1 @@
+Frozen trigger state for exact corrected Kailh solder candidate validation.
