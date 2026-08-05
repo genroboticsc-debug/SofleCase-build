@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -17,11 +17,14 @@ jobs:
     steps:
       - name: Checkout isolated build branch
         uses: actions/checkout@v4
+        with:
+          ref: careerpilot-apk-build-20260805
 
       - name: Restore and verify CareerPilot source
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf careerpilot
           cat .careerpilot-build/source.xz.b64.part* > /tmp/source.b64
           base64 --decode /tmp/source.b64 > /tmp/source.tar.xz
           echo "2f07e23c03398e68f05513b7708bb67149c7d67f5063cf0328bf3b0c01d7dfc4  /tmp/source.tar.xz" | sha256sum --check
@@ -52,14 +55,22 @@ jobs:
           gradle-version: '8.13'
 
       - name: Build latest debug APK
+        id: build_apk
+        continue-on-error: true
         working-directory: careerpilot
         shell: bash
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee /tmp/careerpilot-gradle.log
 
       - name: Verify and package APK
+        id: package_apk
+        if: steps.build_apk.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf artifact
           mkdir -p artifact
           cp careerpilot/app/build/outputs/apk/debug/app-debug.apk artifact/CareerPilotAI-Pro-3.0.0-debug.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose artifact/CareerPilotAI-Pro-3.0.0-debug.apk
@@ -67,9 +78,42 @@ jobs:
           unzip -t artifact/CareerPilotAI-Pro-3.0.0-debug.apk
 
       - name: Upload verified APK
+        id: upload_apk
+        if: steps.package_apk.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: CareerPilotAI-Pro-3.0.0-debug
           path: artifact/*
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish CI run locator and diagnostic tail
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .careerpilot-build-result
+          cat > .careerpilot-build-result/status.txt <<EOF
+          run_id=${GITHUB_RUN_ID}
+          run_attempt=${GITHUB_RUN_ATTEMPT}
+          workflow_sha=${GITHUB_SHA}
+          build_outcome=${{ steps.build_apk.outcome }}
+          package_outcome=${{ steps.package_apk.outcome }}
+          upload_outcome=${{ steps.upload_apk.outcome }}
+          EOF
+          if [ -f /tmp/careerpilot-gradle.log ]; then
+            tail -n 500 /tmp/careerpilot-gradle.log > .careerpilot-build-result/gradle-tail.log
+          else
+            printf 'Gradle did not start; inspect setup steps for the failure.\n' > .careerpilot-build-result/gradle-tail.log
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .careerpilot-build-result/status.txt .careerpilot-build-result/gradle-tail.log
+          git commit -m "Record CareerPilot APK build ${GITHUB_RUN_ID}" || true
+          git push origin HEAD:careerpilot-apk-build-20260805
+
+      - name: Fail workflow when APK was not verified and uploaded
+        if: always() && (steps.build_apk.outcome != 'success' || steps.package_apk.outcome != 'success' || steps.upload_apk.outcome != 'success')
+        shell: bash
+        run: exit 1
