@@ -1,0 +1,130 @@
+name: CareerPilot Pro 2 Android APK
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reconstruct and verify CareerPilot Pro 2 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > expected-chunks.sha256 <<'HASHES'
+          ada4e3471500fdf1377bcad742b33b73b4513eabae45376fa0dcb356deb47522  careerpilot_build/pro_v2/chunks/part00
+          1439bcf8efb6845ca710a52045bb584992b4ebdab952609cea4424218bd15135  careerpilot_build/pro_v2/chunks/part01
+          f6326a4b6ba49c2b2355cc1a4c860b2f69572d5eba12e9f5f3a9d63443116d3b  careerpilot_build/pro_v2/chunks/part02
+          7339b06259515a48eade79b0636fb2f3e76826353a5dd09468543f7fd25889f5  careerpilot_build/pro_v2/chunks/part03
+          aa0021b1fc8a848b0d4de40c9c4277167c41b046431cf4dc97c1d4c3fa90d67c  careerpilot_build/pro_v2/chunks/part04
+          b6142ef0854495f6654a257bad4924bf760332b24d11017eeb4e6778d3acfcb2  careerpilot_build/pro_v2/chunks/part05
+          43a04febef37e689e9d31a3bd5d0d05a2d2ee303caded136a7b08eeb71294bb7  careerpilot_build/pro_v2/chunks/part06
+          a8023de2a08ddaa94ab9e5f413a106ecbbb17ec8d1db4cc89f59c8274de1145a  careerpilot_build/pro_v2/chunks/part07
+          4a25cdd0bd6ccb49f1d2b61ea3d281d4f7a659d59f8d13d6ce7497e6fe4fd6bb  careerpilot_build/pro_v2/chunks/part08
+          38d4c013d9234ca8b64e77157575ddfcd8b76e1d84ab28db7aa17437dfd6de00  careerpilot_build/pro_v2/chunks/part09
+          1068141110c0faf7ba414d6d67168b174ee40d2bb0310e60ce4a4dbf52b039bf  careerpilot_build/pro_v2/chunks/part10
+          06eb8673c43b379541dddd99cd9f29c9d51332451d27f0c656a9618a81dafbd2  careerpilot_build/pro_v2/chunks/part11
+          b7d13a34ccfec1235cf92ae25f856dee9213082ae588bc3168318864bc7c8d7f  careerpilot_build/pro_v2/chunks/part12
+          ffbe0161e9b1a7defd3618f3cbe1a817c0083ac4c8b4c8a4e1f13c95d8853311  careerpilot_build/pro_v2/chunks/part13
+          bf2a3fe3cc3c140b13773d93186e2da102a88d692a64ebac412360421f4961b7  careerpilot_build/pro_v2/chunks/part14
+          6832acae01e5eabff735bcc5e645269de52dc7703fa21f657f03cfaae2178995  careerpilot_build/pro_v2/chunks/part15
+          b9aacc213ee7929a344af29f69d59dcaaf42732c1eb66431288d4f9712097cf1  careerpilot_build/pro_v2/chunks/part16
+          7a845e32cbd4e7fea39f77eedb00c9f4d19977c7f8cfcf1330e8fe4b7a4617a7  careerpilot_build/pro_v2/chunks/part17
+          a6000a08380de55b861f4015f8f5d95e7644349b6eb4d12aada808adef8e9db9  careerpilot_build/pro_v2/chunks/part18
+          c2a119ad37d8075ae5030538adbe97e6ece1e9f9e3ae982217a86b29a2d93678  careerpilot_build/pro_v2/chunks/part19
+          70e4726f84340793d37f626e7c98929135776fee3d962f95c4adfe75f01c34b9  careerpilot_build/pro_v2/chunks/part20
+          a4d5a125fb5bc8423bb6663bc00bdc63ca7fa982383d8d96f06d318c76baff2b  careerpilot_build/pro_v2/chunks/part21
+          d181c59baafdb0e773ba0d5aa72e614d9278bf39b314ea541590602385cc2300  careerpilot_build/pro_v2/chunks/part22
+          f3a5f24b0d104fefb84303fd8df059be4f10fd446b3efe228ebe8fad8ac406ce  careerpilot_build/pro_v2/chunks/part23
+          HASHES
+          sha256sum -c expected-chunks.sha256 | tee careerpilot-pro-2-build.log
+          SOURCE="CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > "$SOURCE"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c - | tee -a careerpilot-pro-2-build.log
+          mkdir -p build-src
+          tar -xJf "$SOURCE" -C build-src
+          test -f build-src/CareerPilotAI/settings.gradle.kts
+          test -f build-src/CareerPilotAI/app/build.gradle.kts
+
+      - name: Build, test and package APK
+        working-directory: build-src/CareerPilotAI
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-2-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify APK signature and package metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro-2.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI-Pro-2.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI-Pro-2.apk
+          } | tee CareerPilotAI-Pro-2.validation.txt | tee -a careerpilot-pro-2-build.log
+          sha256sum CareerPilotAI-Pro-2.apk > CareerPilotAI-Pro-2.apk.sha256
+          unzip -t CareerPilotAI-Pro-2.apk | tail -n 2 | tee -a CareerPilotAI-Pro-2.validation.txt
+
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2-build-diagnostics
+          path: careerpilot-pro-2-build.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Upload installable APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2-Android-APK
+          path: |
+            CareerPilotAI-Pro-2.apk
+            CareerPilotAI-Pro-2.apk.sha256
+            CareerPilotAI-Pro-2.validation.txt
+          if-no-files-found: error
+          retention-days: 1

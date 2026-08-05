@@ -1,0 +1,89 @@
+name: CareerPilot Pro 2.2 Source Package
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified baseline and apply exact 2.2 patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SOURCE="CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > "$SOURCE"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c -
+          mkdir -p build-src
+          tar -xJf "$SOURCE" -C build-src
+          python careerpilot_build/pro_v2/apply_compiler_fixes.py
+          python careerpilot_build/pro_v2/apply_compiler_fixes_2.py
+
+          cat > expected-v22-chunks.sha256 <<'HASHES'
+          815471a48bae55e023550653aa50a1bf8d29710eafde3fc02d448972d4944aa0  careerpilot_build/pro_v22_patch/part00.b64
+          c23e51b667b5973700628c03c6392f760e519d0c39794b0019c75c60e777f498  careerpilot_build/pro_v22_patch/part01.b64
+          d30817c723ccc997ce335b69cab33387188c533b82e43bd7378d944ba514aa31  careerpilot_build/pro_v22_patch/part02.b64
+          492a5d089fa3501c2907045825eed5020780d7bdc277b3485f94f73f2013c7ae  careerpilot_build/pro_v22_patch/part03.b64
+          8fe06c95d81899a411461c8275b400f103ff4bb0c7b785237ecd90d617dde3cd  careerpilot_build/pro_v22_patch/part04.b64
+          HASHES
+          sha256sum -c expected-v22-chunks.sha256
+          cat careerpilot_build/pro_v22_patch/part{00..04}.b64 > careerpilot-22.patch.xz.b64
+          echo "a96b940b66a7bfb30a1447eb8d60acf149d2978d1f92dac086f4ecc0655c2811  careerpilot-22.patch.xz.b64" | sha256sum -c -
+          base64 -d careerpilot-22.patch.xz.b64 > careerpilot-22.patch.xz
+          echo "0eac18187e9688ad8979c0db32f5e09382332214f87f186b0d404400a1c58320  careerpilot-22.patch.xz" | sha256sum -c -
+          xz -dc careerpilot-22.patch.xz > careerpilot-22.patch
+          echo "f3e4a974ce1731ab7f9227bcf7c1f0a37cb0c678ad88f25f3d0783b5a04f13f4  careerpilot-22.patch" | sha256sum -c -
+          cd build-src/CareerPilotAI
+          patch -p4 --forward --batch < "$GITHUB_WORKSPACE/careerpilot-22.patch"
+
+          grep -q 'versionName = "2.2.0-beta"' app/build.gradle.kts
+          grep -q 'versionCode = 22' app/build.gradle.kts
+          grep -q 'AccountAccess' app/src/main/java/com/careerpilot/ai/ai/AiModels.kt
+          grep -q 'InternetToolbox' app/src/main/java/com/careerpilot/ai/tools/InternetToolbox.kt
+          grep -q 'RemotiveSearchConnector' app/src/main/java/com/careerpilot/ai/discovery/JobDiscovery.kt
+
+      - name: Create clean source archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd build-src/CareerPilotAI
+          rm -rf .gradle .idea build app/build
+          find . -name '*.iml' -delete
+          rm -f local.properties
+          cat > SOURCE_BUILD_INFO.txt <<INFO
+          Product: CareerPilot AI Pro
+          Version: 2.2.0-beta
+          Version code: 22
+          Package: com.careerpilot.ai
+          Baseline SHA-256: 8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24
+          2.2 patch SHA-256: f3e4a974ce1731ab7f9227bcf7c1f0a37cb0c678ad88f25f3d0783b5a04f13f4
+          Packaging commit: $GITHUB_SHA
+          INFO
+          zip -qr "$GITHUB_WORKSPACE/CareerPilotAI-Pro-2.2-Source.zip" .
+          cd "$GITHUB_WORKSPACE"
+          sha256sum CareerPilotAI-Pro-2.2-Source.zip > CareerPilotAI-Pro-2.2-Source.zip.sha256
+          unzip -t CareerPilotAI-Pro-2.2-Source.zip | tail -n 2 | tee CareerPilotAI-Pro-2.2-Source.validation.txt
+          unzip -p CareerPilotAI-Pro-2.2-Source.zip app/build.gradle.kts | grep -q 'versionName = "2.2.0-beta"'
+
+      - name: Upload source code
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.2-Source-Code
+          path: |
+            CareerPilotAI-Pro-2.2-Source.zip
+            CareerPilotAI-Pro-2.2-Source.zip.sha256
+            CareerPilotAI-Pro-2.2-Source.validation.txt
+          if-no-files-found: error
+          retention-days: 1

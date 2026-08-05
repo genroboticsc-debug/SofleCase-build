@@ -1,0 +1,121 @@
+name: CareerPilot Pro 2.1 No-Key Search APK
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reconstruct verified 2.0 baseline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SOURCE="CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > "$SOURCE"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c - | tee careerpilot-pro-21-build.log
+          mkdir -p build-src
+          tar -xJf "$SOURCE" -C build-src
+          python careerpilot_build/pro_v2/apply_compiler_fixes.py | tee -a careerpilot-pro-21-build.log
+          python careerpilot_build/pro_v2/apply_compiler_fixes_2.py | tee -a careerpilot-pro-21-build.log
+
+      - name: Verify and apply CareerPilot 2.1 patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > expected-patch-chunks.sha256 <<'HASHES'
+          4d5b785a89f373dfa85b635c5c9766c88ea105629b12d752ce214516ea1ad93d  careerpilot_build/pro_v21_patch/part00.b64
+          f9b1579b6018e87224405ab105f819d76966677eb2be7dee0ac483667e9cc2dd  careerpilot_build/pro_v21_patch/part01.b64
+          bdd5dbc56d012f0bdbdaabf2166f1a70d23be8361d0113cc2826addba358f58f  careerpilot_build/pro_v21_patch/part02.b64
+          HASHES
+          sha256sum -c expected-patch-chunks.sha256 | tee -a careerpilot-pro-21-build.log
+          cat careerpilot_build/pro_v21_patch/part{00..02}.b64 > careerpilot-21.patch.xz.b64
+          echo "b66b1aa34e2e2901b3d982baf9667d26b0743e60a4f3fafb36f2d5eea2b4916f  careerpilot-21.patch.xz.b64" | sha256sum -c - | tee -a careerpilot-pro-21-build.log
+          base64 -d careerpilot-21.patch.xz.b64 > careerpilot-21.patch.xz
+          echo "7244de3b9f49937d4a67f42f0ba9c784c34c54f59468c3f749f2ddf5ffbad275  careerpilot-21.patch.xz" | sha256sum -c - | tee -a careerpilot-pro-21-build.log
+          cd build-src/CareerPilotAI
+          xz -dc "$GITHUB_WORKSPACE/careerpilot-21.patch.xz" | patch -p1 --forward --batch | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-21-build.log"
+          grep -q 'versionName = "2.1.0-beta"' app/build.gradle.kts
+          grep -q 'RemotiveSearchConnector' app/src/main/java/com/careerpilot/ai/discovery/JobDiscovery.kt
+          grep -q 'openGoogleJobs' app/src/main/java/com/careerpilot/ai/ui/screens/JobsScreen.kt
+
+      - name: Build, test and package APK
+        working-directory: build-src/CareerPilotAI
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-21-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify APK signature and package metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.1.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro-2.1.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI-Pro-2.1.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI-Pro-2.1.apk
+            echo '=== APK ZIP INTEGRITY ==='
+            unzip -t CareerPilotAI-Pro-2.1.apk | tail -n 2
+          } | tee CareerPilotAI-Pro-2.1.validation.txt | tee -a careerpilot-pro-21-build.log
+          sha256sum CareerPilotAI-Pro-2.1.apk > CareerPilotAI-Pro-2.1.apk.sha256
+
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.1-build-diagnostics
+          path: careerpilot-pro-21-build.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Upload installable APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.1-No-Key-Search-APK
+          path: |
+            CareerPilotAI-Pro-2.1.apk
+            CareerPilotAI-Pro-2.1.apk.sha256
+            CareerPilotAI-Pro-2.1.validation.txt
+          if-no-files-found: error
+          retention-days: 1
