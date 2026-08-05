@@ -1,0 +1,53 @@
+name: CAD runtime relay
+
+on:
+  push:
+    branches:
+      - cad-runtime-relay-20260804
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  download-pinned-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download exact CAD runtime wheels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p runtime_wheels
+          python -m pip download \
+            --only-binary=:all: \
+            --dest runtime_wheels \
+            --index-url https://pypi.org/simple \
+            build123d==0.11.1 \
+            cadquery-ocp-novtk==7.9.3.1.1 \
+            manifold3d==3.5.2
+          sha256sum runtime_wheels/* | tee runtime_wheels/SHA256SUMS.txt
+          python - <<'PY'
+          from pathlib import Path
+          names = sorted(p.name for p in Path('runtime_wheels').glob('*.whl'))
+          assert 'build123d-0.11.1-py3-none-any.whl' in names, names
+          assert any(n.startswith('cadquery_ocp_novtk-7.9.3.1.1-cp313') and 'manylinux' in n for n in names), names
+          assert any(n.startswith('manifold3d-3.5.2-cp313') and 'manylinux' in n for n in names), names
+          print('\n'.join(names))
+          PY
+
+      - name: Upload pinned runtime wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cad-runtime-py313-linux
+          path: runtime_wheels/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
