@@ -6,6 +6,11 @@ on:
     paths:
       - 'strict_puck/**'
       - '.github/workflows/strict-p010-p011-certification.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'strict_puck/**'
+      - '.github/workflows/strict-p010-p011-certification.yml'
 
 jobs:
   certify:
