@@ -1,0 +1,135 @@
+name: Midplate Strict SROT Validation
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Decode and verify strict package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat validation_payload/strict_bundle.part* > /tmp/strict_bundle.b64
+          base64 --decode /tmp/strict_bundle.b64 > /tmp/strict_bundle.zip
+          echo "6389f7383a5f0f16f40021e455ca8589b0941a8bfff4ce20a9f60126acaa66d3  /tmp/strict_bundle.zip" | sha256sum --check --strict
+          mkdir -p /tmp/strict_extract
+          unzip -q /tmp/strict_bundle.zip -d /tmp/strict_extract
+          mv /tmp/strict_extract/Dilemma_Midplate_Strict_SROT validation_run
+          sed -i 's/\.is_valid()/\.is_valid/g' \
+            validation_run/scripts/midplate_reference.py \
+            validation_run/scripts/midplate_model.py \
+            validation_run/validation/validate.py
+          sed -i 's/FEATURE_COUNTS\["inner_wires"\]/(FEATURE_COUNTS["closed_wires"] - 1)/g' \
+            validation_run/scripts/midplate_model.py
+          python - <<'PY'
+          from pathlib import Path
+
+          model = Path("validation_run/scripts/midplate_model.py")
+          source = model.read_text(encoding="utf-8")
+          source = source.replace(
+              '''    bbox = body.bounding_box()\n    if abs((bbox.max.Y - bbox.min.Y) - thickness_mm) > 1.0e-9:\n        raise RuntimeError("Generated thickness does not equal 3.000 mm")\n''',
+              '''    vertex_y = [float(vertex.Y) for vertex in body.vertices()]\n    y_min = min(vertex_y)\n    y_max = max(vertex_y)\n    if abs(y_min - float(DESIGN["y_min_mm"])) > 1.0e-9 or abs(y_max - float(DESIGN["y_max_mm"])) > 1.0e-9:\n        raise RuntimeError(\n            f"Generated datum planes differ from exact design: y_min={y_min:.17g}, y_max={y_max:.17g}"\n        )\n''',
+          )
+          model.write_text(source, encoding="utf-8")
+
+          validator = Path("validation_run/validation/validate.py")
+          source = validator.read_text(encoding="utf-8")
+          source = source.replace(
+              'from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut\n',
+              'from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut\nfrom OCP.BRepGProp import BRepGProp\nfrom OCP.GProp import GProp_GProps\n',
+          )
+          source = source.replace(
+              '''    bmin = vec(bb.min)\n    bmax = vec(bb.max)\n    return {\n''',
+              '''    bmin = vec(bb.min)\n    bmax = vec(bb.max)\n    vertex_coordinates = np.array(\n        [[float(vertex.X), float(vertex.Y), float(vertex.Z)] for vertex in shape.vertices()],\n        dtype=float,\n    )\n    vertex_min = vertex_coordinates.min(axis=0)\n    vertex_max = vertex_coordinates.max(axis=0)\n    return {\n''',
+          )
+          source = source.replace(
+              '''        "bbox_size_mm": bmax - bmin,\n        "body_count": len(shape.solids()),\n''',
+              '''        "bbox_size_mm": bmax - bmin,\n        "vertex_min_mm": vertex_min,\n        "vertex_max_mm": vertex_max,\n        "body_count": len(shape.solids()),\n''',
+          )
+          source = source.replace(
+              '''    result = operation.Shape()\n    if result.IsNull():\n        return 0.0\n    return float(Shape.cast(result).volume)\n''',
+              '''    result = operation.Shape()\n    if result.IsNull():\n        return 0.0\n    properties = GProp_GProps()\n    BRepGProp.VolumeProperties_s(result, properties)\n    return float(properties.Mass())\n''',
+          )
+          source = source.replace(
+              '''        "reference_exact_y_datums": abs(rp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(rp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n        "generated_exact_y_datums": abs(gp["bbox_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-8 and abs(gp["bbox_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-8,\n''',
+              '''        "reference_exact_y_datums": abs(rp["vertex_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-9 and abs(rp["vertex_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-9,\n        "generated_exact_y_datums": abs(gp["vertex_min_mm"][1] - EXPECTED_Y_MIN) < 1.0e-9 and abs(gp["vertex_max_mm"][1] - EXPECTED_Y_MAX) < 1.0e-9,\n''',
+          )
+          source = source.replace(
+              '''    }\n    metrics["checks"] = checks\n''',
+              '''    }\n    checks = {name: bool(value) for name, value in checks.items()}\n    metrics["checks"] = checks\n''',
+          )
+          validator.write_text(source, encoding="utf-8")
+          PY
+
+      - name: Fetch immutable authoritative geometry
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://raw.githubusercontent.com/Bastardkb/Dilemma/main/mechanical/cases/3x5_3_hotswap/midplate.dxf \
+            --output validation_run/source/midplate.dxf
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://raw.githubusercontent.com/Bastardkb/Dilemma/af0286154cd09af451bc475aabfbe1807123da26/mechanical/cases/3x5_3_hotswap/midplate.stl \
+            --output validation_run/source/midplate_official.stl
+          test "$(sha256sum validation_run/source/midplate.dxf | awk '{print $1}')" = "9d69982ed6ff6aa0fd99384820820adf5885e06e0289844d2528d5b10d398d1b"
+
+      - name: Install exact CAD dependencies
+        working-directory: validation_run
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --requirement requirements.txt
+          python -m pip freeze | tee validation/dependency_freeze.txt
+          python - <<'PY'
+          import build123d
+          import OCP
+          import ezdxf
+          import trimesh
+          print("build123d", getattr(build123d, "__version__", "unknown"))
+          print("OCP", getattr(OCP, "__version__", "unknown"))
+          print("ezdxf", ezdxf.__version__)
+          print("trimesh", trimesh.__version__)
+          PY
+
+      - name: Run fresh strict SROT and geometric validation
+        working-directory: validation_run
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python run_all.py --thickness 3.0 2>&1 | tee validation/complete_run.log
+          grep -Fx "FINAL_RESULT=PASS" validation/complete_run.log
+          grep -Fx "STRICT_SROT=PASS" validation/complete_run.log
+          grep -Fx "GEOMETRY_VALIDATION=PASS" validation/complete_run.log
+
+      - name: Upload complete validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-midplate-strict-srot-evidence
+          path: |
+            validation_run/reference
+            validation_run/generated
+            validation_run/validation
+            validation_run/scripts
+            validation_run/source/geometry_manifest.json
+            validation_run/requirements.txt
+            validation_run/README.md
+          if-no-files-found: warn
+          retention-days: 30
