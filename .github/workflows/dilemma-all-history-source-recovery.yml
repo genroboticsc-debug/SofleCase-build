@@ -18,14 +18,14 @@ jobs:
           fetch-depth: 0
       - name: Fetch every reachable ref
         run: git fetch --all --prune --tags --force
-      - name: Recover every historical P025 and P029 source
+      - name: Recover every historical remaining-part source
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p recovery/direct_blobs recovery/embedded recovery/inventory
           git rev-list --all --objects > recovery/inventory/all_objects.txt
 
-          awk 'NF>1 && $0 ~ /(dilemma_4x6_4_top\.py|dilemma_4x6_4_hotswap_mid\.py|dilemma_4x6_4_hotswap_mid_exact_upper_system\.py|P025[^/]*\.py|P029[^/]*\.py|P025_compact[^/]*\.py)$/ {print}' recovery/inventory/all_objects.txt \
+          awk 'NF>1 && $0 ~ /(dilemma_3x5_2_tenting_puck_case\.py|dilemma_3x5_2_thin_case\.py|dilemma_3x5_3_hotswap_mid\.py|dilemma_4x6_4_top\.py|dilemma_4x6_4_hotswap_mid\.py|dilemma_4x6_4_hotswap_mid_exact_upper_system\.py|P009[^/]*\.py|P012[^/]*\.py|P019[^/]*\.py|P025[^/]*\.py|P029[^/]*\.py|P025_compact[^/]*\.py)$/ {print}' recovery/inventory/all_objects.txt \
             > recovery/inventory/direct_hits.txt
           while read -r blob path; do
             [ -n "${blob:-}" ] || continue
@@ -49,7 +49,15 @@ jobs:
               tr -d '\r\n ' < "$work/payload.b64" | base64 -d > "$work/payload" 2>/dev/null || { rm -rf "$work"; continue; }
               mkdir -p "$work/extracted"
               tar -xf "$work/payload" -C "$work/extracted" 2>/dev/null || { rm -rf "$work"; continue; }
-              mapfile -t targets < <(find "$work/extracted" -type f \( -name 'dilemma_4x6_4_top.py' -o -name 'dilemma_4x6_4_hotswap_mid.py' -o -name 'dilemma_4x6_4_hotswap_mid_exact_upper_system.py' -o -iname 'P025*.py' -o -iname 'P029*.py' \) | sort)
+              mapfile -t targets < <(find "$work/extracted" -type f \( \
+                -name 'dilemma_3x5_2_tenting_puck_case.py' -o \
+                -name 'dilemma_3x5_2_thin_case.py' -o \
+                -name 'dilemma_3x5_3_hotswap_mid.py' -o \
+                -name 'dilemma_4x6_4_top.py' -o \
+                -name 'dilemma_4x6_4_hotswap_mid.py' -o \
+                -name 'dilemma_4x6_4_hotswap_mid_exact_upper_system.py' -o \
+                -iname 'P009*.py' -o -iname 'P012*.py' -o -iname 'P019*.py' -o \
+                -iname 'P025*.py' -o -iname 'P029*.py' \) | sort)
               if ((${#targets[@]})); then
                 out="recovery/embedded/${commit:0:12}_$(basename "$stem" | tr '. /:' '____')"
                 mkdir -p "$out"
@@ -63,6 +71,6 @@ jobs:
           find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: dilemma-all-history-source-recovery
+          name: dilemma-all-history-remaining-sources
           path: recovery
           retention-days: 3
