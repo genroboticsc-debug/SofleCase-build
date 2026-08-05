@@ -1,0 +1,296 @@
+name: Temporary OCCT 7.9.3 exact offset-curve STEP writer patch
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-offset-writer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install build prerequisites
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ninja-build cmake g++ git
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.11.1'
+          mkdir -p input results
+
+      - name: Generate exact offset-curve BREP fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from build123d import Edge, Face, Solid, Vector, Wire
+          from OCP.BRepTools import BRepTools
+          from OCP.BRepAdaptor import BRepAdaptor_Curve
+
+          source = Wire([
+              Edge.make_bezier(Vector(0, 0), Vector(5, -4), Vector(15, -4), Vector(20, 0)),
+              Edge.make_line(Vector(20, 0), Vector(20, 20)),
+              Edge.make_line(Vector(20, 20), Vector(0, 20)),
+              Edge.make_line(Vector(0, 20), Vector(0, 0)),
+          ])
+          offset = source.offset_2d(2.0)
+          if isinstance(offset, list):
+              assert len(offset) == 1
+              offset = offset[0]
+          body = Solid.extrude(Face(offset), Vector(0, 0, 5))
+          curve_types = [str(BRepAdaptor_Curve(e.wrapped).GetType()) for e in offset.edges()]
+          assert body.is_valid
+          assert len(body.solids()) == 1
+          assert len(body.shells()) == 1
+          assert len(body.faces()) == 11
+          assert sum('OffsetCurve' in t for t in curve_types) == 2
+          assert BRepTools.Write_s(body.wrapped, 'input/exact_offset_prism.brep')
+          print({
+              'volume': body.volume,
+              'area': body.area,
+              'faces': len(body.faces()),
+              'curve_types': curve_types,
+          })
+          PY
+
+      - name: Clone and patch OCCT V7_9_3
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch V7_9_3 https://github.com/Open-Cascade-SAS/OCCT.git occt
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('occt/src/GeomToStep/GeomToStep_MakeCurve.cxx')
+          text = path.read_text()
+
+          include_anchor = '#include <Geom_Line.hxx>\n'
+          include_patch = (
+              '#include <Geom_Line.hxx>\n'
+              '#include <Geom_OffsetCurve.hxx>\n'
+          )
+          if '#include <Geom_OffsetCurve.hxx>' not in text:
+              assert include_anchor in text
+              text = text.replace(include_anchor, include_patch, 1)
+
+          include_anchor = '#include <GeomToStep_MakeLine.hxx>\n'
+          include_patch = (
+              '#include <GeomToStep_MakeLine.hxx>\n'
+              '#include <GeomToStep_MakeDirection.hxx>\n'
+          )
+          if '#include <GeomToStep_MakeDirection.hxx>' not in text:
+              assert include_anchor in text
+              text = text.replace(include_anchor, include_patch, 1)
+
+          include_anchor = '#include <StepGeom_Line.hxx>\n'
+          include_patch = (
+              '#include <StepGeom_Line.hxx>\n'
+              '#include <StepGeom_OffsetCurve3d.hxx>\n'
+              '#include <StepData_Logical.hxx>\n'
+              '#include <TCollection_HAsciiString.hxx>\n'
+          )
+          if '#include <StepGeom_OffsetCurve3d.hxx>' not in text:
+              assert include_anchor in text
+              text = text.replace(include_anchor, include_patch, 1)
+
+          branch_anchor = '''  else if (C->IsKind(STANDARD_TYPE(Geom_BoundedCurve)))\n  {\n    Handle(Geom_BoundedCurve)   L = Handle(Geom_BoundedCurve)::DownCast(C);\n    GeomToStep_MakeBoundedCurve MkBoundedC(L, theLocalFactors);\n    theCurve = MkBoundedC.Value();\n  }\n'''
+          branch_patch = '''  else if (C->IsKind(STANDARD_TYPE(Geom_OffsetCurve)))\n  {\n    Handle(Geom_OffsetCurve) OC = Handle(Geom_OffsetCurve)::DownCast(C);\n    GeomToStep_MakeCurve     MkBasis(OC->BasisCurve(), theLocalFactors);\n    GeomToStep_MakeDirection MkDirection(OC->Direction());\n    Handle(StepGeom_OffsetCurve3d) aStepOffset = new StepGeom_OffsetCurve3d;\n    aStepOffset->Init(new TCollection_HAsciiString(""),\n                      MkBasis.Value(),\n                      -OC->Offset() / theLocalFactors.LengthFactor(),\n                      StepData_LFalse,\n                      MkDirection.Value());\n    theCurve = aStepOffset;\n  }\n  else if (C->IsKind(STANDARD_TYPE(Geom_BoundedCurve)))\n  {\n    Handle(Geom_BoundedCurve)   L = Handle(Geom_BoundedCurve)::DownCast(C);\n    GeomToStep_MakeBoundedCurve MkBoundedC(L, theLocalFactors);\n    theCurve = MkBoundedC.Value();\n  }\n'''
+          if 'STANDARD_TYPE(Geom_OffsetCurve)' not in text:
+              assert branch_anchor in text
+              text = text.replace(branch_anchor, branch_patch, 1)
+
+          path.write_text(text)
+          PY
+          git -C occt diff -- src/GeomToStep/GeomToStep_MakeCurve.cxx | tee results/occt793_offsetcurve_writer.patch
+          grep -q 'Geom_OffsetCurve' results/occt793_offsetcurve_writer.patch
+          grep -q 'StepGeom_OffsetCurve3d' results/occt793_offsetcurve_writer.patch
+
+      - name: Build patched OCCT data exchange runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S occt -B occt-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/occt-install" \
+            -DBUILD_MODULE_Visualization=OFF \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_MODULE_ApplicationFramework=OFF \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_TCL=OFF \
+            -DUSE_TK=OFF
+          cmake --build occt-build --parallel 4
+          cmake --install occt-build
+
+      - name: Build exact round-trip verifier
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > exact_roundtrip.cpp <<'CPP'
+          #include <BRepAlgoAPI_Cut.hxx>
+          #include <BRep_Builder.hxx>
+          #include <BRepCheck_Analyzer.hxx>
+          #include <BRepGProp.hxx>
+          #include <BRepTools.hxx>
+          #include <GProp_GProps.hxx>
+          #include <IFSelect_ReturnStatus.hxx>
+          #include <Interface_Static.hxx>
+          #include <STEPControl_Controller.hxx>
+          #include <STEPControl_Reader.hxx>
+          #include <STEPControl_Writer.hxx>
+          #include <TopAbs_ShapeEnum.hxx>
+          #include <TopExp_Explorer.hxx>
+          #include <TopoDS_Shape.hxx>
+
+          #include <cmath>
+          #include <fstream>
+          #include <iomanip>
+          #include <iostream>
+          #include <string>
+
+          static int count(const TopoDS_Shape& s, TopAbs_ShapeEnum kind) {
+            int n = 0;
+            for (TopExp_Explorer ex(s, kind); ex.More(); ex.Next()) ++n;
+            return n;
+          }
+
+          static double volume(const TopoDS_Shape& s) {
+            GProp_GProps p;
+            BRepGProp::VolumeProperties(s, p);
+            return p.Mass();
+          }
+
+          static double area(const TopoDS_Shape& s) {
+            GProp_GProps p;
+            BRepGProp::SurfaceProperties(s, p);
+            return p.Mass();
+          }
+
+          int main() {
+            BRep_Builder builder;
+            TopoDS_Shape source;
+            std::ifstream in("input/exact_offset_prism.brep");
+            if (!BRepTools::Read(source, in, builder)) return 10;
+
+            STEPControl_Controller::Init();
+            Interface_Static::SetIVal("write.surfacecurve.mode", 0);
+            Interface_Static::SetIVal("write.step.surfacecurve.mode", 0);
+
+            const bool sourceValid = BRepCheck_Analyzer(source).IsValid();
+            const double sourceVolume = volume(source);
+            const double sourceArea = area(source);
+
+            STEPControl_Writer writer;
+            const IFSelect_ReturnStatus transferStatus =
+                writer.Transfer(source, STEPControl_ManifoldSolidBrep);
+            const IFSelect_ReturnStatus writeStatus =
+                writer.Write("results/patched_exact_offset_prism.step");
+
+            STEPControl_Reader reader;
+            const IFSelect_ReturnStatus readStatus =
+                reader.ReadFile("results/patched_exact_offset_prism.step");
+            if (readStatus != IFSelect_RetDone) return 11;
+            reader.TransferRoots();
+            TopoDS_Shape roundtrip = reader.OneShape();
+
+            const bool roundValid = BRepCheck_Analyzer(roundtrip).IsValid();
+            const double roundVolume = volume(roundtrip);
+            const double roundArea = area(roundtrip);
+
+            BRepAlgoAPI_Cut cutAB(source, roundtrip);
+            cutAB.Build();
+            BRepAlgoAPI_Cut cutBA(roundtrip, source);
+            cutBA.Build();
+            const bool cutABDone = cutAB.IsDone();
+            const bool cutBADone = cutBA.IsDone();
+            const double residualAB = cutABDone ? volume(cutAB.Shape()) : -1.0;
+            const double residualBA = cutBADone ? volume(cutBA.Shape()) : -1.0;
+
+            std::ifstream stepIn("results/patched_exact_offset_prism.step");
+            std::string stepText((std::istreambuf_iterator<char>(stepIn)),
+                                 std::istreambuf_iterator<char>());
+            std::size_t offsetCount = 0;
+            std::size_t pos = 0;
+            while ((pos = stepText.find("OFFSET_CURVE_3D", pos)) != std::string::npos) {
+              ++offsetCount;
+              pos += 15;
+            }
+
+            std::ofstream out("results/result.json");
+            out << std::setprecision(17)
+                << "{\n"
+                << "  \"source_valid\": " << (sourceValid ? "true" : "false") << ",\n"
+                << "  \"source_solids\": " << count(source, TopAbs_SOLID) << ",\n"
+                << "  \"source_shells\": " << count(source, TopAbs_SHELL) << ",\n"
+                << "  \"source_faces\": " << count(source, TopAbs_FACE) << ",\n"
+                << "  \"source_volume\": " << sourceVolume << ",\n"
+                << "  \"source_area\": " << sourceArea << ",\n"
+                << "  \"transfer_status\": " << static_cast<int>(transferStatus) << ",\n"
+                << "  \"write_status\": " << static_cast<int>(writeStatus) << ",\n"
+                << "  \"read_status\": " << static_cast<int>(readStatus) << ",\n"
+                << "  \"roundtrip_valid\": " << (roundValid ? "true" : "false") << ",\n"
+                << "  \"roundtrip_solids\": " << count(roundtrip, TopAbs_SOLID) << ",\n"
+                << "  \"roundtrip_shells\": " << count(roundtrip, TopAbs_SHELL) << ",\n"
+                << "  \"roundtrip_faces\": " << count(roundtrip, TopAbs_FACE) << ",\n"
+                << "  \"roundtrip_volume\": " << roundVolume << ",\n"
+                << "  \"roundtrip_area\": " << roundArea << ",\n"
+                << "  \"volume_delta\": " << std::abs(roundVolume - sourceVolume) << ",\n"
+                << "  \"area_delta\": " << std::abs(roundArea - sourceArea) << ",\n"
+                << "  \"cut_ab_done\": " << (cutABDone ? "true" : "false") << ",\n"
+                << "  \"cut_ba_done\": " << (cutBADone ? "true" : "false") << ",\n"
+                << "  \"source_minus_roundtrip\": " << residualAB << ",\n"
+                << "  \"roundtrip_minus_source\": " << residualBA << ",\n"
+                << "  \"offset_curve_3d_entities\": " << offsetCount << "\n"
+                << "}\n";
+            out.close();
+
+            std::cout << std::ifstream("results/result.json").rdbuf();
+
+            const bool pass =
+                sourceValid
+                && count(source, TopAbs_SOLID) == 1
+                && count(source, TopAbs_SHELL) == 1
+                && roundValid
+                && count(roundtrip, TopAbs_SOLID) == 1
+                && count(roundtrip, TopAbs_SHELL) == 1
+                && count(roundtrip, TopAbs_FACE) == count(source, TopAbs_FACE)
+                && std::abs(roundVolume - sourceVolume) <= 1.0e-8
+                && std::abs(roundArea - sourceArea) <= 1.0e-8
+                && cutABDone && cutBADone
+                && std::abs(residualAB) <= 1.0e-8
+                && std::abs(residualBA) <= 1.0e-8
+                && offsetCount >= 2;
+            return pass ? 0 : 12;
+          }
+          CPP
+
+          c++ -std=c++17 -O2 exact_roundtrip.cpp -o exact_roundtrip \
+            -I"$PWD/occt-install/include/opencascade" \
+            -L"$PWD/occt-install/lib" \
+            -Wl,-rpath,"$PWD/occt-install/lib" \
+            -lTKDESTEP -lTKDE -lTKXSBase -lTKShHealing -lTKBO -lTKBool \
+            -lTKTopAlgo -lTKBRep -lTKGeomAlgo -lTKGeomBase -lTKG3d -lTKG2d \
+            -lTKMath -lTKernel
+
+      - name: Run exact round-trip verifier
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./exact_roundtrip 2>&1 | tee results/verifier.log
+
+      - name: Upload proof artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: occt793-patched-exact-offsetcurve-step-proof
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
