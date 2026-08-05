@@ -1,0 +1,45 @@
+name: Recover Dilemma fast sources
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/recover-dilemma-fast-sources.yml
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode revised sources
+        shell: bash
+        run: |
+          set -u
+          git fetch --depth=1 origin agent/dilemma-fast-pass-20260804
+          mkdir -p recovered-fast-sources
+          : > recovered-fast-sources/RECOVERY_STATUS.txt
+          for name in \
+            dilemma_3x5_2_tenting_puck_case.py \
+            dilemma_3x5_3_top.py \
+            dilemma_3x5_3_hotswap_bottom.py \
+            dilemma_3x5_3_hotswap_mid.py \
+            dilemma_3x5_3_hotswap_plate_left.py \
+            dilemma_3x5_3_hotswap_plate_right.py; do
+            if git show FETCH_HEAD:dilemma-fast/scripts/${name}.xz.b64 | base64 --decode | xz --decompress > recovered-fast-sources/$name && python -m py_compile recovered-fast-sources/$name; then
+              echo "$name PASS" | tee -a recovered-fast-sources/RECOVERY_STATUS.txt
+            else
+              rm -f recovered-fast-sources/$name
+              echo "$name FAIL" | tee -a recovered-fast-sources/RECOVERY_STATUS.txt
+            fi
+          done
+          sha256sum recovered-fast-sources/*.py > recovered-fast-sources/SHA256SUMS.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dilemma-revised-fast-sources
+          path: recovered-fast-sources/
+          compression-level: 0
+          retention-days: 1
