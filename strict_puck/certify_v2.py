@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import json
 from pathlib import Path
 
 import certify
@@ -11,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 SOURCE_FILES = (
     ROOT / "production.py",
     ROOT / "exact_feature_patch.py",
+    ROOT / "exact_floor_patch.py",
     ROOT / "exact_build.py",
 )
 
@@ -85,7 +85,8 @@ def strict_source_closure_audit() -> dict[str, object]:
     required_symbols = (
         "CASE_PERIMETER_FEATURES", "HONEYCOMB_CELL_INDICES",
         "HexCaseParameters", "IntegratedPuckParameters", "build_case_base",
-        "FACET_COUNTS_BY_INDEX", "lower_wall_support_faces", "install",
+        "FACET_COUNTS_BY_INDEX", "lower_wall_support_faces",
+        "lower_wall_support_solids", "build_case_base_exact", "install",
     )
     missing = [symbol for symbol in required_symbols if symbol not in combined_text]
     overall_pass = overall_pass and not missing
@@ -97,6 +98,7 @@ def strict_source_closure_audit() -> dict[str, object]:
             "35 named perimeter features expanded by fixed authored facet counts",
             "50 integer honeycomb indices",
             "seven exact perimeter-offset support features",
+            "exact floor vent domain and material keepouts",
             "explicit integrated-puck and opening feature branches",
         ],
     }
