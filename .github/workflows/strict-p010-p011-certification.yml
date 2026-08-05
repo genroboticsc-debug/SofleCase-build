@@ -21,10 +21,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned CAD runtime
+      - name: Install pinned CAD runtime and retain CPython 3.13 wheels
         run: |
+          set -euxo pipefail
           python -m pip install --upgrade pip
           python -m pip install build123d==0.11.1 cadquery-ocp-novtk==7.9.3.1.1
+          mkdir -p strict_puck/runtime_wheels
+          curl --fail --location --retry 5 \
+            --output strict_puck/runtime_wheels/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl \
+            'https://files.pythonhosted.org/packages/f3/31/82baf17406c0a13f2eb98c1d46d09a640795fc7d6b373a69bc5f44344db3/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl'
+          python -m pip download --no-deps --dest strict_puck/runtime_wheels cadquery-ocp-proxy==7.9.3.1.1
+          printf '%s  %s\n' \
+            'ffcd04d4efa087d3aa942360020265a1ac0e12407bd7bcfeb37e70b4d1ee72df' \
+            'strict_puck/runtime_wheels/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl' \
+            > strict_puck/runtime_wheels/SHA256SUMS.txt
+          printf '%s  %s\n' \
+            'ca4164ec4b54956d9fc3e68c67d555b5486cb963c2f71e18df005ba16b921c91' \
+            'strict_puck/runtime_wheels/cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl' \
+            >> strict_puck/runtime_wheels/SHA256SUMS.txt
+          sha256sum --check strict_puck/runtime_wheels/SHA256SUMS.txt
       - name: Fetch immutable reference STEP files
         working-directory: strict_puck
         run: |
@@ -45,3 +60,4 @@ jobs:
           path: |
             strict_puck/reports/
             strict_puck/generated/
+            strict_puck/runtime_wheels/
