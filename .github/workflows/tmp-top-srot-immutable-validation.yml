@@ -1,4 +1,4 @@
-name: Immutable top direct residual partition
+name: Immutable top bottom-left boss sweep
 
 on:
   pull_request:
@@ -7,15 +7,15 @@ on:
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
       - tmp_top_validation/validate_direct_final_solid.py
-      - tmp_top_validation/run_direct_residual_partition.py
+      - tmp_top_validation/run_bottom_left_boss_sweep.py
 
 permissions:
   contents: read
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Check out immutable recovered source commit
         uses: actions/checkout@v4
@@ -23,13 +23,13 @@ jobs:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen residual validators only
+      - name: Inject frozen direct validator and boss sweep
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
           git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
-          git show FETCH_HEAD:tmp_top_validation/run_direct_residual_partition.py > tmp_top_validation/run_direct_residual_partition.py
+          git show FETCH_HEAD:tmp_top_validation/run_bottom_left_boss_sweep.py > tmp_top_validation/run_bottom_left_boss_sweep.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -82,24 +82,24 @@ jobs:
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
             tmp_top_validation/validate_direct_final_solid.py \
-            tmp_top_validation/run_direct_residual_partition.py
+            tmp_top_validation/run_bottom_left_boss_sweep.py
           python tmp_top_validation/strict_srot_check.py
           git diff --check
 
-      - name: Partition exact bidirectional residual
+      - name: Run isolated parametric boss sweep
         shell: bash
         run: |
           set -o pipefail
-          rm -rf tmp_top_validation/generated/direct_residual_partition
-          python tmp_top_validation/run_direct_residual_partition.py 2>&1 | tee tmp_top_validation/direct_residual_partition.log
+          rm -rf tmp_top_validation/generated/bottom_left_boss_sweep
+          python tmp_top_validation/run_bottom_left_boss_sweep.py 2>&1 | tee tmp_top_validation/bottom_left_boss_sweep.log
 
-      - name: Upload residual partition evidence
+      - name: Upload boss-sweep evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-direct-residual-partition-${{ github.run_id }}
+          name: immutable-top-bottom-left-boss-sweep-${{ github.run_id }}
           path: |
-            tmp_top_validation/generated/direct_residual_partition/**
-            tmp_top_validation/direct_residual_partition.log
+            tmp_top_validation/generated/bottom_left_boss_sweep/**
+            tmp_top_validation/bottom_left_boss_sweep.log
             tmp_top_validation/strict_srot_report.json
           if-no-files-found: warn
