@@ -13,6 +13,11 @@ env:
   BUILD123D_FILE: build123d-0.11.1-py3-none-any.whl
   BUILD123D_SHA256: 4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10
   BUILD123D_URL: https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl
+  OCP_FILE: cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl
+  OCP_SHA256: ffcd04d4efa087d3aa942360020265a1ac0e12407bd7bcfeb37e70b4d1ee72df
+  OCP_URL: https://files.pythonhosted.org/packages/f3/31/82baf17406c0a13f2eb98c1d46d09a640795fc7d6b373a69bc5f44344db3/cadquery_ocp_novtk-7.9.3.1.1-cp313-cp313-manylinux_2_31_x86_64.whl
+  OCP_PROXY_FILE: cadquery_ocp_proxy-7.9.3.1.1-py3-none-any.whl
+  OCP_PROXY_SHA256: ca4164ec4b54956d9fc3e68c67d555b5486cb963c2f71e18df005ba16b921c91
   MANIFOLD_FILE: manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   MANIFOLD_SHA256: bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45
   MANIFOLD_URL: https://files.pythonhosted.org/packages/43/71/3399b1f669e43391bbd199041bf3baf2f92c1fe374791c622dfb80d7c1fa/manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
@@ -31,9 +36,13 @@ jobs:
           set -euo pipefail
           mkdir -p wheels
           curl --fail --location --retry 5 --output "wheels/${BUILD123D_FILE}" "${BUILD123D_URL}"
+          curl --fail --location --retry 5 --output "wheels/${OCP_FILE}" "${OCP_URL}"
           curl --fail --location --retry 5 --output "wheels/${MANIFOLD_FILE}" "${MANIFOLD_URL}"
-          python -m pip download --only-binary=:all: --no-deps --dest wheels svgelements==1.9.6 webcolors==24.8.0
+          python -m pip download --only-binary=:all: --no-deps --dest wheels \
+            cadquery-ocp-proxy==7.9.3.1.1 svgelements==1.9.6 webcolors==24.8.0
           printf '%s  %s\n' "${BUILD123D_SHA256}" "wheels/${BUILD123D_FILE}" > wheels/SHA256SUMS.txt
+          printf '%s  %s\n' "${OCP_SHA256}" "wheels/${OCP_FILE}" >> wheels/SHA256SUMS.txt
+          printf '%s  %s\n' "${OCP_PROXY_SHA256}" "wheels/${OCP_PROXY_FILE}" >> wheels/SHA256SUMS.txt
           printf '%s  %s\n' "${MANIFOLD_SHA256}" "wheels/${MANIFOLD_FILE}" >> wheels/SHA256SUMS.txt
           printf '%s  %s\n' "${SVGELEMENTS_SHA256}" "wheels/${SVGELEMENTS_FILE}" >> wheels/SHA256SUMS.txt
           printf '%s  %s\n' "${WEBCOLORS_SHA256}" "wheels/${WEBCOLORS_FILE}" >> wheels/SHA256SUMS.txt
@@ -41,7 +50,7 @@ jobs:
       - name: Upload exact CAD runtime wheels
         uses: actions/upload-artifact@v4
         with:
-          name: exact-cad-runtime-wheels-cp313
+          name: exact-cad-runtime-wheels-cp313-v2
           path: wheels/
           if-no-files-found: error
           retention-days: 1
