@@ -1,16 +1,16 @@
-name: CareerPilot APK Build
+name: CareerPilot 3.1 Auth Build
 
 on:
   push:
     branches:
-      - careerpilot-apk-build-20260805
+      - careerpilot-auth-rebuild-20260805
   pull_request:
     branches:
       - master
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -18,25 +18,31 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Checkout isolated build branch
+      - name: Checkout isolated auth rebuild branch
         uses: actions/checkout@v4
         with:
-          ref: careerpilot-apk-build-20260805
+          ref: careerpilot-auth-rebuild-20260805
 
-      - name: Restore and verify CareerPilot source
+      - name: Restore base source and apply verified auth patch
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf careerpilot
-          cat .careerpilot-build/source.xz.b64.part* > /tmp/source.b64
-          base64 --decode /tmp/source.b64 > /tmp/source.tar.xz
-          echo "2f07e23c03398e68f05513b7708bb67149c7d67f5063cf0328bf3b0c01d7dfc4  /tmp/source.tar.xz" | sha256sum --check
+          rm -rf careerpilot /tmp/careerpilot-source.* /tmp/careerpilot-auth-patch.*
+          cat .careerpilot-build/source.xz.b64.part* > /tmp/careerpilot-source.b64
+          base64 --decode /tmp/careerpilot-source.b64 > /tmp/careerpilot-source.tar.xz
+          echo "2f07e23c03398e68f05513b7708bb67149c7d67f5063cf0328bf3b0c01d7dfc4  /tmp/careerpilot-source.tar.xz" | sha256sum --check
           mkdir -p careerpilot
-          tar -xJf /tmp/source.tar.xz -C careerpilot
-          test -f careerpilot/settings.gradle.kts
-          test -f careerpilot/app/build.gradle.kts
-          sed -i 's/version "2\.1\.0"/version "2.3.20"/g' careerpilot/build.gradle.kts
+          tar -xJf /tmp/careerpilot-source.tar.xz -C careerpilot
+
+          base64 --decode .careerpilot-auth-patch/patch.tar.xz.b64 > /tmp/careerpilot-auth-patch.tar.xz
+          echo "d122666f23da372201642943e18a49d55e1f6267fa83cd02486792b3f67ebdfe  /tmp/careerpilot-auth-patch.tar.xz" | sha256sum --check
+          tar -xJf /tmp/careerpilot-auth-patch.tar.xz -C careerpilot
+
+          test -f careerpilot/app/google-services.json
           grep -q 'version "2.3.20"' careerpilot/build.gradle.kts
+          grep -q 'versionName = "3.1.0"' careerpilot/app/build.gradle.kts
+          grep -q 'startPhoneVerification' careerpilot/app/src/main/java/com/careerpilot/ai/auth/AuthManager.kt
+          grep -q 'SEND VERIFICATION CODE' careerpilot/app/src/main/java/com/careerpilot/ai/ui/auth/LoginScreen.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -59,66 +65,25 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build latest debug APK
-        id: build_apk
-        continue-on-error: true
+      - name: Compile CareerPilot 3.1
         working-directory: careerpilot
         shell: bash
-        run: |
-          set -o pipefail
-          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee /tmp/careerpilot-gradle.log
+        run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Verify and package APK
-        id: package_apk
-        if: steps.build_apk.outcome == 'success'
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf artifact
           mkdir -p artifact
-          cp careerpilot/app/build/outputs/apk/debug/app-debug.apk artifact/CareerPilotAI-Pro-3.0.0-debug.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose artifact/CareerPilotAI-Pro-3.0.0-debug.apk
-          sha256sum artifact/CareerPilotAI-Pro-3.0.0-debug.apk > artifact/CareerPilotAI-Pro-3.0.0-debug.apk.sha256
-          unzip -t artifact/CareerPilotAI-Pro-3.0.0-debug.apk
+          cp careerpilot/app/build/outputs/apk/debug/app-debug.apk artifact/CareerPilotAI-Pro-3.1.0-auth-rebuild-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifact/CareerPilotAI-Pro-3.1.0-auth-rebuild-debug.apk > artifact/signature-report.txt
+          sha256sum artifact/CareerPilotAI-Pro-3.1.0-auth-rebuild-debug.apk > artifact/CareerPilotAI-Pro-3.1.0-auth-rebuild-debug.apk.sha256
+          unzip -t artifact/CareerPilotAI-Pro-3.1.0-auth-rebuild-debug.apk
 
       - name: Upload verified APK
-        id: upload_apk
-        if: steps.package_apk.outcome == 'success'
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: CareerPilotAI-Pro-3.0.0-debug
+          name: CareerPilotAI-Pro-3.1.0-auth-rebuild-debug
           path: artifact/*
           if-no-files-found: error
           retention-days: 7
-
-      - name: Publish CI run locator and diagnostic tail
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .careerpilot-build-result
-          cat > .careerpilot-build-result/status.txt <<EOF
-          run_id=${GITHUB_RUN_ID}
-          run_attempt=${GITHUB_RUN_ATTEMPT}
-          workflow_sha=${GITHUB_SHA}
-          build_outcome=${{ steps.build_apk.outcome }}
-          package_outcome=${{ steps.package_apk.outcome }}
-          upload_outcome=${{ steps.upload_apk.outcome }}
-          EOF
-          if [ -f /tmp/careerpilot-gradle.log ]; then
-            tail -n 500 /tmp/careerpilot-gradle.log > .careerpilot-build-result/gradle-tail.log
-          else
-            printf 'Gradle did not start; inspect setup steps for the failure.\n' > .careerpilot-build-result/gradle-tail.log
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .careerpilot-build-result/status.txt .careerpilot-build-result/gradle-tail.log
-          git commit -m "[skip ci] Record CareerPilot APK build ${GITHUB_RUN_ID}" || true
-          git push origin HEAD:careerpilot-apk-build-20260805 || true
-
-      - name: Fail workflow when APK was not verified and uploaded
-        if: always() && (steps.build_apk.outcome != 'success' || steps.package_apk.outcome != 'success' || steps.upload_apk.outcome != 'success')
-        shell: bash
-        run: exit 1
