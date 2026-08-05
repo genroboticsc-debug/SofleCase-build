@@ -1,0 +1,43 @@
+name: Strict P010 P011 Certification
+on:
+  workflow_dispatch:
+  push:
+    branches: [strict-p010-p011-certification]
+    paths:
+      - 'strict_puck/**'
+      - '.github/workflows/strict-p010-p011-certification.yml'
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install pinned CAD runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build123d==0.11.1 cadquery-ocp-novtk==7.9.3.1.1
+      - name: Fetch immutable reference STEP files
+        working-directory: strict_puck
+        run: |
+          mkdir -p reference
+          curl --fail --location --retry 3 -o 'reference/Dilemma Case Integrated Tenting Puck.STEP' 'https://raw.githubusercontent.com/Bastardkb/Dilemma/f5cffb4821fe560b095418b71382ac7d8043c61a/mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma%20Case%20Integrated%20Tenting%20Puck.STEP'
+          curl --fail --location --retry 3 -o 'reference/Dilemma Case Tenting Puck Opening.STEP' 'https://raw.githubusercontent.com/Bastardkb/Dilemma/f5cffb4821fe560b095418b71382ac7d8043c61a/mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma%20Case%20Tenting%20Puck%20Opening.STEP'
+          sha256sum reference/*.STEP
+      - name: Fresh clean Build123d generation
+        working-directory: strict_puck
+        run: python production.py --output-dir generated
+      - name: Strict SROT and native two-direction BRep validation
+        working-directory: strict_puck
+        run: python certify.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strict-p010-p011-certification
+          path: |
+            strict_puck/reports/
+            strict_puck/generated/
