@@ -64,6 +64,7 @@ def main() -> int:
 
     original_close = validator.close_generated_planar_crack
     original_output = validator.OUTPUT
+    original_angular_tolerance = validator.ANGULAR_TOLERANCE
 
     def production_close_and_refine(raw_mesh: trimesh.Trimesh):
         closed, crack_audit = production.close_generated_planar_crack(raw_mesh)
@@ -83,6 +84,7 @@ def main() -> int:
     try:
         validator.close_generated_planar_crack = production_close_and_refine
         validator.OUTPUT = VALIDATION_DIR
+        validator.ANGULAR_TOLERANCE = production.ANGULAR_DEFLECTION_RAD
         result = validator.validate_candidate(
             production.LINEAR_DEFLECTION_MM,
             reference_raw,
@@ -91,6 +93,7 @@ def main() -> int:
     finally:
         validator.close_generated_planar_crack = original_close
         validator.OUTPUT = original_output
+        validator.ANGULAR_TOLERANCE = original_angular_tolerance
 
     candidate_dir = VALIDATION_DIR / (
         f"linear_{production.LINEAR_DEFLECTION_MM:.12f}".replace(".", "p")
@@ -156,6 +159,8 @@ def main() -> int:
         "authoritative_stl_sha256": sha256(validated_stl),
         "production_stl_canonical_triangle_digest": production_digest,
         "authoritative_stl_canonical_triangle_digest": validation_digest,
+        "production_angular_tolerance_rad": production.ANGULAR_DEFLECTION_RAD,
+        "authoritative_angular_tolerance_rad": result["angular_tolerance_rad"],
         "reference_topology_audit": reference_audit,
         "reference_topology_checks": reference_checks,
         "production_export_audit": json.loads(
