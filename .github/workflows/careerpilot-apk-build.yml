@@ -112,7 +112,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .careerpilot-build-result/status.txt .careerpilot-build-result/gradle-tail.log
-          git commit -m "Record CareerPilot APK build ${GITHUB_RUN_ID}" || true
+          git commit -m "[skip ci] Record CareerPilot APK build ${GITHUB_RUN_ID}" || true
           git push origin HEAD:careerpilot-apk-build-20260805
 
       - name: Fail workflow when APK was not verified and uploaded
