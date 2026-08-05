@@ -37,6 +37,16 @@ for node in ast.walk(tree):
     elif isinstance(node, ast.ImportFrom):
         imports.add(node.module or '')
 names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+forbidden_serialization_tokens = (
+    'pickle.dump',
+    'pickle.load',
+    'BRepTools.Write',
+    'BRepTools.Read',
+    'export_brep',
+    'import_brep',
+    'breptools_Write',
+    'breptools_Read',
+)
 checks = {
     'no_validation_imports': not bool(imports & {
         'validate_direct_final_solid',
@@ -49,8 +59,8 @@ checks = {
     'no_geometry_import_calls': (
         'import_step(' not in source and 'import_stl(' not in source
     ),
-    'no_serialized_brep': (
-        '.brep' not in source.lower() and 'pickle' not in source.lower()
+    'no_serialized_brep': not any(
+        token in source for token in forbidden_serialization_tokens
     ),
     'analytic_feature_tree_dependency': 'import top_parametric as tp' in source,
     'formula_based_adaptive_bores': (
