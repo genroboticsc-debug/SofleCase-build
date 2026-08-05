@@ -24,6 +24,7 @@ ROOT = validator.ROOT / "generated" / "bottom_left_boss_seam_sweep"
 ROOT.mkdir(parents=True, exist_ok=True)
 validator.ANGULAR_TOLERANCE = ANGULAR
 ORIGINAL_CLIPPED_BOSS = tp._clipped_boss_solid
+BOTTOM_LEFT_Y0 = tp.BOSSES[0][3]
 
 reference_raw = as_mesh(trimesh.load_mesh(validator.REFERENCE, process=True), "reference")
 reference, topology_audit, topology_checks = topology_split_reference(reference_raw)
@@ -35,7 +36,7 @@ def install_seam(seam_degrees: float) -> None:
     angle = math.radians(seam_degrees)
 
     def seam_oriented_boss(x: float, z: float, y0: float, y1: float):
-        if x < 0.0 and abs(y0 - tp.Y_BACK) <= 1.0e-12:
+        if x < 0.0 and abs(y0 - BOTTOM_LEFT_Y0) <= 1.0e-12:
             plane = tp.Plane(
                 origin=(x, y0, z),
                 x_dir=(math.cos(angle), 0.0, math.sin(angle)),
