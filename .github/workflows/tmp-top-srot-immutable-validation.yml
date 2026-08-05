@@ -16,10 +16,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Check out frozen validation branch
+      - name: Check out immutable recovered source commit
         uses: actions/checkout@v4
         with:
-          ref: tmp/top-engraving-frozen-validation-20260805
+          ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
+          fetch-depth: 1
+
+      - name: Inject frozen direct-solid validator only
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
+          git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
+          python -m py_compile tmp_top_validation/validate_direct_final_solid.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
