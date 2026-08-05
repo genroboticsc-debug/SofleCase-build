@@ -1,0 +1,63 @@
+name: CareerPilot Source Transfer Verification
+
+on:
+  push:
+    branches:
+      - careerpilot-apk-build-20260802
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare every uploaded chunk with its exact source hash
+        shell: bash
+        run: |
+          set +e
+          cat > expected-chunks.sha256 <<'EOF'
+          e20719dfa1412fa292ddcf59e4fbfce652e719af4a369febf5070953fad36a2a  careerpilot_build/v2/p00
+          63f85bd770e491a091ab2afd17e0dc209bcedf4cc4ccaeb118d3c985b83e0175  careerpilot_build/v2/p01
+          4d519fa2cbb656f46f6fc2e6c7e0ccea6ff58f7add81f8b070e9c2677c809154  careerpilot_build/v2/p02
+          9fe862fd5e925c43a60c4e281681cb5f4a4bb0a24eb8bb31a1218b3d5d0f4175  careerpilot_build/v2/p03
+          e1f408fc62dfad6e3e4913353cd1a45cd729f63a3dd23a70b8fc859e294fea8e  careerpilot_build/v2/p04
+          4984478f76b2b7f2c61f39329ea45aa7798b500cd332520df09ee12a0474095e  careerpilot_build/v2/p05
+          c7a27ff3e0012c1e6c8ac138e0a872cad3c01230141677a74292addefe248478  careerpilot_build/v2/p06
+          3327c40299366afe6b7ab647d379e2e73b3510c01cfc09d48eac579abd3fba8b  careerpilot_build/v2/p07
+          f6b85042326296168b3fcabc4aaff6f49eb07f1eb80cf24efe8ad19724b0e57b  careerpilot_build/v2/p08
+          87e778db81be557c4a3847e91fddacfc37298323735c6e9ccc005913ad8cc80e  careerpilot_build/v2/p09
+          22faae6f9bbdec0f04c308362c5da0ccdb0c28333501e9ca154099cda27e2708  careerpilot_build/v2/p10
+          985699fb49fc2a0125f5bda8a547d8c44d2f3cb08241de3e50dbda8c21a0d8f0  careerpilot_build/v2/p11
+          EOF
+          {
+            echo '=== BYTE COUNTS ==='
+            wc -c careerpilot_build/v2/p*
+            echo '=== ACTUAL HASHES ==='
+            sha256sum careerpilot_build/v2/p*
+            echo '=== HASH CHECK ==='
+            sha256sum -c expected-chunks.sha256
+            chunk_status=$?
+            echo "chunk_status=$chunk_status"
+            echo '=== REASSEMBLED ARCHIVE ==='
+            cat careerpilot_build/v2/p* > careerpilot_project.b64
+            wc -c careerpilot_project.b64
+            base64 --decode careerpilot_project.b64 > careerpilot_project.zip
+            decode_status=$?
+            echo "decode_status=$decode_status"
+            sha256sum careerpilot_project.zip
+            echo '19e06f3c7e71b0cf49da6a6f92edfe0697f229460b62cdabb2e45037f0808dac  careerpilot_project.zip' | sha256sum -c -
+            archive_status=$?
+            echo "archive_status=$archive_status"
+          } 2>&1 | tee transfer-manifest.txt
+          exit 0
+
+      - name: Upload transfer manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-transfer-manifest
+          path: transfer-manifest.txt
+          retention-days: 1

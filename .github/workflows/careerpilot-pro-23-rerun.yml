@@ -1,0 +1,127 @@
+name: CareerPilot Pro 2.3 Verified Recovery APK
+
+on:
+  push:
+    branches: [careerpilot-pro-v1-20260803]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android API 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reconstruct and patch verified source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          LOG="$GITHUB_WORKSPACE/careerpilot-pro-23-rerun.log"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > source.tar.xz
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  source.tar.xz" | sha256sum -c - | tee "$LOG"
+          mkdir build-src
+          tar -xJf source.tar.xz -C build-src
+          python careerpilot_build/pro_v2/apply_compiler_fixes.py | tee -a "$LOG"
+          python careerpilot_build/pro_v2/apply_compiler_fixes_2.py | tee -a "$LOG"
+
+          cat careerpilot_build/pro_v22_patch/part{00..04}.b64 > v22.xz.b64
+          echo "a96b940b66a7bfb30a1447eb8d60acf149d2978d1f92dac086f4ecc0655c2811  v22.xz.b64" | sha256sum -c - | tee -a "$LOG"
+          base64 -d v22.xz.b64 > v22.xz
+          echo "0eac18187e9688ad8979c0db32f5e09382332214f87f186b0d404400a1c58320  v22.xz" | sha256sum -c - | tee -a "$LOG"
+          xz -dc v22.xz > v22.patch
+          echo "f3e4a974ce1731ab7f9227bcf7c1f0a37cb0c678ad88f25f3d0783b5a04f13f4  v22.patch" | sha256sum -c - | tee -a "$LOG"
+          (cd build-src/CareerPilotAI && patch -p4 --forward --batch < "$GITHUB_WORKSPACE/v22.patch") | tee -a "$LOG"
+
+          cat careerpilot_build/pro_v23_patch/part{00..04}.b64 > v23.xz.b64
+          echo "27d032546b249e190e7c6dbfb6d4e9f53c3d000c763198f91de9349dedb8cd92  v23.xz.b64" | sha256sum -c - | tee -a "$LOG"
+          base64 -d v23.xz.b64 > v23.xz
+          echo "6a76da41686e4ec56b91e30179e71220f19cafd7e7db6e5f5a1580edf74ed575  v23.xz" | sha256sum -c - | tee -a "$LOG"
+          xz -dc v23.xz > v23.patch
+          echo "ad600e430e4c0785e01e00215494eecbf8732f5e80a4371de4b5f1f5cd185589  v23.patch" | sha256sum -c - | tee -a "$LOG"
+          (cd build-src/CareerPilotAI && patch -p1 --forward --batch < "$GITHUB_WORKSPACE/v23.patch") | tee -a "$LOG"
+          python careerpilot_build/pro_v23_patch/apply_compile_fixes.py | tee -a "$LOG"
+
+          grep -q 'versionName = "2.3.0-core-recovery"' build-src/CareerPilotAI/app/build.gradle.kts
+          grep -q "trim(',', ' ')" build-src/CareerPilotAI/app/src/main/java/com/careerpilot/ai/discovery/JobDiscovery.kt
+          grep -q 'object ProfessionalPdfRenderer' build-src/CareerPilotAI/app/src/main/java/com/careerpilot/ai/data/ProfessionalPdfRenderer.kt
+          grep -q 'object RoleMatchScorer' build-src/CareerPilotAI/app/src/main/java/com/careerpilot/ai/discovery/JobQuality.kt
+
+      - name: Live feed smoke tests
+        shell: bash
+        run: |
+          set +e
+          LOG="$GITHUB_WORKSPACE/careerpilot-pro-23-rerun.log"
+          ok=0
+          for url in 'https://remotive.com/api/remote-jobs?search=mechanical&limit=1' 'https://jobicy.com/api/v2/remote-jobs?count=1&tag=engineering' 'https://remoteok.com/api' 'https://www.arbeitnow.com/api/job-board-api'; do
+            code=$(curl -L --max-time 20 -A 'CareerPilotAI/2.3' -o /tmp/feed.out -s -w '%{http_code}' "$url")
+            bytes=$(wc -c < /tmp/feed.out 2>/dev/null || echo 0)
+            echo "SEARCH_ROUTE http=$code bytes=$bytes url=$url" | tee -a "$LOG"
+            [[ "$code" == "200" && "$bytes" -gt 50 ]] && ok=$((ok+1))
+          done
+          echo "SEARCH_ROUTES_AVAILABLE=$ok/4" | tee -a "$LOG"
+          test "$ok" -ge 3
+
+      - name: Build tests and APK
+        working-directory: build-src/CareerPilotAI
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-pro-23-rerun.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify and package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build-src/CareerPilotAI/app/build/outputs/apk/debug/app-debug.apk CareerPilotAI-Pro-2.3-Core-Recovery.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          {
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI-Pro-2.3-Core-Recovery.apk
+            "$AAPT" dump badging CareerPilotAI-Pro-2.3-Core-Recovery.apk
+            sha256sum CareerPilotAI-Pro-2.3-Core-Recovery.apk
+            unzip -t CareerPilotAI-Pro-2.3-Core-Recovery.apk | tail -n 2
+          } | tee CareerPilotAI-Pro-2.3-Core-Recovery.validation.txt | tee -a careerpilot-pro-23-rerun.log
+          sha256sum CareerPilotAI-Pro-2.3-Core-Recovery.apk > CareerPilotAI-Pro-2.3-Core-Recovery.apk.sha256
+          tar --exclude='.gradle' --exclude='**/build' -cJf CareerPilotAI-Pro-2.3-Core-Recovery-source.tar.xz -C build-src CareerPilotAI
+          sha256sum CareerPilotAI-Pro-2.3-Core-Recovery-source.tar.xz > CareerPilotAI-Pro-2.3-Core-Recovery-source.tar.xz.sha256
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.3-rerun-diagnostics
+          path: careerpilot-pro-23-rerun.log
+          retention-days: 1
+
+      - name: Upload verified build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.3-Core-Recovery
+          path: |
+            CareerPilotAI-Pro-2.3-Core-Recovery.apk
+            CareerPilotAI-Pro-2.3-Core-Recovery.apk.sha256
+            CareerPilotAI-Pro-2.3-Core-Recovery.validation.txt
+            CareerPilotAI-Pro-2.3-Core-Recovery-source.tar.xz
+            CareerPilotAI-Pro-2.3-Core-Recovery-source.tar.xz.sha256
+          retention-days: 1

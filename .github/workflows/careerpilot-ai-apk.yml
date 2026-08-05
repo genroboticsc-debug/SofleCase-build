@@ -1,0 +1,175 @@
+name: CareerPilot AI Android APK
+
+on:
+  push:
+    branches:
+      - careerpilot-apk-build-20260802
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reassemble and verify exact source archive
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '=== CAREERPILOT SOURCE CHUNK BYTE COUNTS ==='
+            wc -c careerpilot_build/v2/p0[0-9] careerpilot_build/v2/p10 careerpilot_build/v2/p11_parts/q0[0-6] careerpilot_build/v2/p11_parts/r*
+            echo '=== CAREERPILOT SOURCE CHUNK HASHES ==='
+            sha256sum careerpilot_build/v2/p0[0-9] careerpilot_build/v2/p10 careerpilot_build/v2/p11_parts/q0[0-6] careerpilot_build/v2/p11_parts/r*
+            echo '=== CAREERPILOT SOURCE REASSEMBLY ==='
+            cat careerpilot_build/v2/p0[0-9] careerpilot_build/v2/p10 careerpilot_build/v2/p11_parts/q0[0-6] careerpilot_build/v2/p11_parts/r* > careerpilot_project.b64
+            wc -c careerpilot_project.b64
+            base64 --decode careerpilot_project.b64 > careerpilot_project.zip
+            decode_status=$?
+            echo "decode_status=$decode_status"
+            sha256sum careerpilot_project.zip
+            echo "19e06f3c7e71b0cf49da6a6f92edfe0697f229460b62cdabb2e45037f0808dac  careerpilot_project.zip" | sha256sum -c -
+            archive_status=$?
+            echo "archive_status=$archive_status"
+            if [ "$decode_status" -ne 0 ] || [ "$archive_status" -ne 0 ]; then
+              exit 1
+            fi
+            rm -rf build-src
+            mkdir build-src
+            unzip -q careerpilot_project.zip -d build-src
+            test -f build-src/CareerPilotAI/settings.gradle.kts
+            test -f build-src/CareerPilotAI/app/build.gradle.kts
+          } 2>&1 | tee "$GITHUB_WORKSPACE/careerpilot-build.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Apply exact build compatibility fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build-src/CareerPilotAI/app/build.gradle.kts")
+          lines = path.read_text(encoding="utf-8").splitlines()
+
+          expected = [
+              "    kotlinOptions {",
+              "        jvmTarget = \"17\"",
+              "    }",
+          ]
+          replacement = [
+              "    kotlin {",
+              "        compilerOptions {",
+              "            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)",
+              "        }",
+              "    }",
+          ]
+          matches = [i for i in range(len(lines) - 2) if lines[i:i + 3] == expected]
+          if matches != [38]:
+              raise SystemExit(f"Expected one exact kotlinOptions block at source lines 39-41; found {matches}")
+          index = matches[0]
+          lines[index:index + 3] = replacement
+
+          pins = {
+              '    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")':
+                  '    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")',
+              '    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")':
+                  '    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")',
+          }
+          for old, new in pins.items():
+              count = lines.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one exact dependency line {old!r}; found {count}")
+              lines[lines.index(old)] = new
+
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          grep -n -A5 -B2 'compilerOptions' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+          grep -n 'androidx.lifecycle' build-src/CareerPilotAI/app/build.gradle.kts | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+
+      - name: Apply exact Kotlin source fixes
+        shell: bash
+        run: |
+          python3 careerpilot_build/apply_exact_source_fixes.py | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+
+      - name: Compile tests and package debug APK
+        working-directory: build-src/CareerPilotAI
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace clean testDebugUnitTest assembleDebug 2>&1 | tee -a "$GITHUB_WORKSPACE/careerpilot-build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/CareerPilotAI.apk"
+          sha256sum "$GITHUB_WORKSPACE/CareerPilotAI.apk" > "$GITHUB_WORKSPACE/CareerPilotAI.apk.sha256"
+
+      - name: Verify APK signature and package metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          {
+            echo '=== APK SIGNATURE ==='
+            "$APKSIGNER" verify --verbose --print-certs CareerPilotAI.apk
+            echo '=== APK PACKAGE METADATA ==='
+            "$AAPT" dump badging CareerPilotAI.apk
+            echo '=== APK SHA256 ==='
+            sha256sum CareerPilotAI.apk
+          } | tee CareerPilotAI.validation.txt | tee -a careerpilot-build.log
+
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-build-diagnostics
+          path: careerpilot-build.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload installable APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Android-APK
+          path: |
+            CareerPilotAI.apk
+            CareerPilotAI.apk.sha256
+            CareerPilotAI.validation.txt
+          if-no-files-found: error
+          retention-days: 1

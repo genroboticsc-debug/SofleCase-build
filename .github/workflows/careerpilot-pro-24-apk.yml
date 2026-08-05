@@ -1,0 +1,62 @@
+name: CareerPilot Pro 2.4 Core Hotfix APK
+
+on:
+  push:
+    branches: [careerpilot-v24-hotfix-20260804]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Reconstruct, test, build and verify CareerPilot 2.4
+        shell: bash
+        run: bash careerpilot_build/pro_v24_hotfix/build.sh
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.4-build-diagnostics
+          path: careerpilot-pro-24-build.log
+          if-no-files-found: warn
+          retention-days: 2
+
+      - name: Upload verified build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.4-Core-Hotfix
+          path: |
+            CareerPilotAI-Pro-2.4.apk
+            CareerPilotAI-Pro-2.4.apk.sha256
+            CareerPilotAI-Pro-2.4.validation.txt
+            CareerPilotAI-Pro-2.4-source.tar.xz
+            CareerPilotAI-Pro-2.4-source.tar.xz.sha256
+          if-no-files-found: error
+          retention-days: 2

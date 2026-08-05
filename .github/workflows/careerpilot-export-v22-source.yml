@@ -1,0 +1,55 @@
+name: Export CareerPilot 2.2 Source
+
+on:
+  push:
+    branches:
+      - careerpilot-pro-v1-20260803
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact 2.2 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SOURCE="CareerPilotAI_Pro_2.0.0_source.tar.xz"
+          cat careerpilot_build/pro_v2/chunks/part{00..23} > "$SOURCE"
+          echo "8801d9153864d3da6d90075fbda17c49b84d2a427d2349baf32551370e767b24  $SOURCE" | sha256sum -c -
+          mkdir build-src
+          tar -xJf "$SOURCE" -C build-src
+          python careerpilot_build/pro_v2/apply_compiler_fixes.py
+          python careerpilot_build/pro_v2/apply_compiler_fixes_2.py
+
+          cat careerpilot_build/pro_v22_patch/part{00..04}.b64 > careerpilot-22.patch.xz.b64
+          echo "a96b940b66a7bfb30a1447eb8d60acf149d2978d1f92dac086f4ecc0655c2811  careerpilot-22.patch.xz.b64" | sha256sum -c -
+          base64 -d careerpilot-22.patch.xz.b64 > careerpilot-22.patch.xz
+          echo "0eac18187e9688ad8979c0db32f5e09382332214f87f186b0d404400a1c58320  careerpilot-22.patch.xz" | sha256sum -c -
+          xz -dc careerpilot-22.patch.xz > careerpilot-22.patch
+          echo "f3e4a974ce1731ab7f9227bcf7c1f0a37cb0c678ad88f25f3d0783b5a04f13f4  careerpilot-22.patch" | sha256sum -c -
+
+          ROOT=$(find build-src -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          test -n "$ROOT"
+          cd "$ROOT"
+          patch -p4 --forward --batch < "$GITHUB_WORKSPACE/careerpilot-22.patch"
+          grep -q 'versionName = "2.2.0-beta"' app/build.gradle.kts
+          cd "$GITHUB_WORKSPACE"
+          mv "$ROOT" CareerPilotAI-Pro-2.2-source
+          zip -qr CareerPilotAI-Pro-2.2-source.zip CareerPilotAI-Pro-2.2-source
+          sha256sum CareerPilotAI-Pro-2.2-source.zip > CareerPilotAI-Pro-2.2-source.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-2.2-Exact-Source
+          path: |
+            CareerPilotAI-Pro-2.2-source.zip
+            CareerPilotAI-Pro-2.2-source.zip.sha256
+          if-no-files-found: error
+          retention-days: 1
