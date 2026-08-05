@@ -1,0 +1,44 @@
+name: DracuLad Kailh compact datum extraction
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'draculad_kailh/branch_datum_extract.py'
+      - '.github/workflows/draculad-kailh-datums.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install 'build123d==0.9.1'
+      - name: Download exact pinned reference
+        run: |
+          curl --fail --location --retry 5 --output reference.step \
+            'https://raw.githubusercontent.com/foostan/kbd/230c6d634a8d409cbd1c506ec0260420a08a1c83/kicad-packages3D/kbd.3dshapes/kailh%20cherry%20socket%20soldered.step'
+          echo '0b938e39f0fd84a6b424ef9c49f2c6aa8a232fa2a68f9105a0f9b821c987cc56  reference.step' | sha256sum --check
+      - name: Extract compact feature datums
+        run: |
+          mkdir -p artifacts/branch_datums
+          set +e
+          timeout 120s env PYTHONPATH=draculad_kailh \
+            python draculad_kailh/branch_datum_extract.py \
+            > artifacts/branch_datums.log 2>&1
+          echo "$?" > artifacts/branch_datums.exit
+          cat artifacts/branch_datums.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: draculad-kailh-branch-datums
+          path: artifacts/
+          retention-days: 7
