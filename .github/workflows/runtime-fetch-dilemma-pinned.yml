@@ -1,0 +1,36 @@
+name: Temporary Pinned Dilemma Source Fetch
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-pinned-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact pinned Dilemma commit
+        uses: actions/checkout@v5
+        with:
+          repository: Bastardkb/Dilemma
+          ref: f5cffb4821fe560b095418b71382ac7d8043c61a
+          path: dilemma-pinned
+          fetch-depth: 1
+          lfs: true
+      - name: Verify pinned commit and inventory hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(git -C dilemma-pinned rev-parse HEAD)
+          test "$actual" = 'f5cffb4821fe560b095418b71382ac7d8043c61a'
+          printf '%s\n' "$actual" > dilemma-pinned/PINNED_COMMIT.txt
+          find dilemma-pinned/mechanical -type f -print0 | sort -z | xargs -0 sha256sum > dilemma-pinned/MECHANICAL_SHA256SUMS.txt
+      - name: Upload exact pinned repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pinned-f5cffb4821fe560b095418b71382ac7d8043c61a
+          path: dilemma-pinned/
+          retention-days: 1
+          if-no-files-found: error
