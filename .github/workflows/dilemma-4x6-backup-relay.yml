@@ -1,0 +1,40 @@
+name: Dilemma 4x6 backup relay
+
+on:
+  push:
+    branches: [runtime-relay-p308]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Recover exact 4x6 production backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --branch 3.1 --single-branch https://github.com/Bastardkb/Dilemma.git source
+          cd source
+          git lfs install --local
+          git lfs pull
+          src='4x6_4/production/backups/dilemma_2_2025-06-23_17-26-18.zip'
+          test -f "$src"
+          mkdir -p ../evidence/extracted
+          cp "$src" ../evidence/
+          sha256sum "$src" > ../evidence/BACKUP_SHA256.txt
+          unzip -l "$src" > ../evidence/BACKUP_LISTING.txt
+          unzip -q "$src" -d ../evidence/extracted
+          cd ..
+          find evidence/extracted -type f -print0 | sort -z | xargs -0 sha256sum > evidence/EXTRACTED_SHA256.txt
+          find evidence/extracted -type f | sort > evidence/EXTRACTED_FILES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-4x6-production-backup
+          path: evidence
+          retention-days: 3
+          compression-level: 9
