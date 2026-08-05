@@ -1,4 +1,4 @@
-name: Immutable top analytic bore-wall refinement
+name: Final top strict SROT production package
 
 on:
   pull_request:
@@ -6,14 +6,14 @@ on:
     types: [opened, reopened, synchronize]
     paths:
       - .github/workflows/tmp-top-srot-immutable-validation.yml
-      - tmp_top_validation/validate_direct_final_solid.py
-      - tmp_top_validation/run_analytic_bore_wall_refinement.py
+      - tmp_top_validation/top_production_export.py
+      - tmp_top_validation/validate_final_production_package.py
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  build-validate-package:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -23,13 +23,13 @@ jobs:
           ref: cc3523043a98f97d5a7938e48cdbb947990f4a09
           fetch-depth: 1
 
-      - name: Inject frozen direct validator and analytic bore refinement
+      - name: Inject frozen production exporter and final validator
         shell: bash
         run: |
           set -euxo pipefail
           git fetch --depth=1 origin tmp/top-engraving-frozen-validation-20260805
-          git show FETCH_HEAD:tmp_top_validation/validate_direct_final_solid.py > tmp_top_validation/validate_direct_final_solid.py
-          git show FETCH_HEAD:tmp_top_validation/run_analytic_bore_wall_refinement.py > tmp_top_validation/run_analytic_bore_wall_refinement.py
+          git show FETCH_HEAD:tmp_top_validation/top_production_export.py > tmp_top_validation/top_production_export.py
+          git show FETCH_HEAD:tmp_top_validation/validate_final_production_package.py > tmp_top_validation/validate_final_production_package.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig cabextract curl xz-utils
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fontconfig cabextract curl xz-utils zip
           FONT_TMP="$(mktemp -d)"
           curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 -o "$FONT_TMP/arial32.exe" https://downloads.sourceforge.net/corefonts/arial32.exe
           cabextract -q -d "$FONT_TMP" "$FONT_TMP/arial32.exe"
@@ -67,7 +67,7 @@ jobs:
           xz --decompress --stdout "$REF_DIR"/top.stl.xz > "$REF_DIR"/top.stl
           test "$(sha256sum "$REF_DIR"/top.stl | awk '{print $1}')" = "d9cd3e5cae398287140e92136a87a7aa1ed6ec4433434fca0cf0b661ca869cac"
 
-      - name: Install recovered feature-tree migrations and run strict SROT
+      - name: Materialize final recovered source and run strict SROT
         shell: bash
         run: |
           set -euxo pipefail
@@ -78,28 +78,143 @@ jobs:
           python tmp_top_validation/apply_f012_lowercase_v_fix.py
           python -m py_compile \
             tmp_top_validation/top_parametric.py \
+            tmp_top_validation/top_production_export.py \
             tmp_top_validation/strict_srot_check.py \
             tmp_top_validation/validate_fast_manifold.py \
             tmp_top_validation/validate_feature_tree_manifold.py \
             tmp_top_validation/validate_direct_final_solid.py \
-            tmp_top_validation/run_analytic_bore_wall_refinement.py
+            tmp_top_validation/validate_final_production_package.py
           python tmp_top_validation/strict_srot_check.py
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          path = Path('tmp_top_validation/top_production_export.py')
+          source = path.read_text(encoding='utf-8')
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name for alias in node.names)
+              elif isinstance(node, ast.ImportFrom):
+                  imported.add(node.module or '')
+          forbidden_imports = {
+              'validate_direct_final_solid',
+              'validate_fast_manifold',
+              'validate_feature_tree_manifold',
+          }
+          forbidden_names = {'REFERENCE', 'REFERENCE_STL', 'reference_mesh'}
+          names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+          checks = {
+              'no_validation_module_imports': not bool(imported & forbidden_imports),
+              'no_reference_identifiers': not bool(names & forbidden_names),
+              'no_step_or_stl_import_calls': 'import_step(' not in source and 'import_stl(' not in source,
+              'no_serialized_brep': '.brep' not in source.lower() and 'pickle' not in source.lower(),
+              'analytic_feature_tree_dependency': 'import top_parametric as tp' in source,
+              'formula_based_adaptive_bores': 'analytic_strip' in source and 'ADAPTIVE_BORE_NAMES' in source,
+          }
+          Path('tmp_top_validation/strict_production_export_report.json').write_text(
+              __import__('json').dumps({'checks': checks, 'pass': all(checks.values())}, indent=2),
+              encoding='utf-8',
+          )
+          if not all(checks.values()):
+              raise SystemExit(f'Production exporter SROT audit failed: {checks}')
+          print(checks)
+          PY
           git diff --check
 
-      - name: Run analytic bore-wall Boolean validation
+      - name: Export production STEP and STL
         shell: bash
         run: |
-          set -o pipefail
-          rm -rf tmp_top_validation/generated/analytic_bore_wall_refinement
-          python tmp_top_validation/run_analytic_bore_wall_refinement.py 2>&1 | tee tmp_top_validation/analytic_bore_wall_refinement.log
+          set -euxo pipefail
+          rm -rf tmp_top_validation/generated/final_top tmp_top_validation/generated/final_authoritative_validation
+          python tmp_top_validation/top_production_export.py
 
-      - name: Upload analytic bore-wall evidence
+      - name: Run authoritative final validation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tmp_top_validation/validate_final_production_package.py | tee tmp_top_validation/final_validation.log
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('tmp_top_validation/generated/final_top/final_validation_report.json').read_text())
+          assert report['overall_pass'] is True, report
+          validation = report['authoritative_validation']
+          assert validation['strict_pass'] is True, validation
+          assert validation['symmetric_difference_percent'] < 0.01, validation
+          print(json.dumps({
+              'overall_pass': report['overall_pass'],
+              'symmetric_difference_percent': validation['symmetric_difference_percent'],
+              'symmetric_difference_mm3': validation['symmetric_difference_mm3'],
+              'volume_difference_percent': validation['volume_difference_percent'],
+              'area_difference_percent': validation['area_difference_percent'],
+              'com_shift_percent_bbox_diagonal': validation['com_shift_percent_bbox_diagonal'],
+          }, indent=2))
+          PY
+
+      - name: Assemble reproducible final package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PKG=tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05
+          rm -rf "$PKG" tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip
+          mkdir -p "$PKG/source" "$PKG/output" "$PKG/validation" "$PKG/provenance"
+          cp tmp_top_validation/top_parametric.py "$PKG/source/"
+          cp tmp_top_validation/top_production_export.py "$PKG/source/"
+          cp tmp_top_validation/strict_srot_check.py "$PKG/source/"
+          cp tmp_top_validation/requirements.txt "$PKG/source/"
+          cp tmp_top_validation/generated/final_top/top_parametric.step "$PKG/output/"
+          cp tmp_top_validation/generated/final_top/top_parametric.stl "$PKG/output/"
+          cp tmp_top_validation/generated/final_top/top_native_raw.stl "$PKG/output/"
+          cp tmp_top_validation/generated/final_top/top_export_audit.json "$PKG/validation/"
+          cp tmp_top_validation/generated/final_top/final_validation_report.json "$PKG/validation/"
+          cp tmp_top_validation/strict_srot_report.json "$PKG/validation/"
+          cp tmp_top_validation/strict_production_export_report.json "$PKG/validation/"
+          cp tmp_top_validation/final_validation.log "$PKG/validation/"
+          cp -r tmp_top_validation/generated/final_authoritative_validation "$PKG/validation/authoritative_evidence"
+          printf '%s\n' 'cc3523043a98f97d5a7938e48cdbb947990f4a09' > "$PKG/provenance/immutable_source_commit.txt"
+          printf '%s\n' '${{ github.sha }}' > "$PKG/provenance/workflow_commit.txt"
+          python - <<'PY'
+          import json
+          import platform
+          from pathlib import Path
+          import build123d, manifold3d, numpy, scipy, shapely, trimesh
+          try:
+              import OCP
+              ocp_version = getattr(OCP, '__version__', 'cadquery-ocp-novtk 7.9.3.1.1 pinned')
+          except Exception:
+              ocp_version = 'cadquery-ocp-novtk 7.9.3.1.1 pinned'
+          env = {
+              'python': platform.python_version(),
+              'build123d': getattr(build123d, '__version__', '0.11.1'),
+              'ocp': ocp_version,
+              'manifold3d': getattr(manifold3d, '__version__', '3.5.2'),
+              'numpy': numpy.__version__,
+              'scipy': scipy.__version__,
+              'shapely': shapely.__version__,
+              'trimesh': trimesh.__version__,
+              'font': 'Arial Regular',
+              'font_sha256': '35c0f3559d8db569e36c31095b8a60d441643d95f59139de40e23fada819b833',
+          }
+          Path('tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05/provenance/environment.json').write_text(json.dumps(env, indent=2))
+
+          report = json.loads(Path('tmp_top_validation/generated/final_top/final_validation_report.json').read_text())
+          v = report['authoritative_validation']
+          readme = f'''# Dilemma top — Strict SROT PASS\n\nThis package contains a genuine analytic Build123d F001-F012 feature tree, production STEP/STL outputs, and clean-build validation evidence.\n\n## Final validation\n\n- Strict SROT: PASS\n- Bidirectional Boolean symmetric difference: {v['symmetric_difference_mm3']:.12f} mm^3 ({v['symmetric_difference_percent']:.12f}%)\n- Volume difference: {v['volume_difference_percent']:.12f}%\n- Surface-area difference: {v['area_difference_percent']:.12f}%\n- COM shift / reference bbox diagonal: {v['com_shift_percent_bbox_diagonal']:.12f}%\n- Generated STL watertight: {v['checks']['generated_watertight']}\n- Generated STL one valid volume: {v['checks']['generated_is_volume']}\n- Production STL canonical congruence: {report['final_checks']['production_stl_canonical_triangle_congruent']}\n\n## Rebuild\n\nInstall `source/requirements.txt`, install Arial Regular with the checksum recorded in `provenance/environment.json`, then run:\n\n```bash\npython source/top_production_export.py\n```\n\nThe exporter reads no reference geometry. The reference STL is used only by the validation workflow.\n'''
+          Path('tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05/README.md').write_text(readme)
+          PY
+          (cd "$PKG" && find . -type f -print0 | sort -z | xargs -0 sha256sum > checksums.sha256)
+          (cd tmp_top_validation && zip -q -9 -r Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip Dilemma_top_STRICT_SROT_PASS_2026-08-05)
+          sha256sum tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip > tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip.sha256
+
+      - name: Upload final strict SROT package
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immutable-top-analytic-bore-wall-${{ github.run_id }}
+          name: Dilemma-top-STRICT-SROT-PASS-${{ github.run_id }}
           path: |
-            tmp_top_validation/generated/analytic_bore_wall_refinement/**
-            tmp_top_validation/analytic_bore_wall_refinement.log
-            tmp_top_validation/strict_srot_report.json
+            tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip
+            tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05.zip.sha256
+            tmp_top_validation/Dilemma_top_STRICT_SROT_PASS_2026-08-05/**
           if-no-files-found: warn
