@@ -1,0 +1,75 @@
+name: CareerPilot APK Build
+
+on:
+  push:
+    branches:
+      - careerpilot-apk-build-20260805
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Restore and verify CareerPilot source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .careerpilot-build/source.xz.b64.part* > /tmp/source.b64
+          base64 --decode /tmp/source.b64 > /tmp/source.tar.xz
+          echo "2f07e23c03398e68f05513b7708bb67149c7d67f5063cf0328bf3b0c01d7dfc4  /tmp/source.tar.xz" | sha256sum --check
+          mkdir -p careerpilot
+          tar -xJf /tmp/source.tar.xz -C careerpilot
+          test -f careerpilot/settings.gradle.kts
+          test -f careerpilot/app/build.gradle.kts
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build latest debug APK
+        working-directory: careerpilot
+        shell: bash
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify and package APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          cp careerpilot/app/build/outputs/apk/debug/app-debug.apk artifact/CareerPilotAI-Pro-3.0.0-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose artifact/CareerPilotAI-Pro-3.0.0-debug.apk
+          sha256sum artifact/CareerPilotAI-Pro-3.0.0-debug.apk > artifact/CareerPilotAI-Pro-3.0.0-debug.apk.sha256
+          unzip -t artifact/CareerPilotAI-Pro-3.0.0-debug.apk
+
+      - name: Upload verified APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CareerPilotAI-Pro-3.0.0-debug
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 7
