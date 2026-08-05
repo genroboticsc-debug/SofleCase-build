@@ -1,1 +1,2 @@
-Trigger verified upstream 35 mm trackpad source retrieval for P314.
+Trigger verified upstream CAD history audit for P314.
+Revision 3: search all commits for native trackpad and Procyon source assets.
