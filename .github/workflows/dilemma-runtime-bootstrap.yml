@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - agent/dilemma-runtime-bootstrap-20260807
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/dilemma-runtime-bootstrap.yml
   workflow_dispatch:
 
 permissions:
