@@ -1,0 +1,29 @@
+name: Temporary OCP wheel recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download pinned OCP wheels
+        run: |
+          mkdir -p wheelhouse
+          python -m pip download --no-deps --dest wheelhouse \
+            cadquery-ocp-novtk==7.9.3.1.1 \
+            cadquery-ocp-proxy==7.9.3.1.1
+          sha256sum wheelhouse/* > wheelhouse/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cadquery-ocp-novtk-cp313
+          path: wheelhouse
+          if-no-files-found: error
