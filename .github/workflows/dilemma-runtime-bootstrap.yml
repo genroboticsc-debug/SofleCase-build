@@ -2,14 +2,13 @@ name: Temporary Dilemma exact-runtime bootstrap
 
 on:
   push:
-    branches: [master]
-    paths:
-      - .github/workflows/dilemma-runtime-bootstrap.yml
+    branches:
+      - agent/dilemma-runtime-bootstrap-20260807
   pull_request:
-    branches: [master]
+    branches:
+      - master
     paths:
       - .github/workflows/dilemma-runtime-bootstrap.yml
-      - .github/dilemma-runtime-bootstrap-trigger.txt
   workflow_dispatch:
 
 permissions:
@@ -17,7 +16,8 @@ permissions:
 
 jobs:
   bundle:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - name: Check out bootstrap repository
         uses: actions/checkout@v4
@@ -32,8 +32,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p bundle/wheels
+          python -m pip install --upgrade pip
           python -m pip download --only-binary=:all: --no-deps \
-            build123d==0.11.1 manifold3d==3.5.2 \
+            build123d==0.11.1 \
+            manifold3d==3.5.2 \
+            numpy==2.5.1 \
+            trimesh==4.8.3 \
+            networkx==3.5 \
             --dest bundle/wheels
 
           BUILD123D_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'build123d-0.11.1-*.whl' -print -quit)"
@@ -48,32 +53,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git init dilemma-reference
-          git -C dilemma-reference remote add origin https://github.com/Bastardkb/Dilemma.git
-          git -C dilemma-reference fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a
-          git -C dilemma-reference checkout --detach FETCH_HEAD
-
-          mkdir -p bundle/reference
-          while IFS= read -r relative_path; do
-            mkdir -p "bundle/reference/$(dirname "$relative_path")"
-            cp "dilemma-reference/$relative_path" "bundle/reference/$relative_path"
-          done <<'EOF'
-          mechanical/cases/3x5_2/tenting_puck/tenting_puck_v3_26.stl
-          mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Integrated Tenting Puck.STEP
-          mechanical/cases/3x5_2/tenting_puck_hex/STEP/Dilemma Case Tenting Puck Opening.STEP
-          mechanical/cases/3x5_2/thin/dilemma_nuts v27.step
-          mechanical/cases/3x5_3_hotswap/mid.stl
-          mechanical/cases/4x6_4/top.stl
-          mechanical/cases/4x6_4_hotswap/mid.stl
-          EOF
-
+          git init bundle/dilemma-reference
+          git -C bundle/dilemma-reference remote add origin https://github.com/Bastardkb/Dilemma.git
+          git -C bundle/dilemma-reference fetch --depth=1 origin f5cffb4821fe560b095418b71382ac7d8043c61a
+          git -C bundle/dilemma-reference checkout --detach FETCH_HEAD
           printf '%s\n' 'f5cffb4821fe560b095418b71382ac7d8043c61a' > bundle/DILEMMA_REFERENCE_COMMIT.txt
           find bundle -type f -print0 | sort -z | xargs -0 sha256sum > bundle/SHA256SUMS.txt
 
-      - name: Upload exact runtime and references
+      - name: Upload exact runtime and reference checkout
         uses: actions/upload-artifact@v4
         with:
-          name: dilemma-exact-runtime-and-references
+          name: dilemma-exact-runtime-wheels-py313-linux
           path: bundle
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
