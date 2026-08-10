@@ -1,0 +1,112 @@
+name: Mouse Spring Native Diagnostics
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'mouse_runtime/spring_src/**'
+      - '.github/workflows/mouse-spring-diagnostics.yml'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CAD runtime
+        run: python -m pip install 'build123d==0.11.1' 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
+      - name: Reconstruct Spring source
+        shell: bash
+        run: cat mouse_runtime/spring_src/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py.part* > mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py
+      - name: Probe F115/F127 rolling-center branches and R1 ownership halfspaces
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, sys, traceback
+          from pathlib import Path
+          sys.path.insert(0,str(Path('mouse_runtime').resolve()))
+          import ScrollWheelSpring_R1OwnedSectors_Build123d_Lean as s
+          from build123d import Keep, Plane
+
+          def bbox(obj):
+              b=obj.bounding_box(); return {'min':[b.min.X,b.min.Y,b.min.Z],'max':[b.max.X,b.max.Y,b.max.Z]}
+          def info(obj):
+              return {'valid':bool(obj.is_valid),'volume_mm3':float(obj.volume),'solids':len(obj.solids()),'faces':len(obj.faces()),'edges':len(obj.edges()),'bbox':bbox(obj)}
+          out={'r05':{},'r1':{}}
+          for fid in ('F115','F127'):
+              row={}
+              try:
+                  sf='F071' if fid=='F115' else 'F072'
+                  center_edges=s._intersection_edges(s._cyl_side(sf,4.5),s._torus_side(4.5))
+                  row['center_edges']=[{'length':float(e.length),'bbox':bbox(e),'ends':[[p.X,p.Y,p.Z] for p in s._edge_ends(e)]} for e in center_edges]
+                  pipe=s._r05_pipe(fid)
+                  row['pipe']=info(pipe)
+                  row['sections']={}
+                  for x in (s.X_OUTER,s.X_BUILD,s.X_INNER,s.X_END,-5.962652818509001,-7.962652818509001):
+                      try:
+                          ee=s._section_edges(pipe,x)
+                          row['sections'][repr(x)]=[{'length':float(e.length),'bbox':bbox(e)} for e in ee]
+                      except Exception as exc:
+                          row['sections'][repr(x)]={'error':repr(exc)}
+              except Exception as exc:
+                  row['error']=repr(exc); row['traceback']=traceback.format_exc()
+              out['r05'][fid]=row
+
+          try:
+              raw=s.build_canal('F139')
+              out['r1']['raw_F139']=info(raw)
+              planes=[
+                ('F061_y',s.R1_F061_LOC,s.R1_F061_YDIR),
+                ('F061_xminusy',s.R1_F061_LOC,tuple(s.R1_F061_XDIR[i]-s.R1_F061_YDIR[i] for i in range(3))),
+                ('F064_y',s.R1_F064_LOC,s.R1_F064_YDIR),
+                ('F064_xminusy',s.R1_F064_LOC,tuple(s.R1_F064_XDIR[i]-s.R1_F064_YDIR[i] for i in range(3))),
+              ]
+              current=[('raw',raw)]
+              for pname,origin,normal in planes:
+                  nexts=[]
+                  for cname,obj in current:
+                      for keep in (Keep.TOP,Keep.BOTTOM):
+                          key=f'{cname}__{pname}__{keep.name}'
+                          try:
+                              q=obj.split(Plane(origin=origin,z_dir=normal),keep)
+                              solids=list(q.solids()) if hasattr(q,'solids') else ([q] if hasattr(q,'volume') else [])
+                              out['r1'][key]={'solid_count':len(solids),'solid_info':[info(x) for x in solids]}
+                              for j,x in enumerate(solids): nexts.append((key+f'_{j}',x))
+                          except Exception as exc:
+                              out['r1'][key]={'error':repr(exc)}
+                  # Don't branch exponentially past the first plane; sequential ownership is probed separately below.
+                  if pname=='F061_y': current=nexts
+                  else: break
+
+              # Sequential four-plane combinations, 16 exact side choices.
+              import itertools
+              out['r1']['sequential_combinations']={}
+              for choices in itertools.product((Keep.TOP,Keep.BOTTOM),repeat=4):
+                  obj=raw; ok=True; history=[]
+                  for (pname,origin,normal),keep in zip(planes,choices):
+                      try:
+                          q=obj.split(Plane(origin=origin,z_dir=normal),keep)
+                          solids=list(q.solids()) if hasattr(q,'solids') else []
+                          history.append({'plane':pname,'keep':keep.name,'solid_count':len(solids),'volumes':[float(x.volume) for x in solids]})
+                          if len(solids)!=1:
+                              ok=False; break
+                          obj=solids[0]
+                      except Exception as exc:
+                          history.append({'plane':pname,'keep':keep.name,'error':repr(exc)}); ok=False; break
+                  key='-'.join(k.name for k in choices)
+                  out['r1']['sequential_combinations'][key]={'success':ok,'history':history,'final':info(obj) if ok else None}
+          except Exception as exc:
+              out['r1']['error']=repr(exc);out['r1']['traceback']=traceback.format_exc()
+
+          Path('mouse_runtime/ScrollWheelSpring_NATIVE_DIAGNOSTICS.json').write_text(json.dumps(out,indent=2,default=str))
+          print(json.dumps(out,indent=2,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scrollwheelspring-native-diagnostics
+          path: mouse_runtime/ScrollWheelSpring_NATIVE_DIAGNOSTICS.json
+          if-no-files-found: error
