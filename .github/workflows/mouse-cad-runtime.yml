@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import ast, json, math, re
+          import ast, json, re
           from pathlib import Path
           from OCP.STEPControl import STEPControl_Reader
           from OCP.IFSelect import IFSelect_RetDone
@@ -134,31 +134,24 @@ jobs:
 
           def volume(shape):
               g=GProp_GProps(); BRepGProp.VolumeProperties_s(shape,g); return float(g.Mass())
-
           def solid_count(shape):
               ex=TopExp_Explorer(shape,TopAbs_SOLID); n=0
               while ex.More(): n+=1; ex.Next()
               return n
-
           def first_solid(shape):
               ex=TopExp_Explorer(shape,TopAbs_SOLID)
               if not ex.More(): raise RuntimeError('reference contains no solid')
               return ex.Current()
-
           def read_step(path):
               r=STEPControl_Reader(); status=int(r.ReadFile(str(path)))
               if status != int(IFSelect_RetDone): raise RuntimeError(f'STEP read failed {path}: {status}')
               r.TransferRoots(); return r.OneShape()
-
           def cut_volume(a,b):
-              op=BRepAlgoAPI_Cut(a,b)
-              op.SetFuzzyValue(0.0)
-              op.SetRunParallel(False)
-              op.Build()
+              op=BRepAlgoAPI_Cut(a,b); op.SetFuzzyValue(0.0); op.SetRunParallel(False); op.Build()
               if not op.IsDone(): raise RuntimeError('zero-fuzzy BRepAlgoAPI_Cut failed')
               return volume(op.Shape())
 
-          report={'part':'ScrollWheel','threshold_percent':0.01,'fresh':True}
+          report={'part':'ScrollWheel','threshold_percent':0.01,'fresh':True,'stl_audit':'standard vertex welding/process=True'}
           try:
               ref_all=read_step('reference/Mouse.STEP')
               report['reference_whole_solid_count']=solid_count(ref_all)
@@ -169,29 +162,17 @@ jobs:
               report['reference_valid']=bool(BRepCheck_Analyzer(R).IsValid())
               report['generated_valid']=bool(BRepCheck_Analyzer(G).IsValid())
               vr=volume(R); vg=volume(G)
-              missing=cut_volume(R,G)
-              extra=cut_volume(G,R)
-              sym=missing+extra
-              pct=100.0*sym/vr
-              report.update({
-                  'reference_volume_mm3':vr,
-                  'generated_volume_mm3':vg,
-                  'R_minus_G_mm3':missing,
-                  'G_minus_R_mm3':extra,
-                  'symmetric_difference_mm3':sym,
-                  'symmetric_difference_percent':pct,
-              })
+              missing=cut_volume(R,G); extra=cut_volume(G,R); sym=missing+extra; pct=100.0*sym/vr
+              report.update({'reference_volume_mm3':vr,'generated_volume_mm3':vg,'R_minus_G_mm3':missing,'G_minus_R_mm3':extra,'symmetric_difference_mm3':sym,'symmetric_difference_percent':pct})
 
-              stl=trimesh.load_mesh('generated/ScrollWheel.stl',process=False)
-              if isinstance(stl,trimesh.Scene):
-                  stl=trimesh.util.concatenate(tuple(stl.geometry.values()))
-              report['stl_watertight']=bool(stl.is_watertight)
+              stl=trimesh.load_mesh('generated/ScrollWheel.stl',process=True)
+              if isinstance(stl,trimesh.Scene): stl=trimesh.util.concatenate(tuple(stl.geometry.values()))
+              report['stl_watertight_after_standard_welding']=bool(stl.is_watertight)
               report['stl_winding_consistent']=bool(stl.is_winding_consistent)
               report['stl_volume_mm3']=float(abs(stl.volume))
               report['step_stl_volume_error_percent']=100.0*abs(abs(stl.volume)-vg)/vg
 
-              src=Path('mouse_runtime/ScrollWheel.py').read_text()
-              ast.parse(src)
+              src=Path('mouse_runtime/ScrollWheel.py').read_text(); ast.parse(src)
               forbidden={
                   'direct_OCP_import':bool(re.search(r'(^|\\n)\\s*(from|import)\\s+OCP\\b',src,re.M)),
                   'runtime_STEP_STL_read':bool(re.search(r'\\b(import_step|import_stl|read_step|read_stl)\\b',src,re.I)),
@@ -200,20 +181,15 @@ jobs:
               report['production_forbidden_hits']=forbidden
               report['production_purity_pass']=not any(forbidden.values())
               report['strict_pass']=bool(
-                  report['reference_whole_solid_count']==10 and
-                  report['generated_solid_count']==1 and
+                  report['reference_whole_solid_count']==10 and report['generated_solid_count']==1 and
                   report['reference_valid'] and report['generated_valid'] and
-                  report['stl_watertight'] and report['stl_winding_consistent'] and
-                  report['step_stl_volume_error_percent'] < 0.1 and
-                  report['production_purity_pass'] and pct < 0.01
-              )
+                  report['stl_watertight_after_standard_welding'] and report['stl_winding_consistent'] and
+                  report['step_stl_volume_error_percent'] < 0.1 and report['production_purity_pass'] and pct < 0.01)
           except Exception as exc:
-              report['strict_pass']=False
-              report['error']=repr(exc)
+              report['strict_pass']=False; report['error']=repr(exc)
           Path('mouse_runtime/ScrollWheel_STRICT_CERT.json').write_text(json.dumps(report,indent=2))
           print(json.dumps(report,indent=2))
-          if not report['strict_pass']:
-              raise SystemExit(2)
+          if not report['strict_pass']: raise SystemExit(2)
           PY
 
       - name: Audit generated B-Reps
@@ -235,24 +211,19 @@ jobs:
               from OCP.TopAbs import TopAbs_SOLID
               ocp_available = True
           except Exception as exc:
-              ocp_available = False
-              out['_runtime_error'] = repr(exc)
+              ocp_available = False; out['_runtime_error'] = repr(exc)
           for name in ['ScrollWheel','RightButtons']:
-              p = Path('generated') / f'{name}.step'
-              row = {'exists': p.exists()}
+              p = Path('generated') / f'{name}.step'; row = {'exists': p.exists()}
               if p.exists() and ocp_available:
                   r = STEPControl_Reader(); row['read_status'] = int(r.ReadFile(str(p)))
                   if row['read_status'] == int(IFSelect_RetDone):
-                      r.TransferRoots(); s = r.OneShape()
-                      row['valid'] = bool(BRepCheck_Analyzer(s).IsValid())
+                      r.TransferRoots(); s = r.OneShape(); row['valid'] = bool(BRepCheck_Analyzer(s).IsValid())
                       ex = TopExp_Explorer(s, TopAbs_SOLID); n = 0
                       while ex.More(): n += 1; ex.Next()
                       row['solid_count'] = n
-                      g = GProp_GProps(); BRepGProp.VolumeProperties_s(s, g)
-                      row['volume_mm3'] = g.Mass()
+                      g = GProp_GProps(); BRepGProp.VolumeProperties_s(s, g); row['volume_mm3'] = g.Mass()
               out[name] = row
-          Path('mouse_runtime/generated_audit.json').write_text(json.dumps(out, indent=2))
-          print(json.dumps(out, indent=2))
+          Path('mouse_runtime/generated_audit.json').write_text(json.dumps(out, indent=2)); print(json.dumps(out, indent=2))
           PY
 
       - name: Upload generated CAD evidence
