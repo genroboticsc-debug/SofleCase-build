@@ -1,4 +1,5 @@
 name: Export retained Dilemma project
+# 2026-08-10 re-export for exact-runtime P044/P048 recovery
 
 on:
   pull_request:
