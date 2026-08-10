@@ -1,0 +1,101 @@
+name: Dilemma KiCad native EdgeCuts
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install KiCad 9 Python API
+        run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
+          sudo apt-get install -y kicad python3
+      - name: Checkout pinned source
+        run: |
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+      - name: Export native Edge.Cuts entities
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exports
+          cat > /tmp/export_native.py <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          import pcbnew
+
+          EXPECTED = {
+            '3x5_3': 'e914ce82c793044cecededead74a2af642506f2a6345d758b3c152c649e142c6',
+            '3x5_3_procyon': '79635af892b3a755ffaacccd17307e3f19316687a3b2ab7f95d78a84df6adff1',
+            '4x6_4': '1e22900adffdd4c14adf82420ab2d66558e5f3a44815a7c89627e432300f7262',
+          }
+          def mm(v): return float(v)/1_000_000.0
+          def pt(v): return [mm(v.x),mm(v.y)]
+          def maybe(obj,name):
+            try: return getattr(obj,name)()
+            except Exception: return None
+          def shape_record(item, owner):
+            layer = maybe(item,'GetLayerName')
+            if layer != 'Edge.Cuts': return None
+            typ = str(maybe(item,'GetShapeStr') or maybe(item,'GetShape') or type(item).__name__)
+            rec={'owner':owner,'type':typ,'class':type(item).__name__}
+            for key,name in [('start','GetStart'),('end','GetEnd'),('center','GetCenter'),('arc_mid','GetArcMid')]:
+              v=maybe(item,name)
+              if v is not None: rec[key]=pt(v)
+            r=maybe(item,'GetRadius')
+            if r is not None: rec['radius_mm']=mm(r)
+            a=maybe(item,'GetArcAngle')
+            if a is not None:
+              try: rec['arc_angle_deg']=float(a.AsDegrees())
+              except Exception: rec['arc_angle_raw']=str(a)
+            w=maybe(item,'GetWidth')
+            if w is not None: rec['line_width_mm']=mm(w)
+            return rec
+          summary={}
+          for fam,sha in EXPECTED.items():
+            pcb=Path('upstream')/fam/'dilemma.kicad_pcb'
+            actual=hashlib.sha256(pcb.read_bytes()).hexdigest()
+            if actual != sha: raise RuntimeError((fam,actual))
+            board=pcbnew.LoadBoard(str(pcb))
+            entities=[]
+            for item in board.GetDrawings():
+              rec=shape_record(item,'board')
+              if rec: entities.append(rec)
+            for fp in board.GetFootprints():
+              ref=str(fp.GetReference())
+              try: items=fp.GraphicalItems()
+              except Exception: items=[]
+              for item in items:
+                rec=shape_record(item,f'footprint:{ref}')
+                if rec: entities.append(rec)
+            pads=[]
+            for fp in board.GetFootprints():
+              for pad in fp.Pads():
+                drill=pad.GetDrillSize()
+                if drill.x<=0 or drill.y<=0: continue
+                pads.append({'reference':str(fp.GetReference()),'number':str(pad.GetNumber()),'position':pt(pad.GetPosition()),'drill':[mm(drill.x),mm(drill.y)],'orientation_degrees':float(pad.GetOrientation().AsDegrees())})
+            data={'family':fam,'source_sha256':actual,'thickness_mm':mm(board.GetDesignSettings().GetBoardThickness()),'entities':entities,'drills':pads}
+            Path('exports',f'{fam}_native_edgecuts.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
+            kinds={}
+            for e in entities: kinds[e['type']]=kinds.get(e['type'],0)+1
+            summary[fam]={'entity_count':len(entities),'types':kinds,'drill_count':len(pads),'thickness_mm':data['thickness_mm']}
+          Path('exports/SUMMARY.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+          print(json.dumps(summary,indent=2))
+          PY
+          python3 /tmp/export_native.py
+          find exports -type f -print0 | sort -z | xargs -0 sha256sum > exports/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-kicad-native-edgecuts
+          path: exports
+          retention-days: 3
+          if-no-files-found: error

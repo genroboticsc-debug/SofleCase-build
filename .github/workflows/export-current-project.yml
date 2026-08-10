@@ -1,0 +1,33 @@
+name: Export retained Dilemma project
+# 2026-08-10 re-export for exact-runtime P044/P048 recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/export-current-project.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode retained project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p exported
+          cat dilemma-runner/project.tar.xz.b64.part-* | base64 --decode > exported/project.tar.xz
+          tar -xJf exported/project.tar.xz -C exported
+          find exported -type f -printf '%P\n' | sort > exported/FILE_INVENTORY.txt
+          find exported -type f -print0 | sort -z | xargs -0 sha256sum > exported/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retained-dilemma-project
+          path: exported/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3

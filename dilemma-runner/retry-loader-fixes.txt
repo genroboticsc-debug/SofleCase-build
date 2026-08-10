@@ -1,0 +1,1 @@
+Rerun exact build with Python 3.13 module registration fixes and non-blocking diagnostics.

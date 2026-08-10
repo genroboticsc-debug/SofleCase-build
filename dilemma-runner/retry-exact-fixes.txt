@@ -1,0 +1,1 @@
+Run exact P025 contact fix, P029 ruled-shell diagnostics, and P010/P011 OCCT metrics.

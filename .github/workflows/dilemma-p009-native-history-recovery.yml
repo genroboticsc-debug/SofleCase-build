@@ -1,0 +1,90 @@
+name: Dilemma P009 native history recovery
+
+on:
+  push:
+    branches: [dilemma-current-failset-20260803]
+    paths:
+      - .github/workflows/dilemma-p009-native-history-recovery.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Clone complete upstream object database
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --mirror https://github.com/Bastardkb/Dilemma.git upstream.git
+          mkdir -p recovery/blobs recovery/inventory
+          git --git-dir=upstream.git rev-list --objects --all > recovery/inventory/all_objects.txt
+          git --git-dir=upstream.git log --all --name-status --date=iso-strict --format='COMMIT %H %ad %s' > recovery/inventory/full_path_history.txt
+
+      - name: Recover native and P009-related historical blobs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import re, subprocess, hashlib
+          from pathlib import Path
+
+          root = Path('recovery')
+          objects = []
+          for line in (root/'inventory/all_objects.txt').read_text(errors='replace').splitlines():
+              parts = line.split(' ', 1)
+              if len(parts) != 2:
+                  continue
+              sha, path = parts
+              low = path.lower()
+              ext = Path(low).suffix
+              relevant_name = any(k in low for k in (
+                  'tenting_puck', 'tenting puck', '3x5_2', 'thin_v1', 'dilemma_nuts',
+                  'case integrated', 'case tenting', 'p009'))
+              native_ext = ext in {
+                  '.f3d','.f3z','.fcstd','.step','.stp','.3mf','.scad','.dxf','.dwg',
+                  '.iges','.igs','.sat','.x_t','.x_b','.sldprt','.ipt','.obj','.brep',
+                  '.json','.yaml','.yml','.py','.js','.ts'
+              }
+              if relevant_name or native_ext:
+                  objects.append((sha,path))
+
+          seen = set()
+          manifest=[]
+          for sha,path in objects:
+              key=(sha,path)
+              if key in seen: continue
+              seen.add(key)
+              typ=subprocess.check_output(['git','--git-dir=upstream.git','cat-file','-t',sha],text=True).strip()
+              if typ!='blob': continue
+              size=int(subprocess.check_output(['git','--git-dir=upstream.git','cat-file','-s',sha],text=True).strip())
+              rec={'sha':sha,'path':path,'size':size}
+              if size <= 100_000_000:
+                  data=subprocess.check_output(['git','--git-dir=upstream.git','cat-file','blob',sha])
+                  safe=re.sub(r'[^A-Za-z0-9._-]+','_',path).strip('_')
+                  out=root/'blobs'/f'{sha[:12]}__{safe}'
+                  out.parent.mkdir(parents=True,exist_ok=True)
+                  out.write_bytes(data)
+                  rec['output']=str(out)
+                  rec['sha256']=hashlib.sha256(data).hexdigest()
+              manifest.append(rec)
+          import json
+          (root/'inventory/manifest.json').write_text(json.dumps(manifest,indent=2))
+          (root/'inventory/p009_hits.txt').write_text('\n'.join(
+              f"{x['sha']} {x['size']} {x['path']}" for x in manifest
+              if any(k in x['path'].lower() for k in ('tenting_puck','tenting puck','3x5_2','thin_v1','dilemma_nuts','p009'))
+          ))
+          print('recovered',len(manifest),'objects')
+          PY
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+          cat recovery/inventory/p009_hits.txt
+
+      - name: Upload recovered history
+        uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-p009-native-history-recovery
+          path: recovery
+          retention-days: 3
+          if-no-files-found: error

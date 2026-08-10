@@ -1,0 +1,32 @@
+name: Dilemma exact board source recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pinned Dilemma source
+        run: |
+          git clone https://github.com/Bastardkb/Dilemma.git upstream
+          cd upstream
+          git checkout f5cffb4821fe560b095418b71382ac7d8043c61a
+      - name: Collect exact canonical PCB sources
+        run: |
+          mkdir -p bundle/3x5_2 bundle/3x5_3 bundle/3x5_3_procyon bundle/4x6_4
+          cp upstream/3x5_2/dilemma.kicad_pcb bundle/3x5_2/
+          cp upstream/3x5_3/dilemma.kicad_pcb bundle/3x5_3/
+          cp upstream/3x5_3_procyon/dilemma.kicad_pcb bundle/3x5_3_procyon/
+          cp upstream/4x6_4/dilemma.kicad_pcb bundle/4x6_4/
+          find bundle -type f -print0 | sort -z | xargs -0 sha256sum > bundle/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-exact-board-sources
+          path: bundle
+          retention-days: 1

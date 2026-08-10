@@ -1,0 +1,76 @@
+name: Dilemma all history source recovery
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch every reachable ref
+        run: git fetch --all --prune --tags --force
+      - name: Recover every historical remaining-part source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery/direct_blobs recovery/embedded recovery/inventory
+          git rev-list --all --objects > recovery/inventory/all_objects.txt
+
+          awk 'NF>1 && $0 ~ /(dilemma_3x5_2_tenting_puck_case\.py|dilemma_3x5_2_thin_case\.py|dilemma_3x5_3_hotswap_mid\.py|dilemma_4x6_4_top\.py|dilemma_4x6_4_hotswap_mid\.py|dilemma_4x6_4_hotswap_mid_exact_upper_system\.py|P009[^/]*\.py|P012[^/]*\.py|P019[^/]*\.py|P025[^/]*\.py|P029[^/]*\.py|P025_compact[^/]*\.py)$/ {print}' recovery/inventory/all_objects.txt \
+            > recovery/inventory/direct_hits.txt
+          while read -r blob path; do
+            [ -n "${blob:-}" ] || continue
+            safe=$(printf '%s' "$path" | tr '/ :' '___')
+            git cat-file blob "$blob" > "recovery/direct_blobs/${blob}_${safe}"
+          done < recovery/inventory/direct_hits.txt
+
+          : > recovery/inventory/seen_stems.txt
+          while IFS= read -r commit; do
+            mapfile -t parts < <(git ls-tree -r --name-only "$commit" | grep -E '\.b64\.part-[0-9]+$' | sort || true)
+            ((${#parts[@]})) || continue
+            mapfile -t stems < <(printf '%s\n' "${parts[@]}" | sed -E 's/\.part-[0-9]+$//' | sort -u)
+            for stem in "${stems[@]}"; do
+              key="$commit $stem"
+              grep -qxF "$key" recovery/inventory/seen_stems.txt && continue
+              echo "$key" >> recovery/inventory/seen_stems.txt
+              mapfile -t group < <(printf '%s\n' "${parts[@]}" | grep -F "${stem}.part-" | sort)
+              work=$(mktemp -d)
+              : > "$work/payload.b64"
+              for p in "${group[@]}"; do git show "$commit:$p" >> "$work/payload.b64"; done
+              tr -d '\r\n ' < "$work/payload.b64" | base64 -d > "$work/payload" 2>/dev/null || { rm -rf "$work"; continue; }
+              mkdir -p "$work/extracted"
+              tar -xf "$work/payload" -C "$work/extracted" 2>/dev/null || { rm -rf "$work"; continue; }
+              mapfile -t targets < <(find "$work/extracted" -type f \( \
+                -name 'dilemma_3x5_2_tenting_puck_case.py' -o \
+                -name 'dilemma_3x5_2_thin_case.py' -o \
+                -name 'dilemma_3x5_3_hotswap_mid.py' -o \
+                -name 'dilemma_4x6_4_top.py' -o \
+                -name 'dilemma_4x6_4_hotswap_mid.py' -o \
+                -name 'dilemma_4x6_4_hotswap_mid_exact_upper_system.py' -o \
+                -iname 'P009*.py' -o -iname 'P012*.py' -o -iname 'P019*.py' -o \
+                -iname 'P025*.py' -o -iname 'P029*.py' \) | sort)
+              if ((${#targets[@]})); then
+                out="recovery/embedded/${commit:0:12}_$(basename "$stem" | tr '. /:' '____')"
+                mkdir -p "$out"
+                for t in "${targets[@]}"; do cp "$t" "$out/$(basename "$t")"; done
+                sha256sum "${targets[@]}" > "$out/source_hashes.txt"
+              fi
+              rm -rf "$work"
+            done
+          done < <(git rev-list --all | sort -u)
+
+          find recovery -type f -print0 | sort -z | xargs -0 sha256sum > recovery/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-all-history-remaining-sources
+          path: recovery
+          retention-days: 3
