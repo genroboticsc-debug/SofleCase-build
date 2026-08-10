@@ -1,0 +1,152 @@
+    origin = (0.0, 0.0, distance / nz)
+    datum = Plane(origin=origin, z_dir=(nx, ny, nz))
+    with BuildSketch(datum) as trim_sketch:
+        Rectangle(span, span)
+    return extrude(trim_sketch.sketch, amount=depth)
+
+
+def _add_drafted_post(body):
+    """Union the exact 4-degree post, R1.5 base round, and oblique trim."""
+    torus_center_z = Z_BASE_TOP + POST_BASE_FILLET
+    tangent = (POST_TANGENT_RADIUS, POST_TANGENT_Z)
+    bottom = (POST_TORUS_MAJOR_RADIUS, Z_BASE_TOP)
+    tangent_angle = math.atan2(
+        POST_TANGENT_Z - torus_center_z,
+        POST_TANGENT_RADIUS - POST_TORUS_MAJOR_RADIUS,
+    )
+    middle_angle = (math.radians(-90.0) + tangent_angle) / 2.0
+    middle = (
+        POST_TORUS_MAJOR_RADIUS + POST_BASE_FILLET * math.cos(middle_angle),
+        torus_center_z + POST_BASE_FILLET * math.sin(middle_angle),
+    )
+    construction_top_z = 46.0
+    construction_top_radius = POST_BASE_RADIUS - (
+        construction_top_z - Z_BASE_TOP
+    ) * math.tan(math.radians(POST_DRAFT_DEG))
+
+    with BuildSketch(Plane.XZ) as profile:
+        with BuildLine():
+            Line((0.0, Z_BASE_TOP), bottom)
+            ThreePointArc(bottom, middle, tangent)
+            Line(tangent, (construction_top_radius, construction_top_z))
+            Line((construction_top_radius, construction_top_z), (0.0, construction_top_z))
+            Line((0.0, construction_top_z), (0.0, Z_BASE_TOP))
+        make_face()
+    boss = revolve(profile.sketch, axis=Axis.Z)
+    boss = Location((POST_CENTER[0], POST_CENTER[1], 0.0)) * boss
+    boss = boss - _plane_positive_halfspace(POST_TRIM_NORMAL, POST_TRIM_DISTANCE)
+    # SolidWorks feature order: the revolved blend predates the final base-
+    # perimeter cut, so the toroidal flange is clipped by that exact outline.
+    outer_limit = extrude(_base_outer_sketch(), amount=30.0)
+    boss = boss & outer_limit
+    return body + boss
+
+
+def _left_pad_top_projection_sketch():
+    """Analytic XY generating footprint proved by F124 side supports."""
+    p0 = (4.509232549654, 39.776728677541)
+    p1 = (14.420581110036, 38.226971640881)
+    p2 = (15.085618879903, 42.480168101384)
+    p3 = (13.904860603039, 43.572235052768)
+    p4 = (7.577781704969, 45.495858362565)
+    p5 = (5.092074352623, 43.870871202845)
+    p6 = (4.556894072976, 40.448168050835)
+    c_front_r2 = (13.251859363763069, 41.681841077560144)
+    c_outer_r88 = (-14.930067776333589, -39.902912627412)
+    c_rear_r2 = (7.068064690543011, 43.561901650225046)
+    c_inner_r4 = (8.50887474881585, 39.83022894559475)
+
+    with BuildSketch(Plane.XY.offset(Z_BASE_TOP)) as sketch:
+        with BuildLine():
+            Line(p0, p1)
+            Line(p1, p2)
+            a0 = _angle(c_front_r2, p2)
+            _arc(c_front_r2, 2.0, a0, _ccw_sweep(a0, _angle(c_front_r2, p3)))
+            a0 = _angle(c_outer_r88, p3)
+            _arc(c_outer_r88, 88.31508011020259, a0, _ccw_sweep(a0, _angle(c_outer_r88, p4)))
+            a0 = _angle(c_rear_r2, p4)
+            _arc(c_rear_r2, 2.0, a0, _ccw_sweep(a0, _angle(c_rear_r2, p5)))
+            Line(p5, p6)
+            a0 = _angle(c_inner_r4, p6)
+            _arc(c_inner_r4, 4.0, a0, _ccw_sweep(a0, _angle(c_inner_r4, p0)))
+        make_face()
+    return sketch.sketch
+
+
+def _left_pad_transition_bottom_sketch():
+    """Exact analytic footprint of the front pad-transition network."""
+    a = (14.317277988463, 35.549382148569)
+    b = (15.227849701683, 41.372871524941)
+    c = (15.248633632391, 41.568295843645)
+    d = (15.177591063459, 42.221801650923)
+    e = (15.085618879903, 42.480168101384)
+    f = (14.420581110036, 38.226971640881)
+    g = (4.509232549654, 39.776728677541)
+    h = (4.771055357418, 38.405902368825)
+    i = (5.021019343968, 36.669191844703)
+    j = (5.745380781298, 36.433583325872)
+    k = (6.034904146592, 36.388312909852)
+    l = (7.358400571878, 37.193519226427)
+    m = (12.228556198737, 36.432012565011)
+    n = (13.012600847169, 35.953675383257)
+    o = (13.242322517778, 35.291628457473)
+    c_right_r2 = (13.251859363763, 41.681841077560)
+    c_rear_r4 = (8.508874748816, 39.830228945595)
+    c_outer_r4 = (1.033235966021, 36.981575792055)
+    c_left_r24 = (6.116144244442, 38.804771731376)
+    c_left_r12 = (7.173018840306, 36.007925023675)
+    c_right_r12 = (12.043174467164, 35.246418362259)
+    c_right_r24 = (13.235231020739, 37.691617980507)
+
+    with BuildSketch(Plane.XY.offset(Z_BASE_TOP)) as sketch:
+        with BuildLine():
+            Line(a, b)
+            a0 = _angle(c_right_r2, b)
+            _arc(c_right_r2, 2.0, a0, _ccw_sweep(a0, _angle(c_right_r2, c)))
+            Line(c, d)
+            a0 = _angle(c_right_r2, d)
+            _arc(c_right_r2, 2.0, a0, _ccw_sweep(a0, _angle(c_right_r2, e)))
+            Line(e, f)
+            Line(f, g)
+            a0 = _angle(c_rear_r4, g)
+            _arc(c_rear_r4, 4.0, a0, _ccw_sweep(a0, _angle(c_rear_r4, h)))
+            a0 = _angle(c_outer_r4, h)
+            _arc(c_outer_r4, 4.0, a0, _cw_sweep(a0, _angle(c_outer_r4, i)))
+            a0 = _angle(c_left_r24, i)
+            _arc(c_left_r24, 2.4, a0, _ccw_sweep(a0, _angle(c_left_r24, j)))
+            Line(j, k)
+            a0 = _angle(c_left_r12, k)
+            _arc(c_left_r12, 1.2, a0, _cw_sweep(a0, _angle(c_left_r12, l)))
+            Line(l, m)
+            a0 = _angle(c_right_r12, m)
+            _arc(c_right_r12, 1.2, a0, _cw_sweep(a0, _angle(c_right_r12, n)))
+            a0 = _angle(c_right_r12, n)
+            _arc(c_right_r12, 1.2, a0, _cw_sweep(a0, _angle(c_right_r12, o)))
+            a0 = _angle(c_right_r24, o)
+            _arc(c_right_r24, 2.4, a0, _ccw_sweep(a0, _angle(c_right_r24, a)))
+        make_face()
+    return sketch.sketch
+
+
+def _left_pad_analytic_core():
+    """Vertical analytic core below the shared oblique pad-top datum."""
+    core = extrude(_left_pad_top_projection_sketch(), amount=15.0)
+    return core - _plane_positive_halfspace(
+        REAR_PAD_TOP_NORMAL, REAR_PAD_TOP_DISTANCE
+    )
+
+
+def _left_pad_radius_one_round_tool():
+    """Finite analytic cut tool for the identified R1 ledge round."""
+    axis = (-0.9879951689600582, 0.1544847763101145, 0.0)
+    origin = (10.46909453971757, 35.694974589463946, Z_BASE_TOP + 1.0)
+    v_min = -2.4244784722969053
+    v_max = 4.781110178293382
+    start = tuple(origin[index] + v_min * axis[index] for index in range(3))
+    with BuildSketch(Plane(origin=start, z_dir=axis)) as cylinder_profile:
+        Circle(1.0)
+    axial_round = extrude(cylinder_profile.sketch, amount=v_max - v_min)
+
+    inward = (0.154484776310116, 0.987995168960058)
+    axial_round = axial_round & _vertical_keep_halfspace(
+        (origin[0] - axis[0], origin[1] - axis[1]),
