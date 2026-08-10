@@ -1,0 +1,74 @@
+name: Mouse Spring R05 Branch Probe
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'mouse_runtime/spring_src/**'
+      - '.github/workflows/mouse-spring-r05-branch-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'build123d==0.11.1' 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
+      - shell: bash
+        run: cat mouse_runtime/spring_src/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py.part* > mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py
+      - shell: bash
+        run: |
+          python - <<'PY'
+          import itertools, json, sys, traceback
+          from pathlib import Path
+          sys.path.insert(0,str(Path('mouse_runtime').resolve()))
+          import ScrollWheelSpring_R1OwnedSectors_Build123d_Lean as s
+
+          def ends(e):
+              return [[p.X,p.Y,p.Z] for p in s._edge_ends(e)]
+          def einfo(e):
+              b=e.bounding_box();return {'length':float(e.length),'ends':ends(e),'bbox':{'min':[b.min.X,b.min.Y,b.min.Z],'max':[b.max.X,b.max.Y,b.max.Z]}}
+          def shared(a,b): return s._shared(a,b)[0]
+
+          f146=s._section_edges(s.build_canal('F146'),s.X_OUTER,s.X_BUILD-s.X_OUTER)
+          out={'F146_sections':[einfo(e) for e in f146],'F115_candidates':[]}
+          center=s._intersection_edges(s._cyl_side('F071',4.5),s._torus_side(4.5))
+          seen=set()
+          for i,j in itertools.permutations(range(len(center)),2):
+              d,ia,ib=s._shared(center[i],center[j])
+              if d>=1e-5: continue
+              key=tuple(sorted((i,j)))
+              if key in seen: continue
+              seen.add(key)
+              # Build both path orientations; pipe geometry is orientation-independent but sweep robustness isn't.
+              row={'center_pair':[i,j],'shared_mm':d,'center_edges':[einfo(center[i]),einfo(center[j])],'orientations':[]}
+              for order in ((i,j),(j,i)):
+                  try:
+                      a=center[order[0]];b=center[order[1]]
+                      _,ai,bi=s._shared(a,b)
+                      ea=s._edge_ends(a); eb=s._edge_ends(b)
+                      # Orient first external->junction and second junction->external.
+                      a2=a if ai==1 else s._reverse(a)
+                      b2=b if bi==0 else s._reverse(b)
+                      pipe=s._pipe([a2,b2],0.5)
+                      sections=s._section_edges(pipe,s.X_INNER,s.X_BUILD-s.X_INNER)
+                      secrows=[]
+                      for sec in sections:
+                          distances=[float(sec.distance_to(f)) for f in f146]
+                          secrows.append({'edge':einfo(sec),'to_F146_mm':distances,'min_to_F146_mm':min(distances) if distances else None,'tor_cost':s._tor_cost(sec,s._torus_circle()[1])})
+                      row['orientations'].append({'order':list(order),'valid':bool(pipe.is_valid),'volume':float(pipe.volume),'sections':secrows})
+                  except Exception as exc:
+                      row['orientations'].append({'order':list(order),'error':repr(exc),'traceback':traceback.format_exc()})
+              out['F115_candidates'].append(row)
+          Path('mouse_runtime/ScrollWheelSpring_R05_BRANCH_PROBE.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spring-r05-branch-probe
+          path: mouse_runtime/ScrollWheelSpring_R05_BRANCH_PROBE.json
+          if-no-files-found: error
