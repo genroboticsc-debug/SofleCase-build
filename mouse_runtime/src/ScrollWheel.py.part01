@@ -1,0 +1,120 @@
+"""Standalone SROT production model for the mouse scroll wheel.
+
+Geometry source: exact analytic dimensions/features identified from the independent
+reference STEP. No reference file is loaded at runtime.
+
+Exports STEP and STL from the same final in-memory build123d body.
+"""
+from __future__ import annotations
+
+STRICT_SROT_STATUS = "BLOCKED_RUNTIME_AND_BOOLEAN_CERTIFICATION"
+MASTER_SOLID_INDEX = 1
+MASTER_REFERENCE_VOLUME_MM3 = 3873.2996798431836
+OCCURRENCE_TRANSLATION = (-0.612652818511, 9.212210969745, 12.749371867901)
+OCCURRENCE_ROTATION_X_DEG = 180.0
+# Fresh compact-law OCP proof: source-pure candidate validity/property check only.
+# Not a strict PASS because Build123d 0.11.1 is unavailable and several exact
+# zero-fuzzy sector Booleans are kernel-indeterminate.
+FRESH_COMPACT_PROOF_VOLUME_DELTA_PERCENT = 0.0002435238495113214
+FRESH_COMPACT_PROOF_COM_SHIFT_MM = 1.9362625394886836e-05
+
+import math
+from pathlib import Path
+
+from build123d import (
+    Axis,
+    Bezier,
+    BuildLine,
+    BuildSketch,
+    CenterOf,
+    Line,
+    Location,
+    Mode,
+    Plane,
+    Rotation,
+    ThreePointArc,
+    chamfer,
+    export_step,
+    export_stl,
+    extrude,
+    make_face,
+    revolve,
+)
+
+# -----------------------------------------------------------------------------
+# Exact identified dimensions [mm]
+# -----------------------------------------------------------------------------
+WHEEL_WIDTH = 8.3
+END_OUTER_RADIUS = 13.65
+END_CHAMFER = 0.4
+OUTER_LAND_RADIUS = 14.05
+LAND_TANGENCY_X = 0.684343973084478
+
+SHOULDER_CENTER_X_LEFT = 2.35
+SHOULDER_CENTER_X_RIGHT = 5.95
+SHOULDER_CENTER_RADIUS = 14.6347
+SHOULDER_ARC_RADIUS = 1.7653
+
+# Exact master central groove reduced to three compact cubic Bezier design spans.
+# These are the minimal cubic control polygons of the source design meridian;
+# there is no copied knot/multiplicity/surface table.
+GROOVE_BEZIERS = (
+    (
+        (3.5886621447781413, 13.376924113328457),
+        (3.7153229331251410, 13.501660105975764),
+        (3.8846335664337044, 13.582344543295855),
+        (4.0611907212698960, 13.602212750870818),
+    ),
+    (
+        (4.0611907212698960, 13.602212750870818),
+        (4.1788954911611030, 13.615458222587506),
+        (4.2998209372868335, 13.601674258861720),
+        (4.4118213969110240, 13.562830063654648),
+    ),
+    (
+        (4.4118213969110240, 13.562830063654648),
+        (4.5238218565348220, 13.523985868447712),
+        (4.6268973296571410, 13.460081441759664),
+        (4.7113378552221410, 13.376924113328457),
+    ),
+)
+
+BORE_RADIUS = 1.57
+BORE_END_RADIUS = 2.17
+BORE_CHAMFER_AXIAL = 0.6
+
+WINDOW_INNER_RADIUS = 8.75
+WINDOW_OUTER_RADIUS = 11.25
+WINDOW_ANGULAR_WIDTH_DEG = 14.0
+WINDOW_COUNT = 13
+WINDOW_END_CHAMFER = 0.4
+
+
+def _circle_midpoint(center: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> tuple[float, float]:
+    """Point half way along the short circular arc from start to end."""
+    a0 = math.atan2(start[1] - center[1], start[0] - center[0])
+    a1 = math.atan2(end[1] - center[1], end[0] - center[0])
+    delta = (a1 - a0 + math.pi) % (2.0 * math.pi) - math.pi
+    am = a0 + delta / 2.0
+    return (
+        center[0] + SHOULDER_ARC_RADIUS * math.cos(am),
+        center[1] + SHOULDER_ARC_RADIUS * math.sin(am),
+    )
+
+
+def _outer_revolve_profile():
+    """Closed X/R wheel profile using the exact compact master groove."""
+    left_land = (LAND_TANGENCY_X, OUTER_LAND_RADIUS)
+    left_groove = GROOVE_BEZIERS[0][0]
+    right_groove = GROOVE_BEZIERS[-1][-1]
+    right_land = (WHEEL_WIDTH - LAND_TANGENCY_X, OUTER_LAND_RADIUS)
+    left_center = (SHOULDER_CENTER_X_LEFT, SHOULDER_CENTER_RADIUS)
+    right_center = (SHOULDER_CENTER_X_RIGHT, SHOULDER_CENTER_RADIUS)
+
+    with BuildSketch(Plane.XZ) as profile:
+        with BuildLine():
+            Line((0.0, 0.0), (0.0, END_OUTER_RADIUS))
+            Line((0.0, END_OUTER_RADIUS), (END_CHAMFER, OUTER_LAND_RADIUS))
+            Line((END_CHAMFER, OUTER_LAND_RADIUS), left_land)
+            ThreePointArc(
+                left_land,
