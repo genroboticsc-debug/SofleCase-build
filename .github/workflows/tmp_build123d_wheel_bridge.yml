@@ -31,7 +31,8 @@ jobs:
             ocp-gordon==0.2.2 \
             trianglesolver==1.2 \
             lib3mf==2.5.0 \
-            webcolors==24.8.0
+            webcolors==24.8.0 \
+            'svgelements>=1.9.1,<2'
 
       - name: Verify pinned critical hashes
         shell: bash
