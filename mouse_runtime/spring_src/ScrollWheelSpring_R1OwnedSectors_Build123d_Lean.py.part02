@@ -1,0 +1,145 @@
+        minor_radius,
+        Plane(origin=TOR_LOC, z_dir=TOR_AXIS, x_dir=TOR_XDIR),
+    )
+    faces = list(tor.faces().filter_by(GeomType.TORUS))
+    if len(faces) != 1:
+        raise RuntimeError(f"torus: expected one toroidal face, got {len(faces)}")
+    return faces[0]
+
+
+def _intersection_edges(a, b) -> list[Edge]:
+    hit = a & b
+    if hit is None:
+        return []
+    return list(hit.edges())
+
+
+def _section_face_x(x: float, span: float = 120.0) -> Face:
+    # Exact X-normal plane; finite rectangle is only a computational carrier.
+    pl = Plane(origin=(x, 0.0, 0.0), x_dir=(0, 1, 0), z_dir=(1, 0, 0))
+    return Face(Wire.make_rect(span, span, pl))
+
+
+def _section_edges(shape, x: float, dx: float = 0.0) -> list[Edge]:
+    hit = shape & _section_face_x(x)
+    if hit is None:
+        return []
+    edges = [e for e in hit.edges() if e.length > 1e-8]
+    if dx:
+        edges = [e.translate((dx, 0, 0)) for e in edges]
+    return edges
+
+
+def _profile(first_edge: Edge, radius: float) -> Face:
+    p = first_edge.position_at(0.0)
+    tangent = first_edge.tangent_at(0.0).normalized()
+    base = Vector(1, 0, 0)
+    n = base - tangent * tangent.dot(base)
+    if n.length < 1e-10:
+        base = Vector(0, 1, 0)
+        n = base - tangent * tangent.dot(base)
+    n = n.normalized()
+    plane = Plane(origin=p, x_dir=n, z_dir=tangent)
+    return Face(Wire.make_circle(radius, plane))
+
+
+def _wire(edges: Iterable[Edge], tol: float = WIRE_TOL) -> Wire:
+    wires = Wire.combine(list(edges), tol=tol)
+    if len(wires) != 1:
+        raise RuntimeError(f"expected one connected wire, got {len(wires)}")
+    return wires[0]
+
+
+def _pipe(path_edges: Iterable[Edge], radius: float) -> Solid:
+    path = _wire(path_edges, tol=1e-5)
+    first = path.order_edges()[0]
+    return Solid.sweep(_profile(first, radius), path)
+
+
+# ---------------------------------------------------------------------------
+# Semantic exact canal generation (R1 and R0.4)
+# ---------------------------------------------------------------------------
+def _path_external_points(edges: list[Edge], path: tuple[int, int, int]):
+    _, i0, _ = _shared(edges[path[0]], edges[path[1]])
+    _, _, i1 = _shared(edges[path[1]], edges[path[2]])
+    a = _edge_ends(edges[path[0]])
+    c = _edge_ends(edges[path[2]])
+    return a[1 - i0], c[1 - i1]
+
+
+def _path_mean_z(edges: list[Edge], path: tuple[int, int, int]) -> float:
+    vals = []
+    for idx in set(path):
+        vals.extend(p.Z for p in _sample(edges[idx], 11))
+    return sum(vals) / len(vals)
+
+
+def _select_canal_path(fid: str, edges: list[Edge], mode: str):
+    rows = []
+    cy = TOR_LOC[1]
+    for path in itertools.permutations(range(len(edges)), 3):
+        if _shared(edges[path[0]], edges[path[1]])[0] >= 1e-5:
+            continue
+        if _shared(edges[path[1]], edges[path[2]])[0] >= 1e-5:
+            continue
+        a, b = _path_external_points(edges, path)
+        mean_z = _path_mean_z(edges, path)
+        if mode == "central_outer_low":
+            if max(a.Z, b.Z) <= 13.5:
+                continue
+            score = (max(abs(a.Y - cy), abs(b.Y - cy)), -mean_z)
+        else:
+            score = (mean_z,)
+        rows.append((score, path, a, b))
+    if not rows:
+        raise RuntimeError(f"{fid}: semantic canal path not found")
+    _, path, a, b = max(rows, key=lambda r: r[0])
+    if mode == "central_outer_low":
+        if a.Z < b.Z:
+            path, a, b = path[::-1], b, a
+    else:
+        if a.Z > b.Z:
+            path, a, b = path[::-1], b, a
+    return path, a
+
+
+def _orient_canal_path(edges: list[Edge], path, start: Vector) -> list[Edge]:
+    out = []
+    cur = start
+    for idx in path:
+        e = edges[idx]
+        a, b = _edge_ends(e)
+        if _dist(cur, a) <= _dist(cur, b):
+            out.append(e)
+            cur = b
+        else:
+            out.append(_reverse(e))
+            cur = a
+    return out
+
+
+def build_canal(fid: str) -> Solid:
+    fa, ra, fb, rb, fillet_r, mode = CANAL_SPEC[fid]
+    edges = _intersection_edges(_cyl_side(fa, ra), _cyl_side(fb, rb))
+    if not edges:
+        raise RuntimeError(f"{fid}: support intersection produced no edges")
+    path, start = _select_canal_path(fid, edges, mode)
+    return _pipe(_orient_canal_path(edges, path, start), fillet_r)
+
+
+# ---------------------------------------------------------------------------
+# Exact R0.5 torus/cylinder rolling-center law for F115/F127
+# ---------------------------------------------------------------------------
+def _coarse_dist(a: Edge, b: Edge) -> float:
+    # Branch ranking only; no sampled curve is constructed from these points.
+    best = float("inf")
+    for p in _sample(a, 31):
+        best = min(best, b.distance_to(p))
+    return best
+
+
+def _r05_pipe(fid: str) -> Solid:
+    sf = "F071" if fid == "F115" else "F072"
+    edges = _intersection_edges(_cyl_side(sf, 4.5), _torus_side(4.5))
+    if not edges:
+        raise RuntimeError(f"{fid}: R0.5 rolling-center intersection failed")
