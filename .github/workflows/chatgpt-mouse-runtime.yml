@@ -1,0 +1,71 @@
+name: ChatGPT Mouse Runtime Fetch
+
+on:
+  push:
+    branches:
+      - chatgpt-mouse-runtime-20260810
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt-mouse-runtime-20260810
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install authentic pinned CAD runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.11.1' 'manifold3d==3.5.2'
+          python - <<'PY'
+          import build123d, OCP, manifold3d
+          import importlib.metadata as md
+          print('build123d', build123d.__version__)
+          print('OCP', OCP.__version__)
+          print('manifold3d', md.version('manifold3d'))
+          PY
+
+      - name: Download only packages missing from sandbox
+        run: |
+          rm -rf wheelhouse runtime_bundle.b64.part* runtime_wheels.zip runtime_manifest.json
+          mkdir -p wheelhouse
+          python - <<'PY'
+          import importlib.metadata as md, subprocess, sys, json
+          wanted = [
+              'build123d', 'svgpathtools', 'ocpsvg', 'ocp-gordon',
+              'trianglesolver', 'lib3mf', 'manifold3d', 'webcolors'
+          ]
+          resolved = {}
+          for name in wanted:
+              version = md.version(name)
+              resolved[name] = version
+              subprocess.check_call([
+                  sys.executable, '-m', 'pip', 'download', '--no-deps',
+                  '--only-binary=:all:', '-d', 'wheelhouse', f'{name}=={version}'
+              ])
+          with open('runtime_manifest.json', 'w') as f:
+              json.dump(resolved, f, indent=2, sort_keys=True)
+          print(json.dumps(resolved, indent=2, sort_keys=True))
+          PY
+          sha256sum wheelhouse/* >> runtime_manifest.sha256
+          cat runtime_manifest.json
+          cat runtime_manifest.sha256
+          zip -9 runtime_wheels.zip wheelhouse/* runtime_manifest.json runtime_manifest.sha256
+          base64 -w0 runtime_wheels.zip | split -b 30M - runtime_bundle.b64.part
+          ls -lh runtime_wheels.zip runtime_bundle.b64.part*
+
+      - name: Commit runtime bundle to temporary branch
+        run: |
+          git config user.name 'chatgpt-runtime-bot'
+          git config user.email 'chatgpt-runtime-bot@users.noreply.github.com'
+          git add runtime_manifest.json runtime_manifest.sha256 runtime_bundle.b64.part*
+          git commit -m 'Add exact Build123d 0.11.1 runtime wheel bundle' || exit 0
+          git push origin HEAD:chatgpt-mouse-runtime-20260810
