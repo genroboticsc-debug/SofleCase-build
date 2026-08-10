@@ -65,6 +65,35 @@ jobs:
           mkdir -p mouse_runtime/logs generated
           python mouse_runtime/RightButtons.py 2>&1 | tee mouse_runtime/logs/RightButtons.log
 
+      - name: Probe RightButtons authored lower edges
+        if: steps.runtime.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('mouse_runtime').resolve()))
+          import RightButtons as rb
+          from build123d import extrude
+          pad = extrude(rb._right_pad_footprint_sketch(), amount=rb.RIGHT_PAD_CONSTRUCTION_HEIGHT)
+          wanted=[(span[0],span[-1]) for span in rb.RIGHT_PAD_INNER_BEZIERS]
+          rows=[]
+          for i,edge in enumerate(pad.edges()):
+              bb=edge.bounding_box()
+              if abs(bb.min.Z-rb.Z_BASE_TOP)>2e-5 or abs(bb.max.Z-rb.Z_BASE_TOP)>2e-5:
+                  continue
+              verts=list(edge.vertices())
+              ep=[[float(v.X),float(v.Y),float(v.Z)] for v in verts]
+              matches=[]
+              for si,(a,b) in enumerate(wanted):
+                  if rb._edge_owns_xy_endpoints(edge,a,b): matches.append(si)
+              rows.append({'edge_index':i,'length':float(edge.length),'endpoints':ep,'authored_span_matches':matches})
+          out={'bottom_edge_count':len(rows),'wanted':wanted,'bottom_edges':rows}
+          Path('mouse_runtime/rightbuttons_probe.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+
       - name: Audit generated B-Reps
         if: always()
         continue-on-error: true
@@ -86,28 +115,20 @@ jobs:
           except Exception as exc:
               ocp_available = False
               out['_runtime_error'] = repr(exc)
-
           for name in ['ScrollWheel','RightButtons']:
               p = Path('generated') / f'{name}.step'
               row = {'exists': p.exists()}
               if p.exists() and ocp_available:
-                  r = STEPControl_Reader()
-                  row['read_status'] = int(r.ReadFile(str(p)))
+                  r = STEPControl_Reader(); row['read_status'] = int(r.ReadFile(str(p)))
                   if row['read_status'] == int(IFSelect_RetDone):
-                      r.TransferRoots()
-                      s = r.OneShape()
+                      r.TransferRoots(); s = r.OneShape()
                       row['valid'] = bool(BRepCheck_Analyzer(s).IsValid())
-                      ex = TopExp_Explorer(s, TopAbs_SOLID)
-                      n = 0
-                      while ex.More():
-                          n += 1
-                          ex.Next()
+                      ex = TopExp_Explorer(s, TopAbs_SOLID); n = 0
+                      while ex.More(): n += 1; ex.Next()
                       row['solid_count'] = n
-                      g = GProp_GProps()
-                      BRepGProp.VolumeProperties_s(s, g)
+                      g = GProp_GProps(); BRepGProp.VolumeProperties_s(s, g)
                       row['volume_mm3'] = g.Mass()
               out[name] = row
-          Path('mouse_runtime').mkdir(exist_ok=True)
           Path('mouse_runtime/generated_audit.json').write_text(json.dumps(out, indent=2))
           print(json.dumps(out, indent=2))
           PY
@@ -122,5 +143,6 @@ jobs:
             generated/**
             mouse_runtime/logs/**
             mouse_runtime/generated_audit.json
+            mouse_runtime/rightbuttons_probe.json
             mouse_runtime/ScrollWheel.py
             mouse_runtime/RightButtons.py
