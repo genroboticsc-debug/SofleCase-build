@@ -20,6 +20,8 @@ jobs:
           mkdir -p wheels
           python -m pip download --only-binary=:all: --no-deps --dest wheels \
             build123d==0.11.1 \
+            cadquery-ocp-novtk==7.9.3.1.1 \
+            cadquery-ocp-proxy==7.9.3.1.1 \
             manifold3d==3.5.2 \
             ocpsvg==0.6.0 \
             svgelements==1.9.6 \
