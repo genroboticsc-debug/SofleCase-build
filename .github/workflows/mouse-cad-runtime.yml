@@ -25,7 +25,7 @@ jobs:
           cat mouse_runtime/src/ScrollWheel.py.part* > mouse_runtime/ScrollWheel.py
           cat mouse_runtime/src/RightButtons.py.part* > mouse_runtime/RightButtons.py
           echo '565503fe190da095bdeae8d397f79faed2d3a9406d36db159328ded5e8fdfc1a  mouse_runtime/ScrollWheel.py' | sha256sum -c -
-          echo 'dfe4230021ea501aa18a7c709d7b4ff7e2f8dbf1b3bdbf8fe6b83f412e1f31ec  mouse_runtime/RightButtons.py' | sha256sum -c -
+          echo 'ad2d70ed26e65562ffd5942b427aed88da00397375a27e5d38734c21d075d6bf  mouse_runtime/RightButtons.py' | sha256sum -c -
           python -m py_compile mouse_runtime/ScrollWheel.py mouse_runtime/RightButtons.py
 
       - name: Install exact CAD runtime
