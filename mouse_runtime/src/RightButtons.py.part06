@@ -2,8 +2,19 @@
 
 
 def _right_pad_lower_round_edges(pad):
-    """Return the four authored lower transition edges by exact endpoint ownership."""
-    wanted = [(span[0], span[-1]) for span in RIGHT_PAD_INNER_BEZIERS]
+    """Return the exact native lower transition chains by authored endpoint ownership.
+
+    Build123d 0.11.1/OCC preserves the first cubic span as one edge and
+    concatenates authored spans 1..3 into one exact G1 edge during face cleanup.
+    The three concatenated spans are source-authored consecutive cubics whose
+    endpoint tangent directions agree to numerical precision; selecting the
+    resulting native chain by its exact authored first/last endpoints changes
+    topology selection only, never the curve geometry or R1.6 feature law.
+    """
+    native_chains = (
+        (RIGHT_PAD_INNER_BEZIERS[0][0], RIGHT_PAD_INNER_BEZIERS[0][-1], (0,)),
+        (RIGHT_PAD_INNER_BEZIERS[1][0], RIGHT_PAD_INNER_BEZIERS[3][-1], (1, 2, 3)),
+    )
     found = []
     ownership = []
     for index, edge in enumerate(pad.edges()):
@@ -11,17 +22,18 @@ def _right_pad_lower_round_edges(pad):
         if abs(bb.min.Z - Z_BASE_TOP) > 2e-5 or abs(bb.max.Z - Z_BASE_TOP) > 2e-5:
             continue
         matches = [
-            span_index
-            for span_index, (a, b) in enumerate(wanted)
+            span_ids
+            for a, b, span_ids in native_chains
             if _edge_owns_xy_endpoints(edge, a, b)
         ]
         if matches:
             found.append(edge)
             ownership.append((index, tuple(matches), float(edge.length)))
-    if len(found) != 4:
+    if len(found) != 2:
         raise RuntimeError(
-            "RightButtons right-pad lower-round endpoint ownership changed: "
-            f"expected 4 authored edges, found {len(found)}; ownership={ownership}"
+            "RightButtons right-pad lower-round native-chain ownership changed: "
+            f"expected 2 exact chains for authored spans 0 and 1..3, "
+            f"found {len(found)}; ownership={ownership}"
         )
     return found
 
