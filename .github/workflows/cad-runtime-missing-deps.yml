@@ -1,0 +1,43 @@
+name: Temporary CAD runtime missing dependencies
+
+on:
+  push:
+    branches:
+      - agent/dilemma-runtime-bootstrap-20260807
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download and verify exact missing wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle
+          python -m pip install --upgrade pip
+          python -m pip download --only-binary=:all: --no-deps \
+            ezdxf==1.4.4 \
+            webcolors==24.8.0 \
+            --dest bundle
+          EZDXF="$(find bundle -maxdepth 1 -type f -name 'ezdxf-1.4.4-py3-none-any.whl' -print -quit)"
+          WEBCOLORS="$(find bundle -maxdepth 1 -type f -name 'webcolors-24.8.0-py3-none-any.whl' -print -quit)"
+          test -n "$EZDXF"
+          test -n "$WEBCOLORS"
+          echo '666edda631ba717270293b734f5d58dd97a1d1aba4787187f09d0cc584645865  '"$EZDXF" | sha256sum --check --strict
+          echo 'fc4c3b59358ada164552084a8ebee637c221e4059267d0f8325b3b560f6c7f0a  '"$WEBCOLORS" | sha256sum --check --strict
+          sha256sum bundle/*.whl > bundle/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cad-runtime-missing-deps-py313
+          path: bundle
+          if-no-files-found: error
+          retention-days: 1
