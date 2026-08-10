@@ -1,0 +1,115 @@
+name: Mouse CAD Runtime
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'mouse_runtime/**'
+      - '.github/workflows/mouse-cad-runtime.yml'
+
+jobs:
+  build-mouse-candidates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Reconstruct exact checkpoint sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat mouse_runtime/src/ScrollWheel.py.part* > mouse_runtime/ScrollWheel.py
+          cat mouse_runtime/src/RightButtons.py.part* > mouse_runtime/RightButtons.py
+          echo '565503fe190da095bdeae8d397f79faed2d3a9406d36db159328ded5e8fdfc1a  mouse_runtime/ScrollWheel.py' | sha256sum -c -
+          echo 'dfe4230021ea501aa18a7c709d7b4ff7e2f8dbf1b3bdbf8fe6b83f412e1f31ec  mouse_runtime/RightButtons.py' | sha256sum -c -
+          python -m py_compile mouse_runtime/ScrollWheel.py mouse_runtime/RightButtons.py
+
+      - name: Install exact CAD runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install \
+            'build123d==0.11.1' \
+            'cadquery-ocp-novtk==7.9.3.1.1' \
+            'manifold3d==3.5.2' \
+            'trimesh==4.11.1' \
+            'numpy==2.3.5'
+          python - <<'PY'
+          import importlib.metadata as m, sys
+          print(sys.version)
+          for p in ['build123d','cadquery-ocp-novtk','manifold3d','trimesh','numpy']:
+              print(p, m.version(p))
+          PY
+
+      - name: Build ScrollWheel
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p mouse_runtime/logs generated
+          python mouse_runtime/ScrollWheel.py 2>&1 | tee mouse_runtime/logs/ScrollWheel.log
+
+      - name: Build RightButtons
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p mouse_runtime/logs generated
+          python mouse_runtime/RightButtons.py 2>&1 | tee mouse_runtime/logs/RightButtons.log
+
+      - name: Audit generated B-Reps
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from OCP.STEPControl import STEPControl_Reader
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.BRepCheck import BRepCheck_Analyzer
+          from OCP.BRepGProp import BRepGProp
+          from OCP.GProp import GProp_GProps
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopAbs import TopAbs_SOLID
+
+          out = {}
+          for name in ['ScrollWheel','RightButtons']:
+              p = Path('generated') / f'{name}.step'
+              row = {'exists': p.exists()}
+              if p.exists():
+                  r = STEPControl_Reader()
+                  row['read_status'] = int(r.ReadFile(str(p)))
+                  if row['read_status'] == int(IFSelect_RetDone):
+                      r.TransferRoots()
+                      s = r.OneShape()
+                      row['valid'] = bool(BRepCheck_Analyzer(s).IsValid())
+                      ex = TopExp_Explorer(s, TopAbs_SOLID)
+                      n = 0
+                      while ex.More():
+                          n += 1
+                          ex.Next()
+                      row['solid_count'] = n
+                      g = GProp_GProps()
+                      BRepGProp.VolumeProperties_s(s, g)
+                      row['volume_mm3'] = g.Mass()
+              out[name] = row
+          Path('mouse_runtime/generated_audit.json').write_text(json.dumps(out, indent=2))
+          print(json.dumps(out, indent=2))
+          PY
+
+      - name: Upload generated CAD evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mouse-cad-runtime-evidence
+          if-no-files-found: warn
+          path: |
+            generated/**
+            mouse_runtime/logs/**
+            mouse_runtime/generated_audit.json
+            mouse_runtime/ScrollWheel.py
+            mouse_runtime/RightButtons.py
