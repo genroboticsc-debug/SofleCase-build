@@ -40,15 +40,23 @@ jobs:
             numpy==2.5.1 \
             trimesh==4.8.3 \
             networkx==3.5 \
+            ezdxf==1.4.4 \
+            webcolors==24.8.0 \
             --dest bundle/wheels
 
           BUILD123D_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'build123d-0.11.1-*.whl' -print -quit)"
           MANIFOLD_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'manifold3d-3.5.2-*.whl' -print -quit)"
+          EZDXF_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'ezdxf-1.4.4-py3-none-any.whl' -print -quit)"
+          WEBCOLORS_WHEEL="$(find bundle/wheels -maxdepth 1 -type f -name 'webcolors-24.8.0-py3-none-any.whl' -print -quit)"
           test -n "$BUILD123D_WHEEL"
           test -n "$MANIFOLD_WHEEL"
+          test -n "$EZDXF_WHEEL"
+          test -n "$WEBCOLORS_WHEEL"
 
           echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  '"$BUILD123D_WHEEL" | sha256sum --check --strict
           echo 'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45  '"$MANIFOLD_WHEEL" | sha256sum --check --strict
+          echo '666edda631ba717270293b734f5d58dd97a1d1aba4787187f09d0cc584645865  '"$EZDXF_WHEEL" | sha256sum --check --strict
+          echo 'fc4c3b59358ada164552084a8ebee637c221e4059267d0f8325b3b560f6c7f0a  '"$WEBCOLORS_WHEEL" | sha256sum --check --strict
 
       - name: Fetch pinned Dilemma reference commit
         shell: bash
