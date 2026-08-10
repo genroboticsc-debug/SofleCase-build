@@ -22,6 +22,7 @@ jobs:
             build123d==0.11.1 \
             manifold3d==3.5.2 \
             ocpsvg==0.6.0 \
+            svgelements==1.9.6 \
             ocp_gordon==0.2.2 \
             svgpathtools==1.7.2 \
             trianglesolver==1.2 \
