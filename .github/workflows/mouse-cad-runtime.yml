@@ -43,9 +43,27 @@ jobs:
           python - <<'PY'
           import importlib.metadata as m, sys
           print(sys.version)
-          for p in ['build123d','cadquery-ocp-novtk','manifold3d','trimesh','numpy']:
-              print(p, m.version(p))
+          expected = {
+              'build123d':'0.11.1',
+              'cadquery-ocp-novtk':'7.9.3.1.1',
+              'manifold3d':'3.5.2',
+              'trimesh':'4.11.1',
+              'numpy':'2.3.5',
+          }
+          for p,v in expected.items():
+              got=m.version(p); print(p,got); assert got==v,(p,got,v)
           PY
+
+      - name: Fetch authoritative Mouse STEP
+        if: steps.runtime.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reference
+          curl --fail --location --retry 5 \
+            --output reference/Mouse.STEP \
+            'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
+          echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
 
       - name: Build ScrollWheel
         if: steps.runtime.outcome == 'success'
@@ -54,6 +72,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p mouse_runtime/logs generated
+          rm -f generated/ScrollWheel.step generated/ScrollWheel.stl
           python mouse_runtime/ScrollWheel.py 2>&1 | tee mouse_runtime/logs/ScrollWheel.log
 
       - name: Build RightButtons
@@ -63,6 +82,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p mouse_runtime/logs generated
+          rm -f generated/RightButtons.step generated/RightButtons.stl
           python mouse_runtime/RightButtons.py 2>&1 | tee mouse_runtime/logs/RightButtons.log
 
       - name: Probe RightButtons authored lower edges
@@ -92,6 +112,108 @@ jobs:
           out={'bottom_edge_count':len(rows),'wanted':wanted,'bottom_edges':rows}
           Path('mouse_runtime/rightbuttons_probe.json').write_text(json.dumps(out,indent=2))
           print(json.dumps(out,indent=2))
+          PY
+
+      - name: Fresh strict ScrollWheel certification
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast, json, math, re
+          from pathlib import Path
+          from OCP.STEPControl import STEPControl_Reader
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.BRepCheck import BRepCheck_Analyzer
+          from OCP.BRepGProp import BRepGProp
+          from OCP.GProp import GProp_GProps
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopAbs import TopAbs_SOLID
+          from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+          import trimesh
+
+          def volume(shape):
+              g=GProp_GProps(); BRepGProp.VolumeProperties_s(shape,g); return float(g.Mass())
+
+          def solid_count(shape):
+              ex=TopExp_Explorer(shape,TopAbs_SOLID); n=0
+              while ex.More(): n+=1; ex.Next()
+              return n
+
+          def first_solid(shape):
+              ex=TopExp_Explorer(shape,TopAbs_SOLID)
+              if not ex.More(): raise RuntimeError('reference contains no solid')
+              return ex.Current()
+
+          def read_step(path):
+              r=STEPControl_Reader(); status=int(r.ReadFile(str(path)))
+              if status != int(IFSelect_RetDone): raise RuntimeError(f'STEP read failed {path}: {status}')
+              r.TransferRoots(); return r.OneShape()
+
+          def cut_volume(a,b):
+              op=BRepAlgoAPI_Cut(a,b)
+              op.SetFuzzyValue(0.0)
+              op.SetRunParallel(False)
+              op.Build()
+              if not op.IsDone(): raise RuntimeError('zero-fuzzy BRepAlgoAPI_Cut failed')
+              return volume(op.Shape())
+
+          report={'part':'ScrollWheel','threshold_percent':0.01,'fresh':True}
+          try:
+              ref_all=read_step('reference/Mouse.STEP')
+              report['reference_whole_solid_count']=solid_count(ref_all)
+              R=first_solid(ref_all)
+              G_all=read_step('generated/ScrollWheel.step')
+              report['generated_solid_count']=solid_count(G_all)
+              G=first_solid(G_all)
+              report['reference_valid']=bool(BRepCheck_Analyzer(R).IsValid())
+              report['generated_valid']=bool(BRepCheck_Analyzer(G).IsValid())
+              vr=volume(R); vg=volume(G)
+              missing=cut_volume(R,G)
+              extra=cut_volume(G,R)
+              sym=missing+extra
+              pct=100.0*sym/vr
+              report.update({
+                  'reference_volume_mm3':vr,
+                  'generated_volume_mm3':vg,
+                  'R_minus_G_mm3':missing,
+                  'G_minus_R_mm3':extra,
+                  'symmetric_difference_mm3':sym,
+                  'symmetric_difference_percent':pct,
+              })
+
+              stl=trimesh.load_mesh('generated/ScrollWheel.stl',process=False)
+              if isinstance(stl,trimesh.Scene):
+                  stl=trimesh.util.concatenate(tuple(stl.geometry.values()))
+              report['stl_watertight']=bool(stl.is_watertight)
+              report['stl_winding_consistent']=bool(stl.is_winding_consistent)
+              report['stl_volume_mm3']=float(abs(stl.volume))
+              report['step_stl_volume_error_percent']=100.0*abs(abs(stl.volume)-vg)/vg
+
+              src=Path('mouse_runtime/ScrollWheel.py').read_text()
+              ast.parse(src)
+              forbidden={
+                  'direct_OCP_import':bool(re.search(r'(^|\\n)\\s*(from|import)\\s+OCP\\b',src,re.M)),
+                  'runtime_STEP_STL_read':bool(re.search(r'\\b(import_step|import_stl|read_step|read_stl)\\b',src,re.I)),
+                  'BRep_replay_token':bool(re.search(r'\\b(BRepBuilderAPI|TopoDS|Geom_BSpline|pcurve|pole|knots?)\\b',src,re.I)),
+              }
+              report['production_forbidden_hits']=forbidden
+              report['production_purity_pass']=not any(forbidden.values())
+              report['strict_pass']=bool(
+                  report['reference_whole_solid_count']==10 and
+                  report['generated_solid_count']==1 and
+                  report['reference_valid'] and report['generated_valid'] and
+                  report['stl_watertight'] and report['stl_winding_consistent'] and
+                  report['step_stl_volume_error_percent'] < 0.1 and
+                  report['production_purity_pass'] and pct < 0.01
+              )
+          except Exception as exc:
+              report['strict_pass']=False
+              report['error']=repr(exc)
+          Path('mouse_runtime/ScrollWheel_STRICT_CERT.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          if not report['strict_pass']:
+              raise SystemExit(2)
           PY
 
       - name: Audit generated B-Reps
@@ -141,8 +263,10 @@ jobs:
           if-no-files-found: warn
           path: |
             generated/**
+            reference/Mouse.STEP
             mouse_runtime/logs/**
             mouse_runtime/generated_audit.json
             mouse_runtime/rightbuttons_probe.json
+            mouse_runtime/ScrollWheel_STRICT_CERT.json
             mouse_runtime/ScrollWheel.py
             mouse_runtime/RightButtons.py
