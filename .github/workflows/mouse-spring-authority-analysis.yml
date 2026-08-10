@@ -2,7 +2,8 @@ name: Mouse Spring F139 Authority Analysis
 
 on:
   pull_request:
-    branches: [master]
+    branches:
+      - master
     paths:
       - '.github/workflows/mouse-spring-authority-analysis.yml'
       - 'mouse_runtime/spring_src/**'
@@ -17,7 +18,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install exact analysis kernel
-        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1'
+        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
       - name: Download authoritative Mouse STEP
         shell: bash
         run: |
@@ -34,7 +35,6 @@ jobs:
           from OCP.TopAbs import TopAbs_SOLID, TopAbs_FACE, TopAbs_EDGE
           from OCP.TopExp import TopExp_Explorer
           from OCP.TopoDS import TopoDS
-          from OCP.BRep import BRep_Tool
           from OCP.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
           from OCP.BRepTools import BRepTools
           from OCP.GProp import GProp_GProps
@@ -95,7 +95,6 @@ jobs:
                   ep=ends(e)
                   shared.append({'F139_edge_index':i,'support_edge_index':j,'ends':ep,'support_u_at_ends':[cylinder_u(ci,p) for p in ep],'bbox':bbox(e)})
               out['F139'][f'shared_with_{supp_name}']=shared
-          # All F139 edge endpoints help identify its remaining ownership supports.
           out['F139']['all_edges']=[{'i':i,'ends':ends(e),'bbox':bbox(e)} for i,e in enumerate(edges(F139))]
           open('mouse_runtime/ScrollWheelSpring_F139_AUTHORITY.json','w').write(json.dumps(out,indent=2))
           print(json.dumps(out,indent=2))
