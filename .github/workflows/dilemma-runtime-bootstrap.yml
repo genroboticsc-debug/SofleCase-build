@@ -1,4 +1,5 @@
 name: Temporary Dilemma exact-runtime bootstrap
+# 2026-08-10 retrigger: exact pinned runtime for P011/P012 execution
 
 on:
   push:
