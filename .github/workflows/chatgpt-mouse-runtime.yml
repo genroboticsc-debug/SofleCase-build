@@ -33,9 +33,9 @@ jobs:
           print('manifold3d', md.version('manifold3d'))
           PY
 
-      - name: Download only packages missing from sandbox
+      - name: Build exact wheel bundle
         run: |
-          rm -rf wheelhouse runtime_bundle.b64.part* runtime_wheels.zip runtime_manifest.json
+          rm -rf wheelhouse runtime_wheels.zip runtime_manifest.json runtime_manifest.sha256 runtime_run_id.txt
           mkdir -p wheelhouse
           python - <<'PY'
           import importlib.metadata as md, subprocess, sys, json
@@ -53,19 +53,27 @@ jobs:
               ])
           with open('runtime_manifest.json', 'w') as f:
               json.dump(resolved, f, indent=2, sort_keys=True)
-          print(json.dumps(resolved, indent=2, sort_keys=True))
           PY
-          sha256sum wheelhouse/* >> runtime_manifest.sha256
+          sha256sum wheelhouse/* > runtime_manifest.sha256
+          zip -9 runtime_wheels.zip wheelhouse/* runtime_manifest.json runtime_manifest.sha256
+          echo "$GITHUB_RUN_ID" > runtime_run_id.txt
           cat runtime_manifest.json
           cat runtime_manifest.sha256
-          zip -9 runtime_wheels.zip wheelhouse/* runtime_manifest.json runtime_manifest.sha256
-          base64 -w0 runtime_wheels.zip | split -b 30M - runtime_bundle.b64.part
-          ls -lh runtime_wheels.zip runtime_bundle.b64.part*
+          echo "run_id=$(cat runtime_run_id.txt)"
+          ls -lh runtime_wheels.zip
 
-      - name: Commit runtime bundle to temporary branch
+      - name: Upload exact runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mouse-runtime-wheels
+          path: runtime_wheels.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Commit manifest and run ID to temporary branch
         run: |
           git config user.name 'chatgpt-runtime-bot'
           git config user.email 'chatgpt-runtime-bot@users.noreply.github.com'
-          git add runtime_manifest.json runtime_manifest.sha256 runtime_bundle.b64.part*
-          git commit -m 'Add exact Build123d 0.11.1 runtime wheel bundle' || exit 0
+          git add runtime_manifest.json runtime_manifest.sha256 runtime_run_id.txt
+          git commit -m 'Record exact Build123d runtime artifact run' || exit 0
           git push origin HEAD:chatgpt-mouse-runtime-20260810
