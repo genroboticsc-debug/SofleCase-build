@@ -1,0 +1,103 @@
+name: Mouse RightButtons Fillet Probe
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'mouse_runtime/**'
+      - '.github/workflows/mouse-rightbuttons-fillet-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct exact RightButtons candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat mouse_runtime/src/RightButtons.py.part* > mouse_runtime/RightButtons.py
+          echo 'ad2d70ed26e65562ffd5942b427aed88da00397375a27e5d38734c21d075d6bf  mouse_runtime/RightButtons.py' | sha256sum -c -
+      - name: Install pinned CAD runtime
+        shell: bash
+        run: |
+          python -m pip install 'build123d==0.11.1' 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
+      - name: Probe exact R1.6 feature order
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('mouse_runtime').resolve()))
+          import RightButtons as rb
+          from build123d import extrude
+
+          pairs = [
+              (rb.RIGHT_PAD_INNER_BEZIERS[0][0], rb.RIGHT_PAD_INNER_BEZIERS[0][-1]),
+              (rb.RIGHT_PAD_INNER_BEZIERS[1][0], rb.RIGHT_PAD_INNER_BEZIERS[3][-1]),
+          ]
+
+          def select(shape, pair):
+              a,b=pair
+              hits=[]
+              for e in shape.edges():
+                  bb=e.bounding_box()
+                  if abs(bb.min.Z-rb.Z_BASE_TOP)>2e-5 or abs(bb.max.Z-rb.Z_BASE_TOP)>2e-5:
+                      continue
+                  if rb._edge_owns_xy_endpoints(e,a,b): hits.append(e)
+              if len(hits)!=1:
+                  raise RuntimeError(f'expected one edge for {pair}, got {len(hits)}')
+              return hits[0]
+
+          def base():
+              return extrude(rb._right_pad_footprint_sketch(), amount=rb.RIGHT_PAD_CONSTRUCTION_HEIGHT)
+
+          def trims(shape):
+              shape = shape - rb._plane_positive_halfspace(rb.RIGHT_PAD_FRONT_TOP_NORMAL, rb.RIGHT_PAD_FRONT_TOP_DISTANCE)
+              shape = shape - rb._plane_positive_halfspace(rb.REAR_PAD_TOP_NORMAL, rb.REAR_PAD_TOP_DISTANCE)
+              return shape
+
+          def one(shape, which, radius=1.6):
+              return shape.fillet(radius,[select(shape,pairs[which])])
+
+          def both(shape, radius=1.6):
+              return shape.fillet(radius,[select(shape,pairs[0]),select(shape,pairs[1])])
+
+          cases={
+              'pre_edge0_R1p6': lambda: one(base(),0),
+              'pre_edge1_R1p6': lambda: one(base(),1),
+              'pre_both_R1p6': lambda: both(base()),
+              'pre_seq_0_then_1_R1p6': lambda: one(one(base(),0),1),
+              'pre_seq_1_then_0_R1p6': lambda: one(one(base(),1),0),
+              'posttrim_edge0_R1p6': lambda: one(trims(base()),0),
+              'posttrim_edge1_R1p6': lambda: one(trims(base()),1),
+              'posttrim_both_R1p6': lambda: both(trims(base())),
+              'posttrim_seq_0_then_1_R1p6': lambda: one(one(trims(base()),0),1),
+              'posttrim_seq_1_then_0_R1p6': lambda: one(one(trims(base()),1),0),
+          }
+          # Smaller radii are diagnostic only; never production substitutes.
+          for r in (1.59,1.55,1.50,1.40,1.20):
+              cases[f'pre_both_R{r}']=lambda r=r: both(base(),r)
+              cases[f'pre_edge0_R{r}']=lambda r=r: one(base(),0,r)
+              cases[f'pre_edge1_R{r}']=lambda r=r: one(base(),1,r)
+
+          out={}
+          for name,fn in cases.items():
+              try:
+                  s=fn()
+                  out[name]={'success':True,'valid':bool(s.is_valid),'volume_mm3':float(s.volume),'edge_count':len(s.edges()),'face_count':len(s.faces())}
+              except Exception as exc:
+                  out[name]={'success':False,'error':repr(exc)}
+          Path('mouse_runtime/RightButtons_R16_FILLET_PROBE.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rightbuttons-r16-fillet-probe
+          path: mouse_runtime/RightButtons_R16_FILLET_PROBE.json
+          if-no-files-found: error
