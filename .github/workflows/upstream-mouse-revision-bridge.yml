@@ -1,0 +1,27 @@
+name: Upstream Mouse Revision Bridge
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  recover-2022-step:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover exact upstream 2022 mechanical STEP
+        run: |
+          mkdir -p upstream_2022
+          curl -L --fail --retry 3 \
+            'https://raw.githubusercontent.com/ploopyco/mouse/a0a4d0ddaf2d4abf88e12ee62552ff3a56d4a9d1/hardware/mechanicals/STEPs/PloopyMouse.STEP' \
+            -o upstream_2022/PloopyMouse_2022.STEP
+          sha256sum upstream_2022/PloopyMouse_2022.STEP > upstream_2022/SHA256SUMS.txt
+          wc -c upstream_2022/PloopyMouse_2022.STEP
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ploopy-mouse-upstream-2022-step
+          path: upstream_2022/
+          if-no-files-found: error
+          retention-days: 1
