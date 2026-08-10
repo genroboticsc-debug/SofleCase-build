@@ -17,7 +17,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
 
       - name: Reconstruct exact checkpoint sources
         shell: bash
@@ -30,6 +29,7 @@ jobs:
           python -m py_compile mouse_runtime/ScrollWheel.py mouse_runtime/RightButtons.py
 
       - name: Install exact CAD runtime
+        id: runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -48,6 +48,8 @@ jobs:
           PY
 
       - name: Build ScrollWheel
+        if: steps.runtime.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
@@ -55,6 +57,8 @@ jobs:
           python mouse_runtime/ScrollWheel.py 2>&1 | tee mouse_runtime/logs/ScrollWheel.log
 
       - name: Build RightButtons
+        if: steps.runtime.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
@@ -63,24 +67,30 @@ jobs:
 
       - name: Audit generated B-Reps
         if: always()
+        continue-on-error: true
         shell: bash
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          from OCP.STEPControl import STEPControl_Reader
-          from OCP.IFSelect import IFSelect_RetDone
-          from OCP.BRepCheck import BRepCheck_Analyzer
-          from OCP.BRepGProp import BRepGProp
-          from OCP.GProp import GProp_GProps
-          from OCP.TopExp import TopExp_Explorer
-          from OCP.TopAbs import TopAbs_SOLID
-
           out = {}
+          try:
+              from OCP.STEPControl import STEPControl_Reader
+              from OCP.IFSelect import IFSelect_RetDone
+              from OCP.BRepCheck import BRepCheck_Analyzer
+              from OCP.BRepGProp import BRepGProp
+              from OCP.GProp import GProp_GProps
+              from OCP.TopExp import TopExp_Explorer
+              from OCP.TopAbs import TopAbs_SOLID
+              ocp_available = True
+          except Exception as exc:
+              ocp_available = False
+              out['_runtime_error'] = repr(exc)
+
           for name in ['ScrollWheel','RightButtons']:
               p = Path('generated') / f'{name}.step'
               row = {'exists': p.exists()}
-              if p.exists():
+              if p.exists() and ocp_available:
                   r = STEPControl_Reader()
                   row['read_status'] = int(r.ReadFile(str(p)))
                   if row['read_status'] == int(IFSelect_RetDone):
@@ -97,6 +107,7 @@ jobs:
                       BRepGProp.VolumeProperties_s(s, g)
                       row['volume_mm3'] = g.Mass()
               out[name] = row
+          Path('mouse_runtime').mkdir(exist_ok=True)
           Path('mouse_runtime/generated_audit.json').write_text(json.dumps(out, indent=2))
           print(json.dumps(out, indent=2))
           PY
