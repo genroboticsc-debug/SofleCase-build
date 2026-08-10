@@ -1,0 +1,145 @@
+"""ScrollWheelSpring Native XParent_003 — strict-SROT pure Build123d port.
+
+Source-independent engineering feature. Geometry is constructed only from identified
+analytic STEP supports and deterministic intersections/tangencies. No reference CAD,
+correction geometry, serialized B-Rep, external geometry replay,
+or external geometry helper is read at runtime.
+
+Feature law (source-proven):
+  torus -> F127 R0.5 -> F157 R0.4 -> F134 R2 -> F139 R1 -> F061 R5
+  -> F142 R1 -> F141 R2 -> F146 R0.4 -> F115 R0.5 -> torus -> exact closure
+
+The section/path ranking samples generated analytic intersection edges only to choose the
+correct engineering branch. Sampled points never define or approximate production curves.
+"""
+from __future__ import annotations
+
+import itertools
+import math
+from dataclasses import dataclass
+from typing import Iterable
+
+from build123d import Edge, Face, GeomType, Keep, Plane, Solid, Vector, Wire
+
+
+# ---------------------------------------------------------------------------
+# Exact source-derived engineering datums
+# ---------------------------------------------------------------------------
+X_BUILD = -7.962652818509
+X_END = -6.462652818506
+X_INNER = -5.962652818509
+X_OUTER = -9.062652818514
+Y_LEFT = 8.212210969752604
+Y_RIGHT = 10.212210969752597
+Z_CLOSURE = 8.2541860511672
+WIRE_TOL = 0.000964207506967509
+
+
+@dataclass(frozen=True)
+class CylinderSupport:
+    radius: float
+    loc: tuple[float, float, float]
+    axis: tuple[float, float, float]
+    xdir: tuple[float, float, float]
+
+
+CYL = {
+    "F061": CylinderSupport(
+        5.0000000000000036,
+        (-12.962652818509198, 8.1911517339244, 14.170265834266903),
+        (-2.66492745744684e-13, -1.0, -3.9219834646100695e-17),
+        (0.7071067811865477, -1.8841109504205327e-13, -0.7071067811865474),
+    ),
+    "F062": CylinderSupport(
+        1.9999999999999978,
+        (-9.9626528185079, 13.2122109697521, 10.459818851083899),
+        (-1.353930517835916e-16, -1.35393051783519e-16, 1.0),
+        (0.7071067811863584, -0.7071067811867366, 1.232595164407831e-31),
+    ),
+    "F064": CylinderSupport(
+        1.9999999999999978,
+        (-9.96265281851, 5.2122109697521, 8.409818851083898),
+        (1.3539305178351939e-16, -1.353930517835916e-16, -1.0),
+        (0.7071067811867366, 0.7071067811863584, 1.4791141972893971e-31),
+    ),
+    "F071": CylinderSupport(
+        4.000000000000002,
+        (-1.9626528185073706, 15.212210969750004, 7.307864723736899),
+        (1.0, -2.66299328267713e-13, -5.950833846274239e-17),
+        (-2.4841891745497797e-13, -0.9329364235415127, 0.3600411499114669),
+    ),
+    "F072": CylinderSupport(
+        4.000000000000001,
+        (-1.9626528185105698, 3.212210969749897, 7.307864723734801),
+        (-1.0, 2.662993282677445e-13, -5.95083384506255e-17),
+        (2.484189174549952e-13, 0.9329364235414505, 0.36004114991162794),
+    ),
+}
+
+TOR_MAJOR = 8.1
+TOR_MINOR = 4.0
+TOR_LOC = (-3.405798569016591, 9.2122109697494, 12.749371867901)
+TOR_AXIS = (-1.0, 2.66453525910038e-13, 4.5845205665406307e-26)
+TOR_XDIR = (-4.889633710033363e-30, 1.7203869183241063e-13, -1.0)
+
+# (support A, offset A, support B, offset B, rolling radius, selector law)
+CANAL_SPEC = {
+    "F139": ("F061", 6.0, "F064", 3.0, 1.0, "central_outer_low"),
+    "F142": ("F061", 6.0, "F062", 3.0, 1.0, "central_outer_low"),
+    "F146": ("F062", 2.4, "F071", 4.4, 0.4, "upper_path"),
+    "F157": ("F064", 2.4, "F072", 4.4, 0.4, "upper_path"),
+}
+
+
+# ---------------------------------------------------------------------------
+# Vector/topology helpers. All geometry stays Build123d-native.
+# ---------------------------------------------------------------------------
+def _v(p) -> Vector:
+    return p if isinstance(p, Vector) else Vector(*p)
+
+
+def _dist(a, b) -> float:
+    a, b = _v(a), _v(b)
+    return (a - b).length
+
+
+def _mid(a, b) -> Vector:
+    return (_v(a) + _v(b)) * 0.5
+
+
+def _edge_ends(e: Edge) -> tuple[Vector, Vector]:
+    return e.position_at(0.0), e.position_at(1.0)
+
+
+def _sample(e: Edge, n: int = 41) -> list[Vector]:
+    return [e.position_at(i / (n - 1)) for i in range(n)]
+
+
+def _reverse(e: Edge) -> Edge:
+    return e.reversed()
+
+
+def _shared(e: Edge, f: Edge):
+    ae = _edge_ends(e)
+    af = _edge_ends(f)
+    return min((_dist(ae[i], af[j]), i, j) for i in range(2) for j in range(2))
+
+
+def _surface_plane(origin, axis, xdir) -> Plane:
+    return Plane(origin=origin, z_dir=axis, x_dir=xdir)
+
+
+def _cyl_side(fid: str, radius: float, length: float = 80.0) -> Face:
+    s = CYL[fid]
+    axis = _v(s.axis).normalized()
+    origin = _v(s.loc) - axis * (0.5 * length)
+    solid = Solid.make_cylinder(radius, length, _surface_plane(origin, axis, s.xdir))
+    faces = list(solid.faces().filter_by(GeomType.CYLINDER))
+    if len(faces) != 1:
+        raise RuntimeError(f"{fid}: expected one cylindrical side face, got {len(faces)}")
+    return faces[0]
+
+
+def _torus_side(minor_radius: float) -> Face:
+    tor = Solid.make_torus(
+        TOR_MAJOR,
