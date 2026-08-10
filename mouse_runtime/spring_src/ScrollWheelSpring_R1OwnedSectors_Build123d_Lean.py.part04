@@ -1,0 +1,132 @@
+    }
+    if any(not v for v in S.values()):
+        missing = [k for k, v in S.items() if not v]
+        raise RuntimeError(f"empty generated XParent sections: {missing}")
+
+    names, path = _select_profile_path(S, tor, rs)
+    sel = {name: S[name][idx] for name, idx in zip(names, path[: len(names)])}
+    ein = S["F115"][path[-2]]
+    eout = S["F115"][path[-1]]
+
+    seq = [tor, sel["F127"], sel["F157"], sel["F134"], sel["F139"], sel["F061"],
+           sel["F142"], sel["F141"], sel["F146"], ein]
+    js = []
+    errors = []
+    for a, b in zip(seq, seq[1:]):
+        err, p = _junction(a, b)
+        errors.append(err)
+        js.append(p)
+
+    seam_err, jseam = _junction(ein, eout)
+    tor_err, jtor = _junction(eout, tor)
+    errors.extend([seam_err, tor_err])
+
+    cy, cz = TOR_LOC[1], TOR_LOC[2]
+    za = cz - math.sqrt(rs * rs - (Y_LEFT - cy) ** 2)
+    zl = cz - math.sqrt(rs * rs - (Y_RIGHT - cy) ** 2)
+    A = Vector(X_BUILD, Y_LEFT, za)
+    L = Vector(X_BUILD, Y_RIGHT, zl)
+    M = Vector(X_BUILD, Y_RIGHT, Z_CLOSURE)
+    N = Vector(X_BUILD, Y_LEFT, Z_CLOSURE)
+
+    edges = [
+        _arc(A, js[0], rs),
+        _trim(sel["F127"], js[0], js[1]),
+        _trim(sel["F157"], js[1], js[2]),
+        _trim(sel["F134"], js[2], js[3]),
+        _trim(sel["F139"], js[3], js[4]),
+        _trim(sel["F061"], js[4], js[5]),
+        _trim(sel["F142"], js[5], js[6]),
+        _trim(sel["F141"], js[6], js[7]),
+        _trim(sel["F146"], js[7], js[8]),
+        _trim(ein, js[8], jseam),
+        _trim(eout, jseam, jtor),
+        _arc(jtor, L, rs),
+        Edge.make_line(L, M),
+        Edge.make_line(M, N),
+        Edge.make_line(N, A),
+    ]
+    profile = Face(_wire(edges))
+    out = Solid.extrude(profile, Vector(X_END - X_BUILD, 0, 0))
+
+    diagnostics = {
+        "generated_branch_path": path,
+        "junction_errors_mm": errors,
+        "max_junction_error_mm": max(errors),
+        "target_feature_volume_mm3": 18.637272700491355,
+        "feature_law": "R1/R0.5/R0.4 analytic support intersections + exact torus/closure",
+    }
+    return (out, diagnostics) if return_diagnostics else out
+
+
+def build():
+    return build_native_xparent003(False)
+
+
+if __name__ == "__main__":
+    # Intentionally no export/reference validation here: production build stays standalone.
+    body, diag = build_native_xparent003(True)
+    print("volume_mm3", body.volume)
+    print("valid_solid_count", len(body.solids()))
+    print(diag)
+
+
+# ---------------------------------------------------------------------------
+# R1 owned-sector production semantics (F139/F142)
+# ---------------------------------------------------------------------------
+# Independent directional validation on the authoritative reference proves these
+# are ADDITIVE concave-cavity rolling fillets. They must never be subtracted.
+R1_OPERATION = "ADD"
+R1_SYMMETRY_Y = 9.2122109697521
+R1_F061_LOC = (-12.962652818509198, 8.1911517339244, 14.170265834266903)
+R1_F061_XDIR = (0.7071067811865477, -1.8841109504205327e-13, -0.7071067811865474)
+R1_F061_YDIR = (0.7071067811865474, -1.8846656026412372e-13, 0.7071067811865477)
+R1_F064_LOC = (-9.96265281851, 5.2122109697521, 8.409818851083898)
+R1_F064_XDIR = (0.7071067811867366, 0.7071067811863584, 1.4791141972893971e-31)
+R1_F064_YDIR = (0.7071067811863584, -0.7071067811867366, 1.9147469008338691e-16)
+
+
+def _one_solid(obj) -> Solid:
+    """Fail closed unless a split/boolean result contains exactly one solid."""
+    if isinstance(obj, Solid):
+        return obj
+    solids = list(obj.solids()) if hasattr(obj, "solids") else []
+    if len(solids) != 1:
+        raise RuntimeError(f"expected one owned-sector solid, got {len(solids)}")
+    return solids[0]
+
+
+def _clip_positive_halfspace(body: Solid, origin, normal) -> Solid:
+    """Keep the +normal side of an exact source-derived radial support plane."""
+    return _one_solid(body.split(Plane(origin=origin, z_dir=normal), Keep.TOP))
+
+
+def _clip_support_sector_0_45(body: Solid, loc, xdir, ydir) -> Solid:
+    """Exact cylindrical support ownership u in [0,45 deg]: Y>=0 and X-Y>=0."""
+    body = _clip_positive_halfspace(body, loc, ydir)
+    n2 = tuple(xdir[i] - ydir[i] for i in range(3))
+    return _clip_positive_halfspace(body, loc, n2)
+
+
+def build_f139_r1_owned_additive() -> Solid:
+    """Exact F139 R1 additive rolling sector from R6(F061) ∩ R3(F064)."""
+    canal = build_canal("F139")
+    canal = _clip_support_sector_0_45(canal, R1_F061_LOC, R1_F061_XDIR, R1_F061_YDIR)
+    canal = _clip_support_sector_0_45(canal, R1_F064_LOC, R1_F064_XDIR, R1_F064_YDIR)
+    if not canal.is_valid:
+        raise RuntimeError("F139 owned R1 sector invalid")
+    return canal
+
+
+def build_f142_r1_owned_additive() -> Solid:
+    """Exact source-symmetric F142 additive sector; no re-fit or independent trim law."""
+    mirror_plane = Plane(origin=(0.0, R1_SYMMETRY_Y, 0.0), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
+    upper = build_f139_r1_owned_additive().mirror(mirror_plane)
+    if not upper.is_valid:
+        raise RuntimeError("F142 mirrored owned R1 sector invalid")
+    return upper
+
+
+def build_r1_additive_pair() -> tuple[Solid, Solid]:
+    """Return (F139,F142); caller must ADD them at the R1 stage of the feature DAG."""
+    return build_f139_r1_owned_additive(), build_f142_r1_owned_additive()
