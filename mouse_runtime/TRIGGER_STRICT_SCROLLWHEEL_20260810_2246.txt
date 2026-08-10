@@ -1,0 +1,1 @@
+Trigger fresh Mouse strict ScrollWheel certification against authoritative Mouse.STEP.
