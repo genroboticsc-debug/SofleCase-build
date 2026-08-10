@@ -1,0 +1,107 @@
+name: Mouse Spring F139 Authority Analysis
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mouse-spring-authority-analysis.yml'
+      - 'mouse_runtime/spring_src/**'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install exact analysis kernel
+        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1'
+      - name: Download authoritative Mouse STEP
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail -o Mouse.STEP 'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
+          echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  Mouse.STEP' | sha256sum -c -
+      - name: Interrogate Spring F061/F064/F139 native parameter ownership
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math
+          from OCP.STEPControl import STEPControl_Reader
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.TopAbs import TopAbs_SOLID, TopAbs_FACE, TopAbs_EDGE
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopoDS import TopoDS
+          from OCP.BRep import BRep_Tool
+          from OCP.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
+          from OCP.BRepTools import BRepTools
+          from OCP.GProp import GProp_GProps
+          from OCP.BRepGProp import BRepGProp
+          from OCP.Bnd import Bnd_Box
+          from OCP.BRepBndLib import BRepBndLib
+
+          r=STEPControl_Reader(); assert r.ReadFile('Mouse.STEP')==IFSelect_RetDone; r.TransferRoots(); shape=r.OneShape()
+          solids=[]; ex=TopExp_Explorer(shape,TopAbs_SOLID)
+          while ex.More(): solids.append(TopoDS.Solid_s(ex.Current())); ex.Next()
+          vols=[]
+          for s in solids:
+              g=GProp_GProps(); BRepGProp.VolumeProperties_s(s,g); vols.append(g.Mass())
+          spring=min(range(len(solids)),key=lambda i:abs(vols[i]-665.0780851531142))
+          solid=solids[spring]
+          faces=[]; ex=TopExp_Explorer(solid,TopAbs_FACE)
+          while ex.More(): faces.append(TopoDS.Face_s(ex.Current())); ex.Next()
+          assert len(faces)==326,(spring,len(faces),vols)
+
+          def uv(face):
+              try: return list(BRepTools.UVBounds_s(face))
+              except Exception as e: return {'error':repr(e)}
+          def bbox(shape):
+              b=Bnd_Box(); BRepBndLib.Add_s(shape,b); return list(b.Get())
+          def edges(face):
+              out=[]; e=TopExp_Explorer(face,TopAbs_EDGE)
+              while e.More(): out.append(TopoDS.Edge_s(e.Current())); e.Next()
+              return out
+          def ends(edge):
+              c=BRepAdaptor_Curve(edge); a=c.Value(c.FirstParameter()); b=c.Value(c.LastParameter())
+              return [[a.X(),a.Y(),a.Z()],[b.X(),b.Y(),b.Z()]]
+          def same_edges(a,b):
+              out=[]
+              for i,e in enumerate(edges(a)):
+                  for j,f in enumerate(edges(b)):
+                      if e.IsSame(f): out.append((i,j,e))
+              return out
+          def cyl_info(face):
+              a=BRepAdaptor_Surface(face,True); c=a.Cylinder(); pos=c.Position()
+              loc=pos.Location(); ax=pos.Direction(); xd=pos.XDirection(); yd=pos.YDirection()
+              return {'radius':c.Radius(),'loc':[loc.X(),loc.Y(),loc.Z()],'axis':[ax.X(),ax.Y(),ax.Z()],'xdir':[xd.X(),xd.Y(),xd.Z()],'ydir':[yd.X(),yd.Y(),yd.Z()]}
+          def cylinder_u(info,p):
+              import numpy as np
+              q=np.array(p)-np.array(info['loc']); ax=np.array(info['axis']); xd=np.array(info['xdir']); yd=np.array(info['ydir'])
+              q=q-ax*float(q@ax)
+              u=math.atan2(float(q@yd),float(q@xd))
+              if u<0: u+=2*math.pi
+              return u
+
+          F061,F064,F139=faces[60],faces[63],faces[138]
+          out={'spring_solid_index_1based':spring+1,'spring_volume':vols[spring],'face_count':len(faces)}
+          for name,f in [('F061',F061),('F064',F064),('F139',F139)]:
+              out[name]={'uv_bounds':uv(f),'bbox':bbox(f),'edge_count':len(edges(f))}
+          ci61=cyl_info(F061); ci64=cyl_info(F064); out['F061']['cylinder']=ci61;out['F064']['cylinder']=ci64
+          for supp_name,supp,ci in [('F061',F061,ci61),('F064',F064,ci64)]:
+              shared=[]
+              for i,j,e in same_edges(F139,supp):
+                  ep=ends(e)
+                  shared.append({'F139_edge_index':i,'support_edge_index':j,'ends':ep,'support_u_at_ends':[cylinder_u(ci,p) for p in ep],'bbox':bbox(e)})
+              out['F139'][f'shared_with_{supp_name}']=shared
+          # All F139 edge endpoints help identify its remaining ownership supports.
+          out['F139']['all_edges']=[{'i':i,'ends':ends(e),'bbox':bbox(e)} for i,e in enumerate(edges(F139))]
+          open('mouse_runtime/ScrollWheelSpring_F139_AUTHORITY.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scrollwheelspring-f139-authority
+          path: mouse_runtime/ScrollWheelSpring_F139_AUTHORITY.json
+          if-no-files-found: error
