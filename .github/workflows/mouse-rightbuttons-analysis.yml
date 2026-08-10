@@ -6,6 +6,7 @@ on:
     paths:
       - 'mouse_runtime/analyze_rightbuttons_step.py'
       - 'mouse_runtime/analyze_rightbuttons_offset.py'
+      - 'mouse_runtime/analyze_rightbuttons_repeat_curve.py'
       - '.github/workflows/mouse-rightbuttons-analysis.yml'
 
 jobs:
@@ -18,7 +19,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install exact analysis kernel
-        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1'
+        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1' numpy
       - name: Fetch authoritative Mouse STEP
         shell: bash
         run: |
@@ -28,8 +29,10 @@ jobs:
           echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
       - name: Analyze exact RightButtons face adjacency
         run: python mouse_runtime/analyze_rightbuttons_step.py
-      - name: Analyze correct occurrence R1.6 rail/offset relationships
+      - name: Analyze correct occurrence R1.6 rail and offset relationships
         run: python mouse_runtime/analyze_rightbuttons_offset.py
+      - name: Search repeated or congruent directrices
+        run: python mouse_runtime/analyze_rightbuttons_repeat_curve.py
       - name: Upload authority analysis
         uses: actions/upload-artifact@v4
         with:
@@ -37,3 +40,4 @@ jobs:
           path: |
             mouse_runtime/rightbuttons_authority_analysis.json
             mouse_runtime/rightbuttons_offset_analysis.json
+            mouse_runtime/rightbuttons_repeat_curve_analysis.json
