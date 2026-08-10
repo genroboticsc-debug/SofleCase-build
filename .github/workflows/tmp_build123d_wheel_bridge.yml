@@ -1,0 +1,53 @@
+name: Temporary verified CAD wheel bridge
+
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheelhouse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download pinned official wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          python -m pip download --only-binary=:all: --no-deps --dest wheelhouse \
+            build123d==0.11.1 \
+            manifold3d==3.5.2 \
+            svgpathtools==1.7.2 \
+            ocpsvg==0.6.0 \
+            ocp-gordon==0.2.2 \
+            trianglesolver==1.2 \
+            lib3mf==2.5.0 \
+            webcolors==24.8.0
+
+      - name: Verify pinned critical hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd wheelhouse
+          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  build123d-0.11.1-py3-none-any.whl' | sha256sum -c -
+          MF=$(ls manifold3d-3.5.2-cp313-cp313-manylinux*.whl | head -1)
+          echo "bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45  $MF" | sha256sum -c -
+          sha256sum * | sort > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload verified wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: build123d-wheelhouse-py313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
