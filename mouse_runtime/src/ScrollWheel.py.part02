@@ -1,0 +1,117 @@
+                _circle_midpoint(left_center, left_land, left_groove),
+                left_groove,
+            )
+            for points in GROOVE_BEZIERS:
+                Bezier(points)
+            ThreePointArc(
+                right_groove,
+                _circle_midpoint(right_center, right_groove, right_land),
+                right_land,
+            )
+            Line(right_land, (WHEEL_WIDTH - END_CHAMFER, OUTER_LAND_RADIUS))
+            Line(
+                (WHEEL_WIDTH - END_CHAMFER, OUTER_LAND_RADIUS),
+                (WHEEL_WIDTH, END_OUTER_RADIUS),
+            )
+            Line((WHEEL_WIDTH, END_OUTER_RADIUS), (WHEEL_WIDTH, 0.0))
+            Line((WHEEL_WIDTH, 0.0), (0.0, 0.0))
+        make_face()
+    return profile.sketch
+
+def _bore_profile():
+    """Exact through-bore with 0.6 x 0.6 45-degree end chamfers."""
+    with BuildSketch(Plane.XZ) as profile:
+        with BuildLine():
+            Line((0.0, 0.0), (0.0, BORE_END_RADIUS))
+            Line((0.0, BORE_END_RADIUS), (BORE_CHAMFER_AXIAL, BORE_RADIUS))
+            Line(
+                (BORE_CHAMFER_AXIAL, BORE_RADIUS),
+                (WHEEL_WIDTH - BORE_CHAMFER_AXIAL, BORE_RADIUS),
+            )
+            Line(
+                (WHEEL_WIDTH - BORE_CHAMFER_AXIAL, BORE_RADIUS),
+                (WHEEL_WIDTH, BORE_END_RADIUS),
+            )
+            Line((WHEEL_WIDTH, BORE_END_RADIUS), (WHEEL_WIDTH, 0.0))
+            Line((WHEEL_WIDTH, 0.0), (0.0, 0.0))
+        make_face()
+    return profile.sketch
+
+
+def _single_window_tool():
+    """Create one exact 14-degree annular-sector through cutter."""
+    half = math.radians(WINDOW_ANGULAR_WIDTH_DEG / 2.0)
+
+    p0 = (
+        WINDOW_INNER_RADIUS * math.cos(-half),
+        WINDOW_INNER_RADIUS * math.sin(-half),
+    )
+    pm = (WINDOW_INNER_RADIUS, 0.0)
+    p1 = (
+        WINDOW_INNER_RADIUS * math.cos(half),
+        WINDOW_INNER_RADIUS * math.sin(half),
+    )
+    q1 = (
+        WINDOW_OUTER_RADIUS * math.cos(half),
+        WINDOW_OUTER_RADIUS * math.sin(half),
+    )
+    qm = (WINDOW_OUTER_RADIUS, 0.0)
+    q0 = (
+        WINDOW_OUTER_RADIUS * math.cos(-half),
+        WINDOW_OUTER_RADIUS * math.sin(-half),
+    )
+
+    with BuildSketch(Plane.YZ) as sector:
+        with BuildLine():
+            ThreePointArc(p0, pm, p1)
+            Line(p1, q1)
+            ThreePointArc(q1, qm, q0)
+            Line(q0, p0)
+        make_face()
+    return extrude(sector.sketch, amount=WHEEL_WIDTH)
+
+
+def build_scroll_wheel():
+    """Return the final parametric scroll-wheel body."""
+    wheel = revolve(_outer_revolve_profile(), axis=Axis.X)
+    bore = revolve(_bore_profile(), axis=Axis.X)
+    wheel = wheel - bore
+
+    base_window = _single_window_tool()
+    pitch = 360.0 / WINDOW_COUNT
+    window_tools = [Rotation(i * pitch, 0.0, 0.0) * base_window for i in range(WINDOW_COUNT)]
+    wheel = wheel - window_tools
+
+    # The reference has 104 exact window-rim chamfer edges:
+    # 13 windows x 4 perimeter edges x 2 end faces.
+    rim_edges = []
+    for edge in wheel.edges():
+        center = edge.center(CenterOf.MASS)
+        radial = math.hypot(center.Y, center.Z)
+        on_end = abs(center.X) < 1e-5 or abs(center.X - WHEEL_WIDTH) < 1e-5
+        if on_end and 8.0 < radial < 12.0:
+            rim_edges.append(edge)
+
+    if len(rim_edges) != 104:
+        raise RuntimeError(
+            f"ScrollWheel feature selection changed: expected 104 window rim edges, "
+            f"found {len(rim_edges)}"
+        )
+
+    wheel = chamfer(rim_edges, length=WINDOW_END_CHAMFER)
+    occurrence = Location(OCCURRENCE_TRANSLATION) * Rotation(OCCURRENCE_ROTATION_X_DEG, 0.0, 0.0)
+    return occurrence * wheel
+
+
+def export_outputs(output_dir: Path | None = None):
+    """Build once and export STEP/STL from the exact same in-memory body."""
+    body = build_scroll_wheel()
+    out = output_dir or (Path(__file__).resolve().parent.parent / "generated")
+    out.mkdir(parents=True, exist_ok=True)
+    export_step(body, out / "ScrollWheel.step")
+    export_stl(body, out / "ScrollWheel.stl", tolerance=0.02, angular_tolerance=0.1)
+    return body
+
+
+if __name__ == "__main__":
+    export_outputs()
