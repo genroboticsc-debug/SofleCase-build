@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'mouse_runtime/analyze_rightbuttons_step.py'
+      - 'mouse_runtime/analyze_rightbuttons_offset.py'
       - '.github/workflows/mouse-rightbuttons-analysis.yml'
 
 jobs:
@@ -25,10 +26,14 @@ jobs:
           curl --fail --location --retry 5 --output reference/Mouse.STEP \
             'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
           echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
-      - name: Analyze exact RightButtons rail relationships
+      - name: Analyze exact RightButtons face adjacency
         run: python mouse_runtime/analyze_rightbuttons_step.py
+      - name: Analyze correct occurrence R1.6 rail/offset relationships
+        run: python mouse_runtime/analyze_rightbuttons_offset.py
       - name: Upload authority analysis
         uses: actions/upload-artifact@v4
         with:
           name: rightbuttons-authority-analysis
-          path: mouse_runtime/rightbuttons_authority_analysis.json
+          path: |
+            mouse_runtime/rightbuttons_authority_analysis.json
+            mouse_runtime/rightbuttons_offset_analysis.json
