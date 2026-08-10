@@ -76,30 +76,22 @@ def _select_profile_path(S: dict[str, list[Edge]], tor: Edge, rs: float):
             cur[j] = best
         dp.append(cur)
 
-    out_idx = min(range(len(S["F115"])), key=lambda i: _tor_cost(S["F115"][i], rs))
-    out_e = S["F115"][out_idx]
-    con = []
-    for i, e in enumerate(S["F115"]):
-        if i == out_idx:
-            continue
-        d = _coarse_dist(e, out_e)
-        if d < 0.01:
-            con.append((i, d))
-    if not con:
-        raise RuntimeError("F115 connected branch not found")
-
+    # At the exact source X_INNER plane F115 is one continuous analytic section,
+    # not an artificial two-edge seam pair. Select the single branch that closes
+    # the proven F146 -> F115 -> torus chain.
     bestall = None
     for j, (cost, path) in dp[-1].items():
-        for inn, _ in con:
+        for f115_idx, f115 in enumerate(S["F115"]):
             row = (
                 cost
-                + _coarse_dist(S["F146"][j], S["F115"][inn])
-                + _coarse_dist(S["F115"][inn], out_e)
-                + _tor_cost(out_e, rs),
-                path + [inn, out_idx],
+                + _coarse_dist(S["F146"][j], f115)
+                + _tor_cost(f115, rs),
+                path + [f115_idx],
             )
             if bestall is None or row[0] < bestall[0]:
                 bestall = row
+    if bestall is None:
+        raise RuntimeError("F115 single-edge closure branch not found")
     return names, bestall[1]
 
 
