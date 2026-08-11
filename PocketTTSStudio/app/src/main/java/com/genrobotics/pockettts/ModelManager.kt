@@ -15,9 +15,7 @@ import java.net.URL
 
 class ModelManager(private val context: Context) {
     companion object {
-        const val MODEL_NAME = "sherpa-onnx-pocket-tts-int8-2026-01-26"
-        const val MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2"
-        private val REQUIRED = listOf(
+        private val POCKET_REQUIRED = listOf(
             "lm_flow.int8.onnx",
             "lm_main.int8.onnx",
             "encoder.onnx",
@@ -29,27 +27,73 @@ class ModelManager(private val context: Context) {
     }
 
     val modelsRoot: File get() = File(context.filesDir, "models")
-    val modelDir: File get() = File(modelsRoot, MODEL_NAME)
-    val defaultVoice: File get() = File(modelDir, "test_wavs/bria.wav")
+    val pocketPack: ModelPack get() = ModelCatalog.byId("pocket_en")
+    val modelDir: File get() = dir(pocketPack)
+    val defaultVoice: File get() = defaultVoice(pocketPack)
 
-    fun isReady(): Boolean = REQUIRED.all { File(modelDir, it).isFile && File(modelDir, it).length() > 0 }
-    fun missingFiles(): List<String> = REQUIRED.filterNot { File(modelDir, it).isFile && File(modelDir, it).length() > 0 }
-    fun modelBytes(): Long = if (!modelDir.exists()) 0L else modelDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    fun dir(pack: ModelPack): File = File(modelsRoot, pack.dirName)
 
-    suspend fun downloadAndInstall(onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
+    fun defaultVoice(pack: ModelPack): File =
+        if (pack.engine == EngineKind.POCKET) File(dir(pack), "test_wavs/bria.wav") else File("")
+
+    fun isReady(): Boolean = isReady(pocketPack)
+
+    fun isReady(pack: ModelPack): Boolean {
+        val root = dir(pack)
+        if (!root.isDirectory) return false
+        return when (pack.engine) {
+            EngineKind.POCKET -> POCKET_REQUIRED.all { File(root, it).isFile && File(root, it).length() > 0 }
+            EngineKind.PIPER -> {
+                File(root, pack.modelFile).let { it.isFile && it.length() > 0 } &&
+                    File(root, "tokens.txt").let { it.isFile && it.length() > 0 } &&
+                    File(root, "espeak-ng-data").isDirectory
+            }
+        }
+    }
+
+    fun missingFiles(pack: ModelPack): List<String> {
+        val root = dir(pack)
+        return when (pack.engine) {
+            EngineKind.POCKET -> POCKET_REQUIRED.filterNot { File(root, it).isFile && File(root, it).length() > 0 }
+            EngineKind.PIPER -> buildList {
+                if (!File(root, pack.modelFile).isFile) add(pack.modelFile)
+                if (!File(root, "tokens.txt").isFile) add("tokens.txt")
+                if (!File(root, "espeak-ng-data").isDirectory) add("espeak-ng-data/")
+            }
+        }
+    }
+
+    fun modelBytes(): Long = modelBytes(pocketPack)
+
+    fun modelBytes(pack: ModelPack): Long {
+        val root = dir(pack)
+        return if (!root.exists()) 0L else root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    fun installedPacks(): List<ModelPack> = ModelCatalog.packs.filter { isReady(it) }
+    fun totalInstalledBytes(): Long = installedPacks().sumOf { modelBytes(it) }
+
+    suspend fun downloadAndInstall(onProgress: (Int, String) -> Unit) = install(pocketPack, onProgress)
+
+    suspend fun install(pack: ModelPack, onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
         modelsRoot.mkdirs()
-        val archive = File(context.cacheDir, "$MODEL_NAME.tar.bz2")
-        val partial = File(context.cacheDir, "$MODEL_NAME.tar.bz2.part")
+        val archive = File(context.cacheDir, "${pack.dirName}.tar.bz2")
+        val partial = File(context.cacheDir, "${pack.dirName}.tar.bz2.part")
         partial.delete()
-        onProgress(0, "Connecting to official model release…")
+        archive.delete()
+        onProgress(0, "Connecting • ${pack.displayName}")
 
-        val connection = URL(MODEL_URL).openConnection() as HttpURLConnection
+        val connection = URL(pack.archiveUrl).openConnection() as HttpURLConnection
         connection.instanceFollowRedirects = true
-        connection.connectTimeout = 20_000
-        connection.readTimeout = 60_000
-        connection.setRequestProperty("User-Agent", "PocketTTSStudio/0.1 Android")
+        connection.connectTimeout = 25_000
+        connection.readTimeout = 90_000
+        connection.setRequestProperty("User-Agent", "PocketTTS-Ultra-Studio/0.2 Android")
         connection.connect()
-        if (connection.responseCode !in 200..299) throw IllegalStateException("Model download failed: HTTP ${connection.responseCode}")
+        if (connection.responseCode !in 200..299) {
+            connection.disconnect()
+            throw IllegalStateException("Model download failed: HTTP ${connection.responseCode}")
+        }
+
         val total = connection.contentLengthLong
         connection.inputStream.use { raw ->
             BufferedInputStream(raw, 256 * 1024).use { input ->
@@ -62,34 +106,44 @@ class ModelManager(private val context: Context) {
                         if (read == 0) continue
                         output.write(buffer, 0, read)
                         done += read
-                        val p = if (total > 0) ((done * 82L) / total).toInt().coerceIn(0, 82) else 0
+                        val p = if (total > 0) ((done * 84L) / total).toInt().coerceIn(0, 84) else 1
                         if (p != last) {
                             last = p
-                            onProgress(p, "Downloading model ${formatBytes(done)}${if (total > 0) " / ${formatBytes(total)}" else ""}")
+                            onProgress(
+                                p,
+                                "Downloading ${pack.voiceName} • ${formatBytes(done)}${if (total > 0) " / ${formatBytes(total)}" else ""}"
+                            )
                         }
                     }
                 }
             }
         }
         connection.disconnect()
+
         if (!partial.renameTo(archive)) {
             partial.copyTo(archive, overwrite = true)
             partial.delete()
         }
+        require(archive.isFile && archive.length() > 0) { "Downloaded archive is empty" }
 
-        onProgress(83, "Extracting PocketTTS model…")
-        if (modelDir.exists()) modelDir.deleteRecursively()
-        extractTarBz2(archive, modelsRoot) { index ->
-            onProgress((83 + index.coerceAtMost(15)).coerceAtMost(98), "Installing model files…")
+        onProgress(85, "Extracting ${pack.displayName}…")
+        val target = dir(pack)
+        if (target.exists()) target.deleteRecursively()
+        extractTarBz2(archive, modelsRoot) { count ->
+            onProgress((85 + count.coerceAtMost(13)).coerceAtMost(98), "Installing model files…")
         }
         archive.delete()
 
-        val missing = missingFiles()
-        if (missing.isNotEmpty()) throw IllegalStateException("Model install incomplete: ${missing.joinToString()}")
-        onProgress(100, "Model ready • ${formatBytes(modelBytes())}")
+        val missing = missingFiles(pack)
+        if (missing.isNotEmpty()) {
+            target.deleteRecursively()
+            throw IllegalStateException("Install validation failed: ${missing.joinToString()}")
+        }
+        onProgress(100, "Installed • ${pack.displayName} • ${formatBytes(modelBytes(pack))}")
     }
 
-    fun deleteModel() { modelDir.deleteRecursively() }
+    fun deleteModel() = delete(pocketPack)
+    fun delete(pack: ModelPack) { dir(pack).deleteRecursively() }
 
     private fun extractTarBz2(archive: File, destination: File, onStep: (Int) -> Unit) {
         val canonicalRoot = destination.canonicalFile
@@ -101,10 +155,16 @@ class ModelManager(private val context: Context) {
                         var count = 0
                         while (entry != null) {
                             val out = File(destination, entry.name).canonicalFile
-                            if (!out.path.startsWith(canonicalRoot.path + File.separator)) throw SecurityException("Unsafe archive path: ${entry.name}")
-                            if (entry.isDirectory) out.mkdirs() else {
+                            if (!out.path.startsWith(canonicalRoot.path + File.separator)) {
+                                throw SecurityException("Unsafe archive path: ${entry.name}")
+                            }
+                            if (entry.isDirectory) {
+                                out.mkdirs()
+                            } else {
                                 out.parentFile?.mkdirs()
-                                BufferedOutputStream(FileOutputStream(out), 256 * 1024).use { output -> tar.copyTo(output, 256 * 1024) }
+                                BufferedOutputStream(FileOutputStream(out), 256 * 1024).use { output ->
+                                    tar.copyTo(output, 256 * 1024)
+                                }
                             }
                             count++
                             onStep(count)
@@ -116,10 +176,12 @@ class ModelManager(private val context: Context) {
         }
     }
 
-    private fun formatBytes(v: Long): String {
+    fun formatBytes(v: Long): String {
         if (v < 1024) return "$v B"
         val kb = v / 1024.0
         if (kb < 1024) return String.format("%.1f KB", kb)
-        return String.format("%.1f MB", kb / 1024.0)
+        val mb = kb / 1024.0
+        if (mb < 1024) return String.format("%.1f MB", mb)
+        return String.format("%.2f GB", mb / 1024.0)
     }
 }
