@@ -47,7 +47,8 @@ dependencies {
     implementation 'androidx.compose.ui:ui-tooling-preview:1.3.2'
     implementation 'androidx.compose.material:material:1.3.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4'
-    implementation 'org.apache.commons:commons-compress:1.26.2'
-    implementation 'commons-io:commons-io:2.16.1'
+    // 1.21 is sufficient for TAR+BZip2 extraction and avoids newer JVM bytecode
+    // that old Android D8 versions can reject while dexing desktop-oriented helpers.
+    implementation 'org.apache.commons:commons-compress:1.21'
     debugImplementation 'androidx.compose.ui:ui-tooling:1.3.2'
 }
