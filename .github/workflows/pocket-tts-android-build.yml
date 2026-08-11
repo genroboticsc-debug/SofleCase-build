@@ -1,0 +1,59 @@
+name: Pocket TTS Android APK
+
+on:
+  push:
+    branches: [pocket-tts-studio-build]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 33
+        run: sdkmanager 'platforms;android-33' 'build-tools;33.0.2'
+
+      - name: Download sherpa-onnx Android AAR
+        working-directory: PocketTTSStudio
+        run: |
+          mkdir -p app/libs
+          curl -fL --retry 3 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.5/sherpa-onnx-1.13.5.aar \
+            -o app/libs/sherpa-onnx-1.13.5.aar
+          echo '6419cd8bc983e0c4fab06067f0fe0313fdc0f7103818ac1e7a08d50787b7a82b  app/libs/sherpa-onnx-1.13.5.aar' | sha256sum -c -
+
+      - name: Gradle 7.4.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '7.4.2'
+
+      - name: Build debug APK
+        working-directory: PocketTTSStudio
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK
+        working-directory: PocketTTSStudio
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketTTS-Ultra-Studio-arm64-debug
+          path: PocketTTSStudio/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
