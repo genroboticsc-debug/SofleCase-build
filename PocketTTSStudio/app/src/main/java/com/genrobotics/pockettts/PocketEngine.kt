@@ -4,14 +4,58 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import com.k2fsa.sherpa.onnx.GenerationConfig
-import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsPocketModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
+
+/** App-owned audio result. Keeping the sherpa generated-audio class out of our public
+ * API avoids binary/source drift between sherpa release AARs and tagged Kotlin sources. */
+data class PocketAudio(val samples: FloatArray, val sampleRate: Int) {
+    fun save(fileName: String): Boolean = try {
+        val file = File(fileName)
+        file.parentFile?.mkdirs()
+        val dataBytes = samples.size * 2
+        BufferedOutputStream(FileOutputStream(file), 128 * 1024).use { out ->
+            fun le16(v: Int) {
+                out.write(v and 0xff)
+                out.write((v ushr 8) and 0xff)
+            }
+            fun le32(v: Int) {
+                out.write(v and 0xff)
+                out.write((v ushr 8) and 0xff)
+                out.write((v ushr 16) and 0xff)
+                out.write((v ushr 24) and 0xff)
+            }
+            out.write("RIFF".toByteArray(Charsets.US_ASCII))
+            le32(36 + dataBytes)
+            out.write("WAVE".toByteArray(Charsets.US_ASCII))
+            out.write("fmt ".toByteArray(Charsets.US_ASCII))
+            le32(16)
+            le16(1) // PCM
+            le16(1) // mono
+            le32(sampleRate)
+            le32(sampleRate * 2)
+            le16(2)
+            le16(16)
+            out.write("data".toByteArray(Charsets.US_ASCII))
+            le32(dataBytes)
+            for (sample in samples) {
+                val pcm = (sample.coerceIn(-1f, 1f) * 32767f).roundToInt()
+                le16(pcm)
+            }
+        }
+        true
+    } catch (_: Throwable) {
+        false
+    }
+}
 
 class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
     private var tts: OfflineTts? = null
@@ -64,7 +108,7 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
         silence: Float,
         livePlayback: Boolean,
         onChunk: (Int) -> Unit
-    ): GeneratedAudio {
+    ): PocketAudio {
         val engine = tts ?: error("TTS engine is not initialized")
         val wave = WaveReader.readWave(referenceWav.absolutePath)
         require(wave.samples.isNotEmpty()) { "Reference WAV contains no audio" }
@@ -85,16 +129,23 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
             extra = extra
         )
 
-        val track = if (livePlayback) makeAudioTrack(engine.sampleRate()) else null
+        val sr = engine.sampleRate()
+        val track = if (livePlayback) makeAudioTrack(sr) else null
+        val chunks = ArrayList<FloatArray>(64)
+        var received = 0
         try {
             track?.play()
-            var received = 0
-            return engine.generateWithConfigAndCallback(text, cfg) { chunk ->
+            // Deliberately discard sherpa's GeneratedAudio object. The callback is the
+            // authoritative sample stream and lets this app own its stable result type.
+            engine.generateWithConfigAndCallback(text, cfg) { chunk ->
                 if (cancel.get()) return@generateWithConfigAndCallback 0
-                received += chunk.size
-                onChunk(received)
-                if (track != null && chunk.isNotEmpty()) {
-                    track.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+                if (chunk.isNotEmpty()) {
+                    chunks.add(chunk.copyOf())
+                    received += chunk.size
+                    onChunk(received)
+                    if (track != null) {
+                        track.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+                    }
                 }
                 1
             }
@@ -102,6 +153,15 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
             try { track?.stop() } catch (_: Exception) {}
             track?.release()
         }
+
+        if (cancel.get()) return PocketAudio(FloatArray(0), sr)
+        val all = FloatArray(received)
+        var offset = 0
+        for (chunk in chunks) {
+            chunk.copyInto(all, offset)
+            offset += chunk.size
+        }
+        return PocketAudio(all, sr)
     }
 
     private fun makeAudioTrack(sampleRate: Int): AudioTrack {
