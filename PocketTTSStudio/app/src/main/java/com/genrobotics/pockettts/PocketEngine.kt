@@ -9,53 +9,8 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsPocketModelConfig
 import com.k2fsa.sherpa.onnx.WaveReader
-import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.roundToInt
-
-/** App-owned audio result. Keeping the sherpa generated-audio class out of our public
- * API avoids binary/source drift between sherpa release AARs and tagged Kotlin sources. */
-data class PocketAudio(val samples: FloatArray, val sampleRate: Int) {
-    fun save(fileName: String): Boolean = try {
-        val file = File(fileName)
-        file.parentFile?.mkdirs()
-        val dataBytes = samples.size * 2
-        BufferedOutputStream(FileOutputStream(file), 128 * 1024).use { out ->
-            fun le16(v: Int) {
-                out.write(v and 0xff)
-                out.write((v ushr 8) and 0xff)
-            }
-            fun le32(v: Int) {
-                out.write(v and 0xff)
-                out.write((v ushr 8) and 0xff)
-                out.write((v ushr 16) and 0xff)
-                out.write((v ushr 24) and 0xff)
-            }
-            out.write("RIFF".toByteArray(Charsets.US_ASCII))
-            le32(36 + dataBytes)
-            out.write("WAVE".toByteArray(Charsets.US_ASCII))
-            out.write("fmt ".toByteArray(Charsets.US_ASCII))
-            le32(16)
-            le16(1) // PCM
-            le16(1) // mono
-            le32(sampleRate)
-            le32(sampleRate * 2)
-            le16(2)
-            le16(16)
-            out.write("data".toByteArray(Charsets.US_ASCII))
-            le32(dataBytes)
-            for (sample in samples) {
-                val pcm = (sample.coerceIn(-1f, 1f) * 32767f).roundToInt()
-                le16(pcm)
-            }
-        }
-        true
-    } catch (_: Throwable) {
-        false
-    }
-}
 
 class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
     private var tts: OfflineTts? = null
@@ -71,7 +26,7 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
             textConditioner = File(modelDir, "text_conditioner.onnx").absolutePath,
             vocabJson = File(modelDir, "vocab.json").absolutePath,
             tokenScoresJson = File(modelDir, "token_scores.json").absolutePath,
-            voiceEmbeddingCacheCapacity = 12
+            voiceEmbeddingCacheCapacity = 24
         )
         val config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
@@ -86,15 +41,6 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
         tts = OfflineTts(config = config)
     }
 
-    fun setThreads(value: Int) {
-        val v = value.coerceIn(1, 4)
-        if (v != threads) {
-            threads = v
-            initialize()
-        }
-    }
-
-    fun isInitialized() = tts != null
     fun sampleRate() = tts?.sampleRate() ?: 24000
     fun cancelGeneration() { cancel.set(true) }
 
@@ -108,14 +54,14 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
         silence: Float,
         livePlayback: Boolean,
         onChunk: (Int) -> Unit
-    ): PocketAudio {
-        val engine = tts ?: error("TTS engine is not initialized")
+    ): SynthAudio {
+        val engine = tts ?: error("PocketTTS engine is not initialized")
         val wave = WaveReader.readWave(referenceWav.absolutePath)
         require(wave.samples.isNotEmpty()) { "Reference WAV contains no audio" }
         cancel.set(false)
 
         val extra = linkedMapOf(
-            "max_reference_audio_len" to "10",
+            "max_reference_audio_len" to "15",
             "temperature" to temperature.coerceIn(0.1f, 2.0f).toString()
         )
         if (seed >= 0) extra["seed"] = seed.toString()
@@ -129,23 +75,29 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
             extra = extra
         )
 
+        return generateInternal(engine, text, cfg, livePlayback, onChunk)
+    }
+
+    private fun generateInternal(
+        engine: OfflineTts,
+        text: String,
+        cfg: GenerationConfig,
+        livePlayback: Boolean,
+        onChunk: (Int) -> Unit
+    ): SynthAudio {
         val sr = engine.sampleRate()
         val track = if (livePlayback) makeAudioTrack(sr) else null
-        val chunks = ArrayList<FloatArray>(64)
+        val chunks = ArrayList<FloatArray>(96)
         var received = 0
         try {
             track?.play()
-            // Deliberately discard sherpa's GeneratedAudio object. The callback is the
-            // authoritative sample stream and lets this app own its stable result type.
             engine.generateWithConfigAndCallback(text, cfg) { chunk ->
                 if (cancel.get()) return@generateWithConfigAndCallback 0
                 if (chunk.isNotEmpty()) {
                     chunks.add(chunk.copyOf())
                     received += chunk.size
                     onChunk(received)
-                    if (track != null) {
-                        track.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
-                    }
+                    track?.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
                 }
                 1
             }
@@ -154,14 +106,14 @@ class PocketEngine(private val modelDir: File, private var threads: Int = 2) {
             track?.release()
         }
 
-        if (cancel.get()) return PocketAudio(FloatArray(0), sr)
+        if (cancel.get()) return SynthAudio(FloatArray(0), sr)
         val all = FloatArray(received)
         var offset = 0
         for (chunk in chunks) {
             chunk.copyInto(all, offset)
             offset += chunk.size
         }
-        return PocketAudio(all, sr)
+        return SynthAudio(all, sr)
     }
 
     private fun makeAudioTrack(sampleRate: Int): AudioTrack {
