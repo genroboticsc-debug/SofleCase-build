@@ -1,0 +1,104 @@
+name: Dilemma PCB outline provenance audit
+
+on:
+  push:
+    branches:
+      - agent/dilemma-runtime-bootstrap-20260807
+    paths:
+      - .github/workflows/dilemma-pcb-history-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Clone authoritative upstream with history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+      - name: Audit Edge.Cuts history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/audit.py <<'PY'
+          import json, re, subprocess, pathlib
+          repo = pathlib.Path('upstream')
+          cmd = ['git','-C',str(repo),'log','--follow','--format=@@%H|%aI|%s','--name-only','--','3x5_2/dilemma.kicad_pcb']
+          out = subprocess.check_output(cmd, text=True, errors='replace')
+          records=[]; cur=None
+          for line in out.splitlines():
+              if line.startswith('@@'):
+                  if cur: records.append(cur)
+                  sha,date,msg=line[2:].split('|',2); cur={'sha':sha,'date':date,'message':msg,'paths':[]}
+              elif cur and line.strip(): cur['paths'].append(line.strip())
+          if cur: records.append(cur)
+          # --follow may not cross the 2023 directory move in all git versions; append known historical path log.
+          out2 = subprocess.check_output(['git','-C',str(repo),'log','--format=@@%H|%aI|%s','--name-only','--','dilemma/dilemma.kicad_pcb'], text=True, errors='replace')
+          cur=None
+          for line in out2.splitlines():
+              if line.startswith('@@'):
+                  if cur and all(r['sha']!=cur['sha'] for r in records): records.append(cur)
+                  sha,date,msg=line[2:].split('|',2); cur={'sha':sha,'date':date,'message':msg,'paths':[]}
+              elif cur and line.strip(): cur['paths'].append(line.strip())
+          if cur and all(r['sha']!=cur['sha'] for r in records): records.append(cur)
+          out3 = subprocess.check_output(['git','-C',str(repo),'log','--format=@@%H|%aI|%s','--name-only','--','unnamed/unnamed.kicad_pcb'], text=True, errors='replace')
+          cur=None
+          for line in out3.splitlines():
+              if line.startswith('@@'):
+                  if cur and all(r['sha']!=cur['sha'] for r in records): records.append(cur)
+                  sha,date,msg=line[2:].split('|',2); cur={'sha':sha,'date':date,'message':msg,'paths':[]}
+              elif cur and line.strip(): cur['paths'].append(line.strip())
+          if cur and all(r['sha']!=cur['sha'] for r in records): records.append(cur)
+
+          def file_at(sha):
+              for p in ('3x5_2/dilemma.kicad_pcb','dilemma/dilemma.kicad_pcb','unnamed/unnamed.kicad_pcb'):
+                  try:
+                      data=subprocess.check_output(['git','-C',str(repo),'show',f'{sha}:{p}'], text=True, errors='replace', stderr=subprocess.DEVNULL)
+                      return p,data
+                  except subprocess.CalledProcessError: pass
+              return None,None
+          def count_edges(data):
+              counts={'gr_line':0,'gr_arc':0,'gr_curve':0,'gr_rect':0,'gr_poly':0}
+              examples=[]
+              for line in data.splitlines():
+                  s=line.strip()
+                  if 'Edge.Cuts' not in s: continue
+                  for k in counts:
+                      if s.startswith('('+k+' '): counts[k]+=1
+                  if len(examples)<8 and any(s.startswith('('+k+' ') for k in counts): examples.append(s)
+              return counts,examples
+          audited=[]
+          for r in sorted(records,key=lambda x:x['date']):
+              path,data=file_at(r['sha'])
+              if not data: continue
+              counts,examples=count_edges(data)
+              audited.append({**r,'resolved_path':path,'size_chars':len(data),'edgecuts':counts,'total':sum(counts.values()),'examples':examples})
+          # also force exact reference commits of interest
+          for sha in ['c9f6dc5cc3dc34aff3a9b03a51578b49ab517ab9','4ee6252755abbc9e23823a21996d565deb03776c','f5cffb4821fe560b095418b71382ac7d8043c61a']:
+              if any(a['sha']==sha for a in audited): continue
+              path,data=file_at(sha)
+              if data:
+                  counts,examples=count_edges(data); audited.append({'sha':sha,'date':None,'message':'forced checkpoint','resolved_path':path,'edgecuts':counts,'total':sum(counts.values()),'examples':examples})
+          pathlib.Path('out').mkdir()
+          pathlib.Path('out/pcb_outline_history.json').write_text(json.dumps(audited,indent=2))
+          with open('out/summary.tsv','w') as f:
+              f.write('date\tsha\tpath\ttotal\tline\tarc\tcurve\tmessage\n')
+              for a in sorted(audited,key=lambda x:(x.get('date') or '9999',x['sha'])):
+                  c=a['edgecuts']; f.write(f"{a.get('date')}\t{a['sha']}\t{a['resolved_path']}\t{a['total']}\t{c['gr_line']}\t{c['gr_arc']}\t{c['gr_curve']}\t{a.get('message','')}\n")
+          print(pathlib.Path('out/summary.tsv').read_text())
+          PY
+          python /tmp/audit.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-pcb-outline-history-audit
+          path: out/
+          retention-days: 7
