@@ -1,8 +1,8 @@
-name: Pocket TTS Android APK
+name: AuraVox Studio Android APK
 
 on:
   push:
-    branches: [pocket-tts-studio-build]
+    branches: [auravox-studio-android]
   workflow_dispatch:
 
 jobs:
@@ -47,13 +47,14 @@ jobs:
         working-directory: PocketTTSStudio
         run: |
           test -f app/build/outputs/apk/debug/app-debug.apk
+          unzip -t app/build/outputs/apk/debug/app-debug.apk >/dev/null
           ls -lh app/build/outputs/apk/debug/app-debug.apk
           sha256sum app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: PocketTTS-Ultra-Studio-arm64-debug
+          name: AuraVox-Studio-v0.3.0-arm64-debug
           path: PocketTTSStudio/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
