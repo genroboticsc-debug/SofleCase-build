@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - nemotron-apk-build-20260818
+  pull_request:
+    branches:
+      - master
 
 jobs:
   build-apk:
