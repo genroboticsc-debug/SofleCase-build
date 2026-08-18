@@ -1,0 +1,49 @@
+name: Temporary P010 P011 Upstream Source Audit
+
+on:
+  push:
+    branches: [strict-p010-p011-certification]
+    paths: [.github/workflows/tmp-p010-p011-upstream-source-audit.yml]
+  pull_request:
+    branches: [master]
+    paths: [.github/workflows/tmp-p010-p011-upstream-source-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Retrieve exact pinned upstream commit
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 5 \
+            -o upstream.zip \
+            'https://github.com/Bastardkb/Dilemma/archive/f5cffb4821fe560b095418b71382ac7d8043c61a.zip'
+          sha256sum upstream.zip | tee UPSTREAM_ARCHIVE_SHA256.txt
+          unzip -q upstream.zip -d upstream
+          root="$(find upstream -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          target="$root/mechanical/cases/3x5_2/tenting_puck_hex"
+          test -d "$target"
+          find "$target" -type f -printf '%P\t%s bytes\n' | sort | tee EXACT_FOLDER_INVENTORY.txt
+          find "$target" -type f \( \
+            -iname '*.f3d' -o -iname '*.f3z' -o -iname '*.sldprt' -o \
+            -iname '*.fcstd' -o -iname '*.step' -o -iname '*.stp' -o \
+            -iname '*.iges' -o -iname '*.igs' -o -iname '*.dxf' -o \
+            -iname '*.scad' -o -iname '*.py' -o -iname '*.stl' \
+          \) -printf '%P\n' | sort | tee CAD_FILE_INVENTORY.txt
+          mkdir exact_folder
+          cp -a "$target"/. exact_folder/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p010-p011-upstream-source-audit
+          path: |
+            UPSTREAM_ARCHIVE_SHA256.txt
+            EXACT_FOLDER_INVENTORY.txt
+            CAD_FILE_INVENTORY.txt
+            exact_folder/
+          if-no-files-found: error
+          retention-days: 7
