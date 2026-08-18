@@ -1,0 +1,61 @@
+name: CAD runtime bridge
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-exact-cad-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Fetch exact Build123d and CAD runtime wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wheelhouse
+          python -m pip install --upgrade pip
+
+          curl -fL --retry 4 --retry-all-errors \
+            -o wheelhouse/build123d-0.11.1-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/e7/f2/c466dbd4cb3aa75a192ba39f1a49058f828fcc0eb6f9cf6936ed6078308b/build123d-0.11.1-py3-none-any.whl
+          echo '4e95fa7ccbdc83e624313be492e7c4f5f0eb2ea1df36130eb718bb0c25a89e10  wheelhouse/build123d-0.11.1-py3-none-any.whl' | sha256sum -c -
+
+          curl -fL --retry 4 --retry-all-errors \
+            -o wheelhouse/manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl \
+            https://files.pythonhosted.org/packages/43/71/3399b1f669e43391bbd199041bf3baf2f92c1fe374791c622dfb80d7c1fa/manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+          echo 'bbfd7a445aeeb24d1e17749e742c637db69fd15f6005ace3fb1a8bfa52beae45  wheelhouse/manifold3d-3.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl' | sha256sum -c -
+
+          # Download only the Build123d support stack that is missing from the
+          # current CAD sandbox. Extra dependency wheels are harmless and are
+          # retained only for offline installation; the exact existing OCP,
+          # NumPy, SciPy and scikit-learn versions are not replaced blindly.
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            'svgpathtools>=1.5.1,<2' \
+            'ocpsvg>=0.6,<0.7' \
+            'ocp_gordon>=0.2,<0.3' \
+            trianglesolver \
+            'lib3mf>=2.4.1'
+
+          sha256sum wheelhouse/* | sort > wheelhouse/SHA256SUMS.txt
+          python - <<'PY'
+          from pathlib import Path
+          for p in sorted(Path('wheelhouse').iterdir()):
+              print(p.name, p.stat().st_size)
+          PY
+
+      - name: Upload exact wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-cad-runtime-wheelhouse
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
