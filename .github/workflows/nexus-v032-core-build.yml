@@ -1,0 +1,103 @@
+name: Nexus Jarvis Core v0.3.2 Install-Safe Build
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-apk:
+    if: github.head_ref == 'nexus-jarvis-core-v032-20260818'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct and strip Play Protect sensitive capability
+        shell: bash
+        run: |
+          cat .nexus-v030/chunk00.b64 .nexus-v030/chunk01.b64 .nexus-v030/chunk02.b64 | base64 -d > /tmp/NemotronVoice_v030.tar.xz
+          mkdir -p /tmp/nexus
+          tar -xJf /tmp/NemotronVoice_v030.tar.xz -C /tmp/nexus
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/nexus/NemotronVoice_v030')
+          p=root/'app/build.gradle'
+          s=p.read_text().replace("applicationId 'com.nexus.nemotronvoice'", "applicationId 'com.nexus.jarviscore'")
+          s=s.replace('versionCode 3','versionCode 5').replace("versionName '0.3.0'", "versionName '0.3.2'")
+          p.write_text(s)
+          p=root/'app/src/main/AndroidManifest.xml'
+          s=p.read_text().replace('android:label="Nexus Voice"','android:label="Nexus Jarvis Core"')
+          start=s.find('        <service\n            android:name=".automation.AssistantAccessibilityService"')
+          if start!=-1:
+              end=s.find('        </service>',start)
+              if end!=-1:
+                  end += len('        </service>')
+                  s=s[:start]+s[end:]
+          p.write_text(s)
+          p=root/'app/src/main/java/com/nexus/nemotronvoice/MainActivity.java'
+          s=p.read_text().replace('import android.provider.Settings;\n','').replace('import com.nexus.nemotronvoice.automation.AssistantAccessibilityService;\n','')
+          s=s.replace('updateModelLine("Persistent memory ON • agent skills ON" + (AssistantAccessibilityService.isReady() ? " • automation ON" : " • long-press orb for automation"));','updateModelLine("Persistent memory ON • install-safe device skills ON");')
+          s=s.replace('return "open_app".equals(skill) || "search_web".equals(skill) || "open_url".equals(skill) || "click_text".equals(skill) || "type_text".equals(skill) || "scroll".equals(skill) || "back".equals(skill) || "home".equals(skill);','return "open_app".equals(skill) || "search_web".equals(skill) || "open_url".equals(skill);')
+          s=s.replace('NVIDIA is sufficient. Optional keys activate automatic Kimi/MiniMax fallback. Device/browser automation requires Android Accessibility permission.','NVIDIA is sufficient. Optional keys activate automatic Kimi/MiniMax fallback. This install-safe build intentionally excludes Accessibility so Play Protect can install it normally.')
+          s=s.replace('                .setNeutralButton("Automation", null)\n                .create();\n        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {\n            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));\n        }));\n        dialog.show();','                .create();\n        dialog.show();')
+          p.write_text(s)
+          p=root/'app/src/main/java/com/nexus/nemotronvoice/skills/DeviceSkillRegistry.java'
+          s=p.read_text().replace('import android.provider.Settings;\n','').replace('import com.nexus.nemotronvoice.automation.AssistantAccessibilityService;\n','')
+          for line in ['                "enable_automation{}\\n" +\n','                "screen_snapshot{}\\n" +\n','                "click_text{text}\\n" +\n','                "type_text{text}\\n" +\n','                "scroll{direction=forward|backward}\\n" +\n','                "back{}\\n" +\n','                "home{}\\n" +\n']:
+              s=s.replace(line,'')
+          old='''        if (s.equals("click_text")) {\n            String t = args == null ? "" : args.optString("text", "").toLowerCase(Locale.ROOT);\n            String[] risky = {"send","buy","purchase","pay","delete","remove","post","publish","confirm","submit","order","book","transfer"};\n            for (String r : risky) if (t.contains(r)) return true;\n        }\n'''
+          s=s.replace(old,'')
+          for frag in ['                case "enable_automation": return enableAutomation();\n','                case "screen_snapshot": return SkillResult.ok(AssistantAccessibilityService.snapshot());\n','                case "click_text": return AssistantAccessibilityService.clickText(args.optString("text", "")) ? SkillResult.ok("Clicked text: " + args.optString("text", "")) : SkillResult.fail("Could not find clickable text: " + args.optString("text", ""));\n','                case "type_text": return AssistantAccessibilityService.setText(args.optString("text", "")) ? SkillResult.ok("Entered text into active field") : SkillResult.fail("No editable field was available");\n','                case "back": return AssistantAccessibilityService.globalBack() ? SkillResult.ok("Pressed Back") : SkillResult.fail("Accessibility automation is not enabled");\n','                case "home": return AssistantAccessibilityService.globalHome() ? SkillResult.ok("Went Home") : SkillResult.fail("Accessibility automation is not enabled");\n']:
+              s=s.replace(frag,'')
+          old='''                case "scroll": {\n                    boolean forward = !"backward".equalsIgnoreCase(args.optString("direction", "forward"));\n                    return AssistantAccessibilityService.scroll(forward) ? SkillResult.ok("Scrolled " + (forward ? "forward" : "backward")) : SkillResult.fail("No scrollable area found");\n                }\n'''
+          s=s.replace(old,'')
+          s=s.replace('return SkillResult.ok("Opened web search for: " + query + ". Use screen_snapshot after the page loads to inspect visible results.");','return SkillResult.ok("Opened web search for: " + query + ".");')
+          idx=s.find('    private SkillResult enableAutomation() {')
+          if idx!=-1:
+              end=s.find('\n    }',idx)
+              if end!=-1:
+                  end += len('\n    }')
+                  s=s[:idx]+s[end:]
+          p.write_text(s)
+          p=root/'app/src/main/java/com/nexus/nemotronvoice/agent/AgentBrain.java'
+          s=p.read_text().replace('For current/latest facts that may have changed, use search_web and then screen_snapshot before answering. ','For current/latest facts that may have changed, use search_web to open a browser search when appropriate; do not claim you inspected browser content in this install-safe build. ')
+          p.write_text(s)
+          for q in [root/'app/src/main/java/com/nexus/nemotronvoice/automation/AssistantAccessibilityService.java', root/'app/src/main/res/xml/accessibility_service_config.xml']:
+              if q.exists(): q.unlink()
+          PY
+          ! grep -R "BIND_ACCESSIBILITY_SERVICE\|AccessibilityService\|ACTION_ACCESSIBILITY_SETTINGS" -n /tmp/nexus/NemotronVoice_v030/app/src/main
+          grep -q "applicationId 'com.nexus.jarviscore'" /tmp/nexus/NemotronVoice_v030/app/build.gradle
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: yes | sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Compile install-safe APK
+        working-directory: /tmp/nexus/NemotronVoice_v030
+        run: gradle --no-daemon assembleDebug --stacktrace
+      - name: Verify install-safe package
+        shell: bash
+        run: |
+          APK=/tmp/nexus/NemotronVoice_v030/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/nexus-v032-badging.txt
+          grep -q "package: name='com.nexus.jarviscore'" /tmp/nexus-v032-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee /tmp/nexus-v032-permissions.txt
+          ! grep -E "READ_SMS|RECEIVE_SMS|BIND_ACCESSIBILITY_SERVICE|NOTIFICATION_LISTENER" /tmp/nexus-v032-permissions.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/nexus-v032-signature.txt
+          sha256sum "$APK" | tee /tmp/NexusJarvisCore-v0.3.2.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexusJarvisCore-v0.3.2-install-safe
+          path: |
+            /tmp/nexus/NemotronVoice_v030/app/build/outputs/apk/debug/app-debug.apk
+            /tmp/NexusJarvisCore-v0.3.2.apk.sha256
+            /tmp/nexus-v032-badging.txt
+            /tmp/nexus-v032-permissions.txt
+            /tmp/nexus-v032-signature.txt
+          if-no-files-found: error
+          retention-days: 7
