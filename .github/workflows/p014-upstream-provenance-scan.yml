@@ -1,0 +1,77 @@
+name: P014 upstream native-CAD provenance scan
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, synchronize]
+    paths:
+      - .github/workflows/p014-upstream-provenance-scan.yml
+      - ci/P014_provenance.trigger
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan complete upstream Git history and release assets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p p014_provenance
+          git clone --mirror https://github.com/Bastardkb/Dilemma.git p014_provenance/Dilemma.git
+          git -C p014_provenance/Dilemma.git rev-list --objects --all > p014_provenance/all_objects.txt
+          grep -Eai '\.(step|stp|iges|igs|sldprt|sldasm|f3d|f3z|fcstd|ipt|iam|x_t|x_b|sat|sab|3dm|brep|brp|scad|blend|dwg|dxf|3mf|amf|obj|stl)([[:space:]]|$)' \
+            p014_provenance/all_objects.txt > p014_provenance/cad_objects_all_history.txt || true
+          grep -Eai '(^|/)(mechanical/cases/3x5_3|3x5_3).*(top|case)' \
+            p014_provenance/all_objects.txt > p014_provenance/p014_related_objects.txt || true
+          curl -fsSL --retry 5 --retry-delay 2 \
+            'https://api.github.com/repos/Bastardkb/Dilemma/releases?per_page=100' \
+            -o p014_provenance/releases.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          releases=json.loads(Path('p014_provenance/releases.json').read_text())
+          rows=[]
+          for release in releases:
+              for asset in release.get('assets',[]):
+                  rows.append({
+                      'release_name': release.get('name'),
+                      'tag_name': release.get('tag_name'),
+                      'published_at': release.get('published_at'),
+                      'asset_name': asset.get('name'),
+                      'content_type': asset.get('content_type'),
+                      'size': asset.get('size'),
+                      'browser_download_url': asset.get('browser_download_url'),
+                  })
+          Path('p014_provenance/release_assets.json').write_text(json.dumps(rows,indent=2))
+          native_ext=('.step','.stp','.iges','.igs','.sldprt','.sldasm','.f3d','.f3z','.fcstd','.ipt','.iam','.x_t','.x_b','.sat','.sab','.3dm','.brep','.brp')
+          native=[r for r in rows if str(r['asset_name']).lower().endswith(native_ext)]
+          Path('p014_provenance/native_release_assets.json').write_text(json.dumps(native,indent=2))
+          summary={
+              'repository':'Bastardkb/Dilemma',
+              'git_object_count':sum(1 for _ in open('p014_provenance/all_objects.txt')),
+              'cad_object_count':sum(1 for _ in open('p014_provenance/cad_objects_all_history.txt')),
+              'p014_related_object_count':sum(1 for _ in open('p014_provenance/p014_related_objects.txt')),
+              'release_count':len(releases),
+              'release_asset_count':len(rows),
+              'native_release_asset_count':len(native),
+          }
+          Path('p014_provenance/SUMMARY.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          print(Path('p014_provenance/p014_related_objects.txt').read_text())
+          print(json.dumps(native,indent=2))
+          PY
+          sha256sum p014_provenance/* > p014_provenance/SHA256SUMS.txt
+
+      - name: Upload provenance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: P014-upstream-provenance-${{ github.run_id }}
+          path: p014_provenance/
+          if-no-files-found: error
+          retention-days: 14
