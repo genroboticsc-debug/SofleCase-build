@@ -1,0 +1,125 @@
+name: Dilemma outline design-law audit
+
+on:
+  push:
+    branches:
+      - agent/dilemma-runtime-bootstrap-20260807
+    paths:
+      - .github/workflows/dilemma-outline-law-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Clone authoritative Dilemma history
+        run: git clone --filter=blob:none https://github.com/Bastardkb/Dilemma.git upstream
+      - name: Extract authoritative outline snapshots and layout datums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/audit.py <<'PY'
+          import json,re,subprocess,pathlib,math
+          repo='upstream'
+          snaps={
+            'initial107':'b1e633996d7c76fb97f6ad8cedc662312f0bc505',
+            'pre_chop213':'f5f943cf2a1ed65d2a3249225cd5f3652716972b',
+            'current197':'f5cffb4821fe560b095418b71382ac7d8043c61a',
+          }
+          paths=('3x5_2/dilemma.kicad_pcb','dilemma/dilemma.kicad_pcb','unnamed/unnamed.kicad_pcb')
+          def text_at(sha):
+            for p in paths:
+              try: return p,subprocess.check_output(['git','-C',repo,'show',f'{sha}:{p}'],text=True,errors='replace',stderr=subprocess.DEVNULL)
+              except subprocess.CalledProcessError: pass
+            raise RuntimeError(sha)
+          def blocks(txt,prefix):
+            out=[]; i=0; token='('+prefix+' '
+            while True:
+              s=txt.find(token,i)
+              if s<0: break
+              depth=0; inq=False; esc=False
+              for j in range(s,len(txt)):
+                c=txt[j]
+                if inq:
+                  if esc: esc=False
+                  elif c=='\\': esc=True
+                  elif c=='"': inq=False
+                else:
+                  if c=='"': inq=True
+                  elif c=='(': depth+=1
+                  elif c==')':
+                    depth-=1
+                    if depth==0:
+                      out.append(txt[s:j+1]); i=j+1; break
+              else: break
+            return out
+          def nums(s): return [float(x) for x in re.findall(r'[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?',s)]
+          def point(tag,b):
+            m=re.search(r'\('+tag+r'\s+([-+\d.eE]+)\s+([-+\d.eE]+)\)',b)
+            return [float(m.group(1)),float(m.group(2))] if m else None
+          def edgecuts(txt):
+            es=[]
+            for kind in ('gr_line','gr_arc','gr_curve'):
+              for b in blocks(txt,kind):
+                if 'Edge.Cuts' not in b: continue
+                d={'kind':kind,'start':point('start',b),'end':point('end',b)}
+                if kind=='gr_arc': d['mid']=point('mid',b)
+                if kind=='gr_curve':
+                  pts=re.findall(r'\(xy\s+([-+\d.eE]+)\s+([-+\d.eE]+)\)',b)
+                  d['pts']=[[float(a),float(c)] for a,c in pts]
+                es.append(d)
+            return es
+          def footprints(txt):
+            fs=[]
+            for b in blocks(txt,'footprint'):
+              at=re.search(r'\(at\s+([-+\d.eE]+)\s+([-+\d.eE]+)(?:\s+([-+\d.eE]+))?',b)
+              if not at: continue
+              name=re.match(r'\(footprint\s+"([^"]+)"',b)
+              ref=re.search(r'\(fp_text\s+reference\s+"([^"]+)"',b)
+              val=re.search(r'\(fp_text\s+value\s+"([^"]+)"',b)
+              nm=name.group(1) if name else ''
+              rf=ref.group(1) if ref else ''
+              vl=val.group(1) if val else ''
+              if any(k in (nm+' '+rf+' '+vl).lower() for k in ('switch','mx','choc','mountinghole','cirque','elite','mcu','jack','reset','encoder')):
+                fs.append({'name':nm,'ref':rf,'value':vl,'at':[float(at.group(1)),float(at.group(2)),float(at.group(3) or 0)]})
+            return fs
+          data={}
+          for key,sha in snaps.items():
+            p,t=text_at(sha); data[key]={'sha':sha,'path':p,'edgecuts':edgecuts(t),'footprints':footprints(t)}
+          # Convert current PCB coordinates to established case frame.
+          cur=data['current197']
+          for e in cur['edgecuts']:
+            for k in ('start','mid','end'):
+              if e.get(k):
+                x,y=e[k]; e[k+'_case']=[x-208.647041,44.510483-y]
+          for f in cur['footprints']:
+            x,y,a=f['at']; f['case_at']=[x-208.647041,44.510483-y,-a]
+          pathlib.Path('out').mkdir()
+          pathlib.Path('out/outline_snapshots.json').write_text(json.dumps(data,indent=2))
+          # basic endpoint-set comparison
+          def endpoint_set(edges,nd=6):
+            return {(round(p[0],nd),round(p[1],nd)) for e in edges for p in (e.get('start'),e.get('end')) if p}
+          summary={}
+          keys=list(data)
+          for k in keys:
+            e=data[k]['edgecuts']; summary[k]={'edges':len(e),'kinds':{q:sum(x['kind']==q for x in e) for q in ('gr_line','gr_arc','gr_curve')},'endpoints':len(endpoint_set(e))}
+          for a,b in [('initial107','current197'),('pre_chop213','current197')]:
+            A=endpoint_set(data[a]['edgecuts']); B=endpoint_set(data[b]['edgecuts'])
+            summary[a+'__'+b]={'common_endpoints':len(A&B),'a_only':len(A-B),'b_only':len(B-A)}
+          pathlib.Path('out/summary.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          PY
+          python /tmp/audit.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dilemma-outline-design-law-audit
+          path: out/
+          retention-days: 7
