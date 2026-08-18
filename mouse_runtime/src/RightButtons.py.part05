@@ -1,0 +1,152 @@
+        (origin[0] + axis[0], origin[1] + axis[1]),
+        (origin[0] + inward[0], origin[1] + inward[1]),
+    )
+    below_start = Z_BASE_TOP - 10.0
+    with BuildSketch(Plane.XY.offset(below_start)) as below_profile:
+        Rectangle(100.0, 100.0)
+    below_center = extrude(below_profile.sketch, amount=origin[2] - below_start)
+    axial_round = axial_round & below_center
+
+    torus_tools = None
+    for center_x, center_y, u_start, u_end in (
+        (
+            13.235231020738825,
+            37.69161798050675,
+            4.557283032344245,
+            6.128079359139112,
+        ),
+        (
+            6.116144244442231,
+            38.804771731375844,
+            3.485989367121504,
+            4.557283032344257,
+        ),
+    ):
+        torus = Location((center_x, center_y, origin[2])) * Torus(2.4, 1.0)
+        radial_limit = Location((center_x, center_y, below_start)) * Cylinder(
+            2.4,
+            20.0,
+            align=(Align.CENTER, Align.CENTER, Align.MIN),
+        )
+        mid = (u_start + u_end) / 2.0
+        keep_point = (
+            center_x + 2.0 * math.cos(mid),
+            center_y + 2.0 * math.sin(mid),
+        )
+        start_point = (
+            center_x + math.cos(u_start),
+            center_y + math.sin(u_start),
+        )
+        end_point = (
+            center_x + math.cos(u_end),
+            center_y + math.sin(u_end),
+        )
+        start_keep = _vertical_keep_halfspace(
+            (center_x, center_y), start_point, keep_point
+        )
+        end_keep = _vertical_keep_halfspace(
+            (center_x, center_y), end_point, keep_point
+        )
+        torus = torus & radial_limit & below_center & start_keep & end_keep
+
+        outer_upper = Location((center_x, center_y, origin[2])) * Cylinder(
+            2.4,
+            20.0,
+            align=(Align.CENTER, Align.CENTER, Align.MIN),
+        )
+        inner_upper = Location((center_x, center_y, origin[2])) * Cylinder(
+            1.4,
+            20.0,
+            align=(Align.CENTER, Align.CENTER, Align.MIN),
+        )
+        upper_annulus = (outer_upper - inner_upper) & start_keep & end_keep
+        torus = torus + upper_annulus
+        torus_tools = torus if torus_tools is None else torus_tools + torus
+
+    return axial_round + torus_tools
+
+
+def _left_pad_complete():
+    """Exact left pad: two datums, R2 crown, R1 ledge round, and end trim."""
+    front = extrude(_left_pad_transition_bottom_sketch(), amount=15.0)
+    rear = extrude(_left_pad_top_projection_sketch(), amount=15.0)
+    pad = front + rear
+    pad = pad - _plane_positive_halfspace(
+        LEFT_PAD_FRONT_TOP_NORMAL, LEFT_PAD_FRONT_TOP_DISTANCE
+    )
+    pad = pad - _plane_positive_halfspace(
+        REAR_PAD_TOP_NORMAL, REAR_PAD_TOP_DISTANCE
+    )
+    ridge_edges = [
+        edge
+        for edge in pad.edges().filter_by(GeomType.LINE)
+        if edge.length > 9.0 and edge.bounding_box().min.Z > 32.3
+    ]
+    if len(ridge_edges) != 1:
+        raise RuntimeError(
+            f"Expected one left-pad R2 crown edge, got {len(ridge_edges)}"
+        )
+    pad = fillet(ridge_edges, radius=2.0)
+    pad = pad - _left_pad_radius_one_round_tool()
+    pad = pad - _plane_positive_halfspace(
+        LEFT_PAD_END_TRIM_NORMAL, LEFT_PAD_END_TRIM_DISTANCE
+    )
+    return pad
+
+
+def _short_arc_midpoint(a, b, center, radius):
+    a0 = math.atan2(a[1] - center[1], a[0] - center[0])
+    a1 = math.atan2(b[1] - center[1], b[0] - center[0])
+    delta = (a1 - a0 + math.pi) % (2.0 * math.pi) - math.pi
+    am = a0 + delta / 2.0
+    return (center[0] + radius * math.cos(am), center[1] + radius * math.sin(am))
+
+
+def _right_pad_arc(a, b, center, radius):
+    ThreePointArc(a, _short_arc_midpoint(a, b, center, radius), b)
+
+
+def _right_pad_footprint_sketch():
+    """Exact right flexure-pad footprint on the base-top datum."""
+    with BuildSketch(Plane.XY.offset(Z_BASE_TOP)) as sketch:
+        with BuildLine():
+            _right_pad_arc(RPA, RPB, (18.056765142479, 40.045587270825), 2.0)
+            Line(RPB, RPC)
+            _right_pad_arc(RPC, RPD, (-14.93006777633, -39.90291262741), 88.486379170318)
+            _right_pad_arc(RPD, RPE, (21.089306815216, 38.725952530529), 2.0)
+            _right_pad_arc(RPE, RPF, (21.089306815216, 38.725952530529), 2.0)
+            Line(RPF, RPG)
+            _right_pad_arc(RPG, RPH, (21.058718808853, 34.646451510635), 1.4)
+            _right_pad_arc(RPH, RPI, (21.058718808853, 34.646451510635), 1.4)
+            Line(RPI, RPJ)
+            Line(RPJ, RPK)
+            _right_pad_arc(RPK, RPL, (17.100275782191, 32.633809266056), 1.2)
+            _right_pad_arc(RPL, RPM, (17.100275782191, 32.633809266056), 1.2)
+            for points in RIGHT_PAD_INNER_BEZIERS:
+                Bezier(points)
+            _right_pad_arc(RPO, RPA, (18.056765142479, 40.045587270825), 2.0)
+        make_face()
+    return sketch.sketch
+
+
+def _xy2(v):
+    return (float(v.X), float(v.Y))
+
+
+def _near2(a, b, tol=2e-5):
+    return math.hypot(a[0] - b[0], a[1] - b[1]) <= tol
+
+
+def _edge_owns_xy_endpoints(edge, a, b, tol=2e-5):
+    """Select a native edge by its authored sketch endpoints, not OCC curve class.
+
+    Build123d/OCC may represent cubic Bezier sketch segments as BEZIER, BSPLINE,
+    or another exact curve class after face creation/extrusion.  Endpoint ownership
+    is invariant under that representation change and does not fit or sample geometry.
+    """
+    verts = list(edge.vertices())
+    if len(verts) != 2:
+        return False
+    p, q = _xy2(verts[0]), _xy2(verts[1])
+    return (_near2(p, a, tol) and _near2(q, b, tol)) or (
+        _near2(p, b, tol) and _near2(q, a, tol)

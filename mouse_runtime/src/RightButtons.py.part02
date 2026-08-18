@@ -1,0 +1,152 @@
+    ((15.543811700249,35.668943245142),(15.743242164727,36.614439370056),(15.946815488010,37.559057689908),(16.156780818246,38.502275478488)),
+    ((16.156780818246,38.502275478488),(16.392476267407,39.561079520499),(16.636226325409,40.618118744096),(16.892855996662,41.672029861353)),
+)
+
+
+def _point(center: tuple[float, float], radius: float, angle_deg: float) -> tuple[float, float]:
+    angle = math.radians(angle_deg)
+    return center[0] + radius * math.cos(angle), center[1] + radius * math.sin(angle)
+
+
+def _arc(center: tuple[float, float], radius: float, start: float, sweep: float) -> None:
+    CenterArc(center, radius, start, sweep)
+
+
+def _angle(center: tuple[float, float], point: tuple[float, float]) -> float:
+    return math.degrees(math.atan2(point[1] - center[1], point[0] - center[0]))
+
+
+def _ccw_sweep(start_angle: float, end_angle: float) -> float:
+    return (end_angle - start_angle) % 360.0
+
+
+def _cw_sweep(start_angle: float, end_angle: float) -> float:
+    return -((start_angle - end_angle) % 360.0)
+
+
+def _base_outer_sketch():
+    """Exact analytic injection-moulded base outline on the bottom datum."""
+    c_r8 = (9.687132464046687, 4.643026689173848)
+    c_r20 = (15.966960492135668, -22.64366896892349)
+    c_front_right = (7.658930003991688, -3.356973310826166)
+    c_front_left = (-8.89651871905553, -3.356973310826166)
+    c_left_r2 = (-7.896518719055534, 0.867239438888426)
+    c_left_r1 = (-1.979236652643, 3.867239438888)
+    c_left_r3 = (-2.3077295014780415, 6.643026689173832)
+    c_neck_r19 = (2.9589300039916884, 6.343026689173835)
+    c_neck_r1 = (1.1589300039916877, 8.616790089354234)
+    c_corner_r1 = (3.1589300039916886, 11.143026689159234)
+    c_corner_r2 = (4.758930004010609, 14.143026689159287)
+    c_forward_r4 = (2.758930004010611, 30.963396503087843)
+    c_left_transition_r4 = (8.97300832471369, 36.00177229536135)
+    c_left_pad_r4 = (1.0332359660206807, 36.981575792055445)
+    c_left_rear_r4 = (8.50887474881585, 39.83022894559475)
+    c_left_tip_r2 = (7.068064690543, 43.561901650225)
+    c_left_long = (-14.930067776333589, -39.902912627412)
+    c_left_return_r2 = (13.251859363763, 41.68184107756)
+    c_flexure_end = (13.891992108913023, 29.59293507073299)
+    c_right_tip_r2 = (18.056765142479, 40.045587270825)
+    c_right_long = (-14.930067776333589, -39.902912627412)
+    c_right_return_r2 = (21.089306815216, 38.725952530529)
+
+    a = AXIS_ANGLE_DEG
+    with BuildSketch(Plane.XY.offset(Z_BOTTOM)) as sketch:
+        with BuildLine():
+            # Main oblique front edge into the tangent R8/R20 nose pair.
+            Line(_point(c_right_return_r2, 2.0, a), _point(c_r8, 8.0, a))
+            _arc(c_r8, 8.0, a, -68.15256574199999)
+            _arc(c_r20, 20.0, 102.960518058, 10.344160582)
+            _arc(c_front_right, 1.0, -66.69532136, -23.30467864)
+            Line(_point(c_front_right, 1.0, -90.0), _point(c_front_left, 1.0, -90.0))
+            _arc(c_front_left, 1.0, -90.0, -90.0)
+            Line(_point(c_front_left, 1.0, 180.0), _point(c_left_r2, 2.0, 180.0))
+            _arc(c_left_r2, 2.0, 180.0, -90.0)
+
+            # Left-hand neck into the raised-platform region.
+            Line(_point(c_left_r2, 2.0, 90.0), _point(c_left_r1, 1.0, -90.0))
+            _arc(c_left_r1, 1.0, -90.0, 64.226880779)
+            Line(_point(c_left_r1, 1.0, -25.773119221), _point(c_left_r3, 3.0, -59.235238248))
+            _arc(c_left_r3, 3.0, -59.235238248, 34.235238248)
+            Line(_point(c_left_r3, 3.0, -25.0), _point(c_neck_r19, 1.9, 155.0))
+            _arc(c_neck_r19, 1.9, 155.0, -26.633485744)
+            _arc(c_neck_r1, 1.0, -51.633485744, 51.633485744)
+            Line(_point(c_neck_r1, 1.0, 0.0), _point(c_corner_r1, 1.0, 180.0))
+            _arc(c_corner_r1, 1.0, 180.0, -90.0)
+            Line(_point(c_corner_r1, 1.0, 90.0), _point(c_corner_r2, 2.0, -90.0))
+            _arc(c_corner_r2, 2.0, -90.0, 90.0)
+            Line(_point(c_corner_r2, 2.0, 0.0), _point(c_forward_r4, 4.0, 0.0))
+
+            # Rear flexure/pad perimeter, all native circles and tangent lines.
+            _arc(c_forward_r4, 4.0, 0.0, 39.035145237)
+            _arc(c_left_transition_r4, 4.0, -140.964854763, -46.070133952)
+            _arc(c_left_pad_r4, 4.0, -7.034988715, 27.894739134)
+            _arc(c_left_rear_r4, 4.0, -159.140249581, -29.746666619)
+            Line(_point(c_left_rear_r4, 4.0, 171.1130838), _point(c_left_tip_r2, 2.0, 171.1130838))
+            _arc(c_left_tip_r2, 2.0, 171.1130838, -95.878285003)
+            _arc(c_left_long, 88.31508011020259, 75.234798797, -4.291313184)
+            _arc(c_left_return_r2, 2.0, 70.943485613, -79.830401813)
+            Line(_point(c_left_return_r2, 2.0, a), _point(c_flexure_end, 0.5, 171.1130838))
+            _arc(c_flexure_end, 0.5, 171.1130838, 180.0)
+            Line(_point(c_flexure_end, 0.5, a), _point(c_right_tip_r2, 2.0, 171.1130838))
+            _arc(c_right_tip_r2, 2.0, 171.1130838, -103.53417766)
+            _arc(c_right_long, 88.48637917031795, 67.57890614, -2.191115522)
+            _arc(c_right_return_r2, 2.0, 65.387790618, -74.274706818)
+        make_face()
+    return sketch.sketch
+
+
+def _forward_flexure_opening_bottom():
+    """First exact line/arc opening before its common bottom chamfer."""
+    c_entry = (14.858930003991672, 24.8082577695116)
+    c1 = (18.822661055851224, 25.856511626346148)
+    c2 = (18.87334754035707, 25.848586192632652)
+    c3 = (19.866662255278722, 32.20125189238735)
+    c4 = (17.10027578219062, 32.63380926605575)
+    c5 = (16.46641367233827, 28.57999427354295)
+    a = AXIS_ANGLE_DEG
+    with BuildSketch(Plane.XY.offset(Z_BOTTOM)) as sketch:
+        with BuildLine():
+            _arc(c_entry, 2.7, 66.916688302, -52.103299771)
+            _arc(c1, 1.4, -165.186611469, 66.299695269)
+            Line(_point(c1, 1.4, a - 90.0), _point(c2, 1.4, a - 90.0))
+            _arc(c2, 1.4, a - 90.0, 90.0)
+            Line(_point(c2, 1.4, a), _point(c3, 1.4, a))
+            _arc(c3, 1.4, a, 90.0)
+            Line(_point(c3, 1.4, a + 90.0), _point(c4, 1.4, a + 90.0))
+            _arc(c4, 1.4, a + 90.0, 90.0)
+            Line(_point(c4, 1.4, a + 180.0), _point(c5, 1.4, a + 180.0))
+            _arc(c5, 1.4, 171.1130838, 75.803604502)
+        make_face()
+    return sketch.sketch
+
+
+def _rear_flexure_opening_bottom():
+    """Second exact line/arc opening before its common bottom chamfer."""
+    c1 = (12.043174467164471, 35.24641836225865)
+    c2 = (7.173018840306, 36.007925023675)
+    c3 = (8.97300832471369, 36.00177229536135)
+    c4 = (2.758930004010611, 30.963396503087843)
+    c5 = (8.958930003990131, 28.80825776949179)
+    c6 = (9.858930003991672, 24.8082577695116)
+    c7 = (11.052127797956917, 28.90825776949265)
+    a = AXIS_ANGLE_DEG
+    with BuildSketch(Plane.XY.offset(Z_BOTTOM)) as sketch:
+        with BuildLine():
+            _arc(c1, 1.4, a + 45.0, 45.0)
+            Line(_point(c1, 1.4, a + 90.0), _point(c2, 1.4, a + 90.0))
+            _arc(c2, 1.4, a + 90.0, 98.691068394)
+            _arc(c3, 3.2, 179.804152194, 39.230993043)
+            _arc(c4, 4.8, 39.035145237, -39.035145237)
+            Line(_point(c4, 4.8, 0.0), _point(c5, 1.4, 180.0))
+            _arc(c5, 1.4, 180.0, 102.680383492)
+            _arc(c6, 2.7, 102.680383492, -12.680383492)
+            Line(_point(c6, 2.7, 90.0), _point(c7, 1.4, -90.0))
+            _arc(c7, 1.4, -90.0, 81.1130838)
+            Line(_point(c7, 1.4, a), _point(c1, 1.4, a))
+            _arc(c1, 1.4, a, 45.0)
+        make_face()
+    return sketch.sketch
+
+
+def _chamfered_through_tool(bottom_profile):
+    """Make a 0.2 x 45-degree opening plus its vertical through-cut."""
