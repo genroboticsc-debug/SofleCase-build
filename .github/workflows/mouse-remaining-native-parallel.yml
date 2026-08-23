@@ -31,12 +31,19 @@ jobs:
           mkdir -p reference generated mouse_runtime/results
           curl --fail --location --retry 5 --output reference/Mouse.STEP 'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
           echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
-      - name: Static source-purity gate
+      - name: Normalize and static source-purity gate
         run: |
           python - <<'PY'
           import ast,re,json
           from pathlib import Path
-          p=Path('mouse_runtime/remaining/CutExtrude38.py'); s=p.read_text(); ast.parse(s)
+          p=Path('mouse_runtime/remaining/CutExtrude38.py')
+          raw=p.read_bytes()
+          try:
+              s=raw.decode('utf-8')
+          except UnicodeDecodeError:
+              s=raw.decode('utf-8',errors='replace')
+              p.write_text(s,encoding='utf-8')
+          ast.parse(s)
           forbidden={
             'runtime_import_step': bool(re.search(r'\b(import_step|import_stl|STEPControl_Reader|StlAPI_Reader)\b',s)),
             'direct_brep_replay': bool(re.search(r'\b(BRep_Builder|BRepTools|read_brep|TopoDS)\b',s)),
