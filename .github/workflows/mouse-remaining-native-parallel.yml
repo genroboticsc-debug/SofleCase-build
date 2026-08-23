@@ -1,0 +1,115 @@
+name: Mouse Remaining Native Parallel
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'mouse_runtime/remaining/**'
+      - '.github/workflows/mouse-remaining-native-parallel.yml'
+
+jobs:
+  cutextrude38-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CAD runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'build123d==0.11.1' 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
+          python - <<'PY'
+          import importlib.metadata as m
+          assert m.version('build123d') == '0.11.1'
+          assert m.version('cadquery-ocp-novtk') == '7.9.3.1.1'
+          print('runtime', m.version('build123d'), m.version('cadquery-ocp-novtk'))
+          PY
+      - name: Fetch authoritative Mouse STEP
+        run: |
+          mkdir -p reference generated mouse_runtime/results
+          curl --fail --location --retry 5 --output reference/Mouse.STEP 'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
+          echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
+      - name: Static source-purity gate
+        run: |
+          python - <<'PY'
+          import ast,re,json
+          from pathlib import Path
+          p=Path('mouse_runtime/remaining/CutExtrude38.py'); s=p.read_text(); ast.parse(s)
+          forbidden={
+            'runtime_import_step': bool(re.search(r'\b(import_step|import_stl|STEPControl_Reader|StlAPI_Reader)\b',s)),
+            'direct_brep_replay': bool(re.search(r'\b(BRep_Builder|BRepTools|read_brep|TopoDS)\b',s)),
+            'explicit_bspline_replay': bool(re.search(r'\b(Geom_BSplineCurve|Geom_BSplineSurface|Geom2d_BSplineCurve|TColgp_|TColStd_)\b',s)),
+            'mesh_reconstruction': bool(re.search(r'\b(trimesh|meshio)\b',s)),
+            'serialized_geometry': bool(re.search(r'\b(pickle|base64)\b',s)),
+          }
+          out={'forbidden':forbidden,'pass':not any(forbidden.values())}
+          Path('mouse_runtime/results/CutExtrude38_source_purity.json').write_text(json.dumps(out,indent=2)); print(json.dumps(out,indent=2))
+          if not out['pass']: raise SystemExit(2)
+          PY
+      - name: Fresh native Build123d build
+        run: |
+          python mouse_runtime/remaining/CutExtrude38.py
+          test -s generated/CutExtrude38.step
+          test -s generated/CutExtrude38.stl
+      - name: Zero-fuzzy two-way symmetric difference
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from OCP.STEPControl import STEPControl_Reader
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.TopAbs import TopAbs_SOLID
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopoDS import TopoDS
+          from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+          from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+          from OCP.BRepCheck import BRepCheck_Analyzer
+          from OCP.BRepGProp import BRepGProp
+          from OCP.GProp import GProp_GProps
+          from OCP.gp import gp_Trsf,gp_Vec
+
+          def read(path):
+              r=STEPControl_Reader(); st=r.ReadFile(str(path))
+              if st != IFSelect_RetDone: raise RuntimeError((path,int(st)))
+              r.TransferRoots(); return r.OneShape()
+          def solids(shape):
+              e=TopExp_Explorer(shape,TopAbs_SOLID); out=[]
+              while e.More(): out.append(TopoDS.Solid_s(e.Current())); e.Next()
+              return out
+          def volume(shape):
+              g=GProp_GProps(); BRepGProp.VolumeProperties_s(shape,g); return float(g.Mass())
+          def cutvol(a,b):
+              op=BRepAlgoAPI_Cut(a,b); op.SetFuzzyValue(0.0); op.SetRunParallel(False); op.Build()
+              if not op.IsDone(): raise RuntimeError('zero-fuzzy cut failed')
+              return volume(op.Shape())
+
+          refs=solids(read('reference/Mouse.STEP')); assert len(refs)==10,len(refs)
+          R=refs[2]
+          gs=solids(read('generated/CutExtrude38.step')); assert len(gs)==1,len(gs)
+          tr=gp_Trsf(); tr.SetTranslation(gp_Vec(4.237347181489,-26.287789030255,-5.750628132099))
+          G=BRepBuilderAPI_Transform(gs[0],tr,True).Shape()
+          vr,vg=volume(R),volume(G)
+          missing=cutvol(R,G); extra=cutvol(G,R); xor=missing+extra; pct=100.0*xor/vr
+          out={
+            'part':'CutExtrude38','fresh_native_build':True,'reference_index':2,
+            'reference_volume_mm3':vr,'generated_volume_mm3':vg,
+            'R_minus_G_mm3':missing,'G_minus_R_mm3':extra,
+            'symmetric_difference_mm3':xor,'symmetric_difference_percent':pct,
+            'threshold_percent':0.01,'geometry_pass':pct < 0.01,
+            'reference_valid':bool(BRepCheck_Analyzer(R).IsValid()),
+            'generated_valid':bool(BRepCheck_Analyzer(G).IsValid()),
+          }
+          Path('mouse_runtime/results/CutExtrude38_STRICT_NATIVE.json').write_text(json.dumps(out,indent=2)); print(json.dumps(out,indent=2))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mouse-remaining-native-cutextrude38
+          if-no-files-found: warn
+          path: |
+            generated/CutExtrude38.*
+            mouse_runtime/results/**
+            mouse_runtime/remaining/CutExtrude38.py
