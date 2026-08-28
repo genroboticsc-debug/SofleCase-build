@@ -1,0 +1,74 @@
+name: Build FishBrain AI APK
+
+on:
+  push:
+    branches:
+      - fishbrain-apk-build
+    paths:
+      - '.fishbrain/source.zip.b64'
+      - '.github/workflows/fishbrain-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct source
+        shell: bash
+        run: |
+          mkdir -p /tmp/fishbrain-build
+          base64 -d .fishbrain/source.zip.b64 > /tmp/FishBrainAI_Android_Source.zip
+          unzip -q /tmp/FishBrainAI_Android_Source.zip -d /tmp/fishbrain-build
+          test -f /tmp/fishbrain-build/FishBrainAI/app/build.gradle.kts
+          test -f /tmp/fishbrain-build/FishBrainAI/app/src/main/java/com/fishbrain/ai/MainActivity.java
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Build APK
+        working-directory: /tmp/fishbrain-build/FishBrainAI
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          SRC=/tmp/fishbrain-build/FishBrainAI/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$SRC"
+          cp "$SRC" /tmp/FishBrainAI-v1.0.0.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging /tmp/FishBrainAI-v1.0.0.apk | tee /tmp/FishBrainAI-badging.txt
+          grep -q "package: name='com.fishbrain.ai'" /tmp/FishBrainAI-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs /tmp/FishBrainAI-v1.0.0.apk | tee /tmp/FishBrainAI-signature.txt
+          sha256sum /tmp/FishBrainAI-v1.0.0.apk | tee /tmp/FishBrainAI-v1.0.0.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FishBrainAI-v1.0.0-APK
+          path: |
+            /tmp/FishBrainAI-v1.0.0.apk
+            /tmp/FishBrainAI-v1.0.0.apk.sha256
+            /tmp/FishBrainAI-badging.txt
+            /tmp/FishBrainAI-signature.txt
+          if-no-files-found: error
+          retention-days: 7
