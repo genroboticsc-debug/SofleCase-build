@@ -57,42 +57,45 @@ def _torus_circle() -> tuple[Edge, float]:
     return Edge.make_circle(rs, plane), rs
 
 
-def _tor_cost(e: Edge, rs: float) -> float:
-    cy, cz = TOR_LOC[1], TOR_LOC[2]
-    return min(abs(math.hypot(p.Y - cy, p.Z - cz) - rs) for p in _sample(e, 121))
+def _exact_edge_distance(a: Edge, b: Edge) -> float:
+    """Kernel exact closest distance; branch selection only, never geometry creation."""
+    return float(a.distance_to_with_closest_points(b)[0])
+
+
+def _tor_cost(e: Edge, tor: Edge) -> float:
+    return _exact_edge_distance(e, tor)
 
 
 def _select_profile_path(S: dict[str, list[Edge]], tor: Edge, rs: float):
     names = ["F127", "F157", "F134", "F139", "F061", "F142", "F141", "F146"]
-    dp = [{i: (_tor_cost(e, rs), [i]) for i, e in enumerate(S["F127"])}]
+    dp = [{i: (_tor_cost(e, tor), [i]) for i, e in enumerate(S["F127"])}]
     for k in range(1, len(names)):
         cur = {}
         for j, e in enumerate(S[names[k]]):
             best = None
             for i, (cost, path) in dp[-1].items():
-                row = (cost + _coarse_dist(S[names[k - 1]][i], e), path + [j])
+                gap = _exact_edge_distance(S[names[k - 1]][i], e)
+                row = (cost + gap, path + [j])
                 if best is None or row[0] < best[0]:
                     best = row
             cur[j] = best
         dp.append(cur)
 
-    # At the exact source X_INNER plane F115 is one continuous analytic section,
-    # not an artificial two-edge seam pair. Select the single branch that closes
-    # the proven F146 -> F115 -> torus chain.
-    bestall = None
+    # F115 is one analytic section. Require the candidate that closes the
+    # F146 -> F115 -> torus chain in the exact kernel, rather than selecting by
+    # sampled proximity (which previously picked a branch 3.067 mm away).
+    candidates = []
     for j, (cost, path) in dp[-1].items():
         for f115_idx, f115 in enumerate(S["F115"]):
-            row = (
-                cost
-                + _coarse_dist(S["F146"][j], f115)
-                + _tor_cost(f115, rs),
-                path + [f115_idx],
-            )
-            if bestall is None or row[0] < bestall[0]:
-                bestall = row
-    if bestall is None:
+            g1 = _exact_edge_distance(S["F146"][j], f115)
+            g2 = _exact_edge_distance(f115, tor)
+            candidates.append((max(g1, g2), cost + g1 + g2, path + [f115_idx], g1, g2))
+    if not candidates:
         raise RuntimeError("F115 single-edge closure branch not found")
-    return names, bestall[1]
+    max_gap, _, path, g1, g2 = min(candidates, key=lambda r: (r[0], r[1]))
+    if max_gap > WIRE_TOL:
+        raise RuntimeError(f"F115 exact closure failed: F146 gap={g1}, torus gap={g2}")
+    return names, path
 
 
 def _junction(a: Edge, b: Edge) -> tuple[float, Vector]:
