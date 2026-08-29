@@ -110,32 +110,35 @@ def _one_solid(obj) -> Solid:
     return solids[0]
 
 
-def _clip_positive_halfspace(body: Solid, origin, normal) -> Solid:
-    """Keep the geometric +normal half-space, independent of Keep.TOP orientation."""
+def _positive_halfspace_pieces(pieces: list[Solid], origin, normal) -> list[Solid]:
+    """Apply one analytic radial inequality without prematurely requiring uniqueness."""
     n = _v(normal).normalized()
     o = _v(origin)
-    pieces = _collect_solids(body.split(Plane(origin=origin, z_dir=normal), Keep.BOTH))
-    if not pieces:
-        raise RuntimeError("half-space split produced no solids")
-    ranked = []
+    out = []
+    plane = Plane(origin=origin, z_dir=normal)
     for piece in pieces:
-        c = piece.center()
-        signed = (_v(c) - o).dot(n)
-        ranked.append((signed, piece))
-    positive = [(s, p) for s, p in ranked if s >= -1e-9]
-    if len(positive) != 1:
-        raise RuntimeError(
-            "positive half-space ownership ambiguous: "
-            + repr([float(s) for s, _ in ranked])
-        )
-    return positive[0][1]
+        split_result = piece.split(plane, Keep.BOTH)
+        subs = _collect_solids(split_result)
+        if not subs:
+            subs = [piece]
+        for sub in subs:
+            signed = (_v(sub.center()) - o).dot(n)
+            if signed >= -1e-9:
+                out.append(sub)
+    if not out:
+        raise RuntimeError("analytic half-space removed every R1 canal lobe")
+    return out
 
 
 def _clip_support_sector_0_45(body: Solid, loc, xdir, ydir) -> Solid:
-    """Exact cylindrical support ownership u in [0,45 deg]: Y>=0 and X-Y>=0."""
-    body = _clip_positive_halfspace(body, loc, ydir)
+    """Exact cylindrical ownership u in [0,45 deg], resolved after both inequalities."""
+    pieces = _positive_halfspace_pieces([body], loc, ydir)
     n2 = tuple(xdir[i] - ydir[i] for i in range(3))
-    return _clip_positive_halfspace(body, loc, n2)
+    pieces = _positive_halfspace_pieces(pieces, loc, n2)
+    # A single connected owned rolling sector must remain only after both radial
+    # inequalities have been enforced. This avoids the previous false failure
+    # when the first plane legitimately produced multiple positive lobes.
+    return _one_solid(pieces)
 
 
 def build_f139_r1_owned_additive() -> Solid:
