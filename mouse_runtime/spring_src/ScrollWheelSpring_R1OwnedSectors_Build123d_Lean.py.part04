@@ -5,11 +5,13 @@
 
     names, path = _select_profile_path(S, tor, rs)
     sel = {name: S[name][idx] for name, idx in zip(names, path[: len(names)])}
-    ein = S["F115"][path[-2]]
-    eout = S["F115"][path[-1]]
+    # _select_profile_path deliberately returns one F115 branch after the eight
+    # named predecessors. Older code still consumed two F115 indices and could
+    # therefore substitute the F146 index as an F115 edge.
+    f115 = S["F115"][path[-1]]
 
     seq = [tor, sel["F127"], sel["F157"], sel["F134"], sel["F139"], sel["F061"],
-           sel["F142"], sel["F141"], sel["F146"], ein]
+           sel["F142"], sel["F141"], sel["F146"], f115]
     js = []
     errors = []
     for a, b in zip(seq, seq[1:]):
@@ -17,9 +19,8 @@
         errors.append(err)
         js.append(p)
 
-    seam_err, jseam = _junction(ein, eout)
-    tor_err, jtor = _junction(eout, tor)
-    errors.extend([seam_err, tor_err])
+    tor_err, jtor = _junction(f115, tor)
+    errors.append(tor_err)
 
     cy, cz = TOR_LOC[1], TOR_LOC[2]
     za = cz - math.sqrt(rs * rs - (Y_LEFT - cy) ** 2)
@@ -39,8 +40,7 @@
         _trim(sel["F142"], js[5], js[6]),
         _trim(sel["F141"], js[6], js[7]),
         _trim(sel["F146"], js[7], js[8]),
-        _trim(ein, js[8], jseam),
-        _trim(eout, jseam, jtor),
+        _trim(f115, js[8], jtor),
         _arc(jtor, L, rs),
         Edge.make_line(L, M),
         Edge.make_line(M, N),
@@ -86,19 +86,49 @@ R1_F064_XDIR = (0.7071067811867366, 0.7071067811863584, 1.4791141972893971e-31)
 R1_F064_YDIR = (0.7071067811863584, -0.7071067811867366, 1.9147469008338691e-16)
 
 
+def _collect_solids(obj) -> list[Solid]:
+    """Normalize Build123d split return types without touching reference geometry."""
+    if obj is None:
+        return []
+    if isinstance(obj, Solid):
+        return [obj]
+    if isinstance(obj, (list, tuple)):
+        out = []
+        for item in obj:
+            out.extend(_collect_solids(item))
+        return out
+    if hasattr(obj, "solids"):
+        return list(obj.solids())
+    return []
+
+
 def _one_solid(obj) -> Solid:
     """Fail closed unless a split/boolean result contains exactly one solid."""
-    if isinstance(obj, Solid):
-        return obj
-    solids = list(obj.solids()) if hasattr(obj, "solids") else []
+    solids = _collect_solids(obj)
     if len(solids) != 1:
         raise RuntimeError(f"expected one owned-sector solid, got {len(solids)}")
     return solids[0]
 
 
 def _clip_positive_halfspace(body: Solid, origin, normal) -> Solid:
-    """Keep the +normal side of an exact source-derived radial support plane."""
-    return _one_solid(body.split(Plane(origin=origin, z_dir=normal), Keep.TOP))
+    """Keep the geometric +normal half-space, independent of Keep.TOP orientation."""
+    n = _v(normal).normalized()
+    o = _v(origin)
+    pieces = _collect_solids(body.split(Plane(origin=origin, z_dir=normal), Keep.BOTH))
+    if not pieces:
+        raise RuntimeError("half-space split produced no solids")
+    ranked = []
+    for piece in pieces:
+        c = piece.center()
+        signed = (_v(c) - o).dot(n)
+        ranked.append((signed, piece))
+    positive = [(s, p) for s, p in ranked if s >= -1e-9]
+    if len(positive) != 1:
+        raise RuntimeError(
+            "positive half-space ownership ambiguous: "
+            + repr([float(s) for s, _ in ranked])
+        )
+    return positive[0][1]
 
 
 def _clip_support_sector_0_45(body: Solid, loc, xdir, ydir) -> Solid:
