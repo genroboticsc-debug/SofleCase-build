@@ -1,0 +1,152 @@
+"""RightButtons reference-only strict-SROT standalone Build123d reconstruction.
+
+Construction uses only engineering features identified from the current master
+Mouse.STEP. No reference geometry or analysis file is read at runtime. Fresh
+whole-body Build123d/Boolean certification remains blocked by runtime availability.
+"""
+from __future__ import annotations
+
+STRICT_SROT_STATUS = "BLOCKED_RUNTIME_WHOLE_BODY_CERTIFICATION"
+MASTER_SOLID_INDEX = 10
+MASTER_REFERENCE_VOLUME_MM3 = 2108.5211808864387
+OCCURRENCE_TRANSLATION = (8.878417177497228, -12.630815719428673, -24.256343014615943)
+
+import math
+from pathlib import Path
+
+from build123d import (
+    Align,
+    Axis,
+    Bezier,
+    BuildLine,
+    BuildSketch,
+    CenterOf,
+    CenterArc,
+    Compound,
+    Circle,
+    Cone,
+    Cylinder,
+    GeomType,
+    Line,
+    Location,
+    Locations,
+    Plane,
+    Polyline,
+    Rectangle,
+    RectangleRounded,
+    ThreePointArc,
+    Torus,
+    chamfer,
+    extrude,
+    export_step,
+    export_stl,
+    fillet,
+    loft,
+    make_face,
+    offset,
+    revolve,
+)
+
+
+
+
+# Component-definition Z datums [mm], proved by repeated planar supports.
+Z_BOTTOM = 30.205714882516943
+BASE_THICKNESS = 0.600000000000002
+BOTTOM_CHAMFER = 0.200000000000002
+PLATFORM_HEIGHT = 4.000000000000003
+Z_BASE_TOP = Z_BOTTOM + BASE_THICKNESS
+Z_PLATFORM_TOP = Z_BASE_TOP + PLATFORM_HEIGHT
+PLATFORM_EDGE_RAMP = 2.0
+
+# Common plan rotation proved by exact native line directions.
+AXIS_DIRECTION = (0.987995168960058, -0.154484776310116)
+AXIS_ANGLE_DEG = math.degrees(math.atan2(AXIS_DIRECTION[1], AXIS_DIRECTION[0]))
+
+# Central tapered attachment-hole feature.
+ATTACHMENT_CENTER = (9.858930003991773, 8.943026689173672)
+ATTACHMENT_LOWER_RADIUS = 1.2
+ATTACHMENT_UPPER_RADIUS = 2.7
+ATTACHMENT_CONE_ANGLE_DEG = 41.0
+ATTACHMENT_CONE_START_Z = Z_BOTTOM + 0.4
+ATTACHMENT_CONE_HEIGHT = (
+    ATTACHMENT_UPPER_RADIUS - ATTACHMENT_LOWER_RADIUS
+) / math.tan(math.radians(ATTACHMENT_CONE_ANGLE_DEG))
+
+# Rounded rectangular actuator opening.
+ACTUATOR_CENTER = (2.658930003991688, -0.406973310826166)
+ACTUATOR_BOTTOM_WIDTH = 6.4
+ACTUATOR_BOTTOM_HEIGHT = 5.9
+ACTUATOR_BOTTOM_RADIUS = 1.2
+
+# Common oblique top datum of the two rear button pads.  The plane is applied
+# as an exact design trim; its positive normal points out of the material.
+REAR_PAD_TOP_NORMAL = (
+    0.0665636156221197,
+    0.2691257853304291,
+    0.9608020590868812,
+)
+REAR_PAD_TOP_DISTANCE = 42.1022269120912
+
+# Front pad-top datum.  Together with the rear datum it creates the exact
+# radius-2 convex cylindrical transition proved by F0020/F0127.
+LEFT_PAD_FRONT_TOP_NORMAL = (
+    -0.07307394226840128,
+    -0.597474139636155,
+    0.798551721197438,
+)
+LEFT_PAD_FRONT_TOP_DISTANCE = 2.54751494464936
+
+# Oblique end trim between the left pad crown and the outer side wall.
+LEFT_PAD_END_TRIM_NORMAL = (
+    0.7368274676974303,
+    0.08010046059611604,
+    0.6713189994770612,
+)
+LEFT_PAD_END_TRIM_DISTANCE = 35.245713441579
+
+# Two exact shallow blind pin holes in the raised platform.
+PIN_HOLE_RADIUS = 1.0
+PIN_HOLE_DEPTH = 0.4
+PIN_HOLE_CENTERS = (
+    (9.24228507010482, 15.75818930348320),
+    (12.84228507010482, 15.75818930348320),
+)
+
+# Exact revolved drafted post and its base round.
+POST_CENTER = (-6.260440045286008, -0.202033708026324)
+POST_BASE_RADIUS = 3.0
+POST_DRAFT_DEG = 4.0
+POST_BASE_FILLET = 1.5
+POST_TORUS_MAJOR_RADIUS = 4.39877262920649
+POST_TANGENT_RADIUS = 2.9024265538167655
+POST_TANGENT_Z = 32.20108017190075
+POST_TRIM_NORMAL = (
+    0.06656183541313208,
+    0.2691254359015711,
+    0.9608022802935183,
+)
+POST_TRIM_DISTANCE = 42.249240142605835
+
+# Exact right-pad design datums and compact footprint.
+RIGHT_PAD_FRONT_TOP_NORMAL = (-0.07307394226840128, -0.597474139636155, 0.798551721197438)
+RIGHT_PAD_FRONT_TOP_DISTANCE = 4.04354951759728
+RIGHT_PAD_LOWER_ROUND = 1.6
+RIGHT_PAD_CROWN_RADIUS = 2.0
+RIGHT_PAD_CONSTRUCTION_HEIGHT = 15.0
+
+# Named footprint stations on Z_BASE_TOP. All analytic stations are exact
+# intersections of master line/circle supports. The only freeform design input is
+# the four cubic Bezier spans below.
+RPA=(17.076600423451,41.788939536884); RPB=(17.884770079117,42.038177970939)
+RPC=(19.336995718497,41.678995036693); RPD=(21.922255886011,40.544247293614)
+RPE=(22.851081068024,39.672605308556); RPF=(23.065297153136,38.416982977910)
+RPG=(22.441912045397,34.430172823801); RPH=(21.883852000018,33.515454067297)
+RPI=(20.842440122019,33.263258274091); RPJ=(20.052043986851,33.386846095139)
+RPK=(17.285657513763,33.819403468808); RPL=(16.393018761192,33.603235646060)
+RPM=(16.074355970273,33.256295040585); RPN=(15.543811700249,35.668943245142)
+RPO=(16.892855996662,41.672029861353)
+
+RIGHT_PAD_INNER_BEZIERS = (
+    ((16.074355970273,33.256295040585),(15.824072501958,33.591755036053),(15.645070666529,33.980473630588),(15.552875091331,34.388734482411)),
+    ((15.552875091331,34.388734482411),(15.458162049725,34.808143190066),(15.455060605878,35.248175956507),(15.543811700249,35.668943245142)),

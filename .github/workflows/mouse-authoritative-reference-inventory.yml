@@ -1,0 +1,61 @@
+name: Mouse Authoritative Reference Inventory
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mouse-authoritative-reference-inventory.yml'
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install OCP runtime
+        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1'
+      - name: Fetch SHA-verified authoritative STEP and inventory solids
+        run: |
+          mkdir -p reference mouse_runtime/results
+          curl --fail --location --retry 5 --output reference/Mouse.STEP 'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
+          echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from OCP.STEPControl import STEPControl_Reader
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.TopAbs import TopAbs_SOLID,TopAbs_FACE
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopoDS import TopoDS
+          from OCP.BRepGProp import BRepGProp
+          from OCP.GProp import GProp_GProps
+          from OCP.BRepBndLib import BRepBndLib
+          from OCP.Bnd import Bnd_Box
+          from OCP.BRepCheck import BRepCheck_Analyzer
+
+          r=STEPControl_Reader(); st=r.ReadFile('reference/Mouse.STEP')
+          if st != IFSelect_RetDone: raise RuntimeError(int(st))
+          r.TransferRoots(); root=r.OneShape()
+          solids=[]; e=TopExp_Explorer(root,TopAbs_SOLID)
+          while e.More(): solids.append(TopoDS.Solid_s(e.Current())); e.Next()
+          rows=[]
+          for i,s in enumerate(solids):
+              gv=GProp_GProps(); BRepGProp.VolumeProperties_s(s,gv)
+              ga=GProp_GProps(); BRepGProp.SurfaceProperties_s(s,ga)
+              c=gv.CentreOfMass(); b=Bnd_Box(); BRepBndLib.Add_s(s,b); bb=list(b.Get())
+              fe=TopExp_Explorer(s,TopAbs_FACE); fc=0
+              while fe.More(): fc+=1; fe.Next()
+              row={'index':i,'volume_mm3':float(gv.Mass()),'area_mm2':float(ga.Mass()),'com':[c.X(),c.Y(),c.Z()],'bbox':bb,'dims':[bb[3]-bb[0],bb[4]-bb[1],bb[5]-bb[2]],'faces':fc,'valid':bool(BRepCheck_Analyzer(s).IsValid())}
+              rows.append(row)
+          out={'reference_sha256':'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb','solid_count':len(solids),'solids':rows}
+          Path('mouse_runtime/results/authoritative_reference_inventory.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          assert len(solids)==10
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mouse-authoritative-reference-inventory
+          path: mouse_runtime/results/authoritative_reference_inventory.json

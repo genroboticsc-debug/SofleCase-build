@@ -1,0 +1,152 @@
+    upper_profile = offset(bottom_profile, amount=-BOTTOM_CHAMFER)
+    upper_profile = Location((0.0, 0.0, BOTTOM_CHAMFER)) * upper_profile
+    lead_in = loft([bottom_profile, upper_profile])
+    vertical = extrude(upper_profile, amount=BASE_THICKNESS - BOTTOM_CHAMFER)
+    return lead_in + vertical
+
+
+def _rounded_actuator_opening_bottom():
+    with BuildSketch(Plane.XY.offset(Z_BOTTOM)) as sketch:
+        with Locations(ACTUATOR_CENTER):
+            RectangleRounded(
+                ACTUATOR_BOTTOM_WIDTH,
+                ACTUATOR_BOTTOM_HEIGHT,
+                ACTUATOR_BOTTOM_RADIUS,
+            )
+    return sketch.sketch
+
+
+def _rear_pad_top_trim_tool():
+    """Half-space tool above the exact shared oblique pad-top datum."""
+    nx, ny, nz = REAR_PAD_TOP_NORMAL
+    datum_origin = (0.0, 0.0, REAR_PAD_TOP_DISTANCE / nz)
+    datum = Plane(origin=datum_origin, z_dir=(nx, ny, nz))
+    with BuildSketch(datum) as trim_sketch:
+        Rectangle(120.0, 120.0)
+    return extrude(trim_sketch.sketch, amount=40.0)
+
+
+def _raised_platform_sketch():
+    """Exact analytic top outline of the 4 mm raised platform."""
+    c_r8 = (9.687132464046687, 4.643026689173848)
+    c_r20 = (15.966960492135668, -22.64366896892349)
+    c_r2 = (4.758930004010609, 14.143026689159287)
+    c_r1 = (3.1589300039916886, 11.143026689159234)
+    a = AXIS_ANGLE_DEG
+    with BuildSketch(Plane.XY.offset(Z_BASE_TOP)) as sketch:
+        with BuildLine():
+            Line(_point(c_r8, 8.0, a), (20.394436336074, 21.335703856103))
+            Line((20.394436336074, 21.335703856103), (6.758930004011, 25.071190221019))
+            Line((6.758930004011, 25.071190221019), _point(c_r2, 2.0, 0.0))
+            _arc(c_r2, 2.0, 0.0, -90.0)
+            Line(_point(c_r2, 2.0, -90.0), _point(c_r1, 1.0, 90.0))
+            _arc(c_r1, 1.0, 90.0, 90.0)
+            Line(_point(c_r1, 1.0, 180.0), (2.158930003992, 8.934971052124))
+            Line((2.158930003992, 8.934971052124), (9.658930003992, 3.937962241066))
+            Line((9.658930003992, 3.937962241066), (9.658930003992, -3.664502723784))
+            _arc(c_r20, 20.0, 108.385055151, -5.424537093)
+            _arc(c_r8, 8.0, -77.039481942, 68.152565742)
+        make_face()
+    return sketch.sketch
+
+
+def _nearest_top_edge(solid, target_xy: tuple[float, float]):
+    candidates = []
+    for edge in solid.edges():
+        center = edge.center(CenterOf.MASS)
+        if abs(center.Z - Z_PLATFORM_TOP) < 1e-5:
+            distance = math.hypot(center.X - target_xy[0], center.Y - target_xy[1])
+            candidates.append((distance, edge))
+    if not candidates or min(candidates, key=lambda item: item[0])[0] > 1e-4:
+        raise RuntimeError(f"Unable to locate platform ramp edge at {target_xy}")
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def _platform_ramp_wedge(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    extend_start: float = 0.0,
+    extend_end: float = 0.0,
+):
+    """Create one exact lower expansion plus upper 45-degree ramp prism."""
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = math.hypot(dx, dy)
+    direction = (dx / length, dy / length, 0.0)
+    left_normal = (-direction[1], direction[0], 0.0)
+    section_origin = (
+        start[0] - direction[0] * extend_start,
+        start[1] - direction[1] * extend_start,
+        Z_BASE_TOP,
+    )
+    section_plane = Plane(
+        origin=section_origin,
+        x_dir=left_normal,
+        z_dir=direction,
+    )
+    with BuildSketch(section_plane) as section:
+        with BuildLine():
+            Polyline(
+                (0.0, 0.0),
+                (-PLATFORM_EDGE_RAMP, 0.0),
+                (-PLATFORM_EDGE_RAMP, PLATFORM_HEIGHT - PLATFORM_EDGE_RAMP),
+                (0.0, PLATFORM_HEIGHT),
+                (0.0, 0.0),
+            )
+        make_face()
+    return extrude(section.sketch, amount=length + extend_start + extend_end)
+
+
+def _vertical_keep_halfspace(
+    line_start: tuple[float, float],
+    line_end: tuple[float, float],
+    keep_point: tuple[float, float],
+):
+    """Large vertical half-space on the side containing ``keep_point``."""
+    dx = line_end[0] - line_start[0]
+    dy = line_end[1] - line_start[1]
+    length = math.hypot(dx, dy)
+    normal = (-dy / length, dx / length)
+    if (
+        (keep_point[0] - line_start[0]) * normal[0]
+        + (keep_point[1] - line_start[1]) * normal[1]
+        < 0.0
+    ):
+        normal = (-normal[0], -normal[1])
+    plane = Plane(
+        origin=(line_start[0], line_start[1], Z_BASE_TOP + PLATFORM_HEIGHT / 2.0),
+        x_dir=(0.0, 0.0, 1.0),
+        z_dir=(normal[0], normal[1], 0.0),
+    )
+    with BuildSketch(plane) as sketch:
+        Rectangle(80.0, 80.0)
+    return extrude(sketch.sketch, amount=80.0)
+
+
+def _attachment_upper_tool():
+    cone = Location(
+        (ATTACHMENT_CENTER[0], ATTACHMENT_CENTER[1], ATTACHMENT_CONE_START_Z)
+    ) * Cone(
+        ATTACHMENT_LOWER_RADIUS,
+        ATTACHMENT_UPPER_RADIUS,
+        ATTACHMENT_CONE_HEIGHT,
+        align=(Align.CENTER, Align.CENTER, Align.MIN),
+    )
+    cylinder_start = ATTACHMENT_CONE_START_Z + ATTACHMENT_CONE_HEIGHT
+    with BuildSketch(Plane.XY.offset(cylinder_start)) as upper_bore:
+        with Locations(ATTACHMENT_CENTER):
+            Circle(ATTACHMENT_UPPER_RADIUS)
+    cylinder = extrude(upper_bore.sketch, amount=Z_PLATFORM_TOP - cylinder_start)
+    return cone + cylinder
+
+
+def _blind_pin_tools():
+    floor_z = Z_PLATFORM_TOP - PIN_HOLE_DEPTH
+    with BuildSketch(Plane.XY.offset(floor_z)) as holes:
+        with Locations(*PIN_HOLE_CENTERS):
+            Circle(PIN_HOLE_RADIUS)
+    return extrude(holes.sketch, amount=PIN_HOLE_DEPTH)
+
+
+def _plane_positive_halfspace(normal, distance: float, span: float = 120.0, depth: float = 40.0):
+    nx, ny, nz = normal

@@ -1,0 +1,164 @@
+    )
+
+
+def _right_pad_lower_round_edges(pad):
+    """Return the exact native lower transition chains by authored endpoint ownership.
+
+    Build123d 0.11.1/OCC preserves the first cubic span as one edge and
+    concatenates authored spans 1..3 into one exact G1 edge during face cleanup.
+    The three concatenated spans are source-authored consecutive cubics whose
+    endpoint tangent directions agree to numerical precision; selecting the
+    resulting native chain by its exact authored first/last endpoints changes
+    topology selection only, never the curve geometry or R1.6 feature law.
+    """
+    native_chains = (
+        (RIGHT_PAD_INNER_BEZIERS[0][0], RIGHT_PAD_INNER_BEZIERS[0][-1], (0,)),
+        (RIGHT_PAD_INNER_BEZIERS[1][0], RIGHT_PAD_INNER_BEZIERS[3][-1], (1, 2, 3)),
+    )
+    found = []
+    ownership = []
+    for index, edge in enumerate(pad.edges()):
+        bb = edge.bounding_box()
+        if abs(bb.min.Z - Z_BASE_TOP) > 2e-5 or abs(bb.max.Z - Z_BASE_TOP) > 2e-5:
+            continue
+        matches = [
+            span_ids
+            for a, b, span_ids in native_chains
+            if _edge_owns_xy_endpoints(edge, a, b)
+        ]
+        if matches:
+            found.append(edge)
+            ownership.append((index, tuple(matches), float(edge.length)))
+    if len(found) != 2:
+        raise RuntimeError(
+            "RightButtons right-pad lower-round native-chain ownership changed: "
+            f"expected 2 exact chains for authored spans 0 and 1..3, "
+            f"found {len(found)}; ownership={ownership}"
+        )
+    return found
+
+
+def _right_pad_complete():
+    """Native extrusion -> R1.6 lower round -> top trims -> R2 crown."""
+    pad = extrude(_right_pad_footprint_sketch(), amount=RIGHT_PAD_CONSTRUCTION_HEIGHT)
+
+    # Select by exact authored endpoint ownership.  Do not depend on OCC's
+    # post-extrusion curve classification (BEZIER vs BSPLINE).
+    lower_transition_edges = _right_pad_lower_round_edges(pad)
+    pad = fillet(lower_transition_edges, radius=RIGHT_PAD_LOWER_ROUND)
+
+    pad = pad - _plane_positive_halfspace(
+        RIGHT_PAD_FRONT_TOP_NORMAL, RIGHT_PAD_FRONT_TOP_DISTANCE
+    )
+    pad = pad - _plane_positive_halfspace(
+        REAR_PAD_TOP_NORMAL, REAR_PAD_TOP_DISTANCE
+    )
+
+    ridge_edges = []
+    for edge in pad.edges().filter_by(GeomType.LINE):
+        c = edge.center(CenterOf.MASS)
+        p = (c.X, c.Y, c.Z)
+        er = abs(sum(REAR_PAD_TOP_NORMAL[i] * p[i] for i in range(3)) - REAR_PAD_TOP_DISTANCE)
+        ef = abs(sum(RIGHT_PAD_FRONT_TOP_NORMAL[i] * p[i] for i in range(3)) - RIGHT_PAD_FRONT_TOP_DISTANCE)
+        if edge.length > 0.1 and er < 1e-5 and ef < 1e-5:
+            ridge_edges.append(edge)
+    if len(ridge_edges) != 1:
+        raise RuntimeError(f"Expected one right-pad R2 crown ridge, got {len(ridge_edges)}")
+    pad = fillet(ridge_edges, radius=RIGHT_PAD_CROWN_RADIUS)
+    return pad
+
+
+def build_base_stage():
+    """Build the exact base-extrude stage and its four identified openings."""
+    body = extrude(_base_outer_sketch(), amount=BASE_THICKNESS)
+
+    # Lower part of the stepped/tapered attachment hole.
+    with BuildSketch(Plane.XY.offset(Z_BOTTOM)) as bore_sketch:
+        with Locations(ATTACHMENT_CENTER):
+            Circle(ATTACHMENT_LOWER_RADIUS)
+    body = body - extrude(bore_sketch.sketch, amount=BASE_THICKNESS)
+    attachment_cone = Location(
+        (ATTACHMENT_CENTER[0], ATTACHMENT_CENTER[1], ATTACHMENT_CONE_START_Z)
+    ) * Cone(
+        ATTACHMENT_LOWER_RADIUS,
+        ATTACHMENT_UPPER_RADIUS,
+        ATTACHMENT_CONE_HEIGHT,
+        align=(Align.CENTER, Align.CENTER, Align.MIN),
+    )
+    body = body - attachment_cone
+
+    # Three openings share the same identified 0.2 x 45-degree bottom chamfer.
+    for bottom in (
+        _forward_flexure_opening_bottom(),
+        _rear_flexure_opening_bottom(),
+        _rounded_actuator_opening_bottom(),
+    ):
+        body = body - _chamfered_through_tool(bottom)
+    body = body - _rear_pad_top_trim_tool()
+    return body
+
+
+def build_platform_stage():
+    """Add the raised platform, three exact ramps, and upper hole features."""
+    body = build_base_stage()
+    platform = extrude(_raised_platform_sketch(), amount=PLATFORM_HEIGHT)
+    platform_limit = extrude(
+        _base_outer_sketch(), amount=BASE_THICKNESS + PLATFORM_HEIGHT
+    )
+    ramp1_start = (20.394436336074, 21.335703856103)
+    ramp1_end = (6.758930004011, 25.071190221019)
+    ramp1 = _platform_ramp_wedge(ramp1_start, ramp1_end, 3.0, 3.0)
+    ramp1_keep = ((ramp1_start[0] + ramp1_end[0]) / 2.0, (ramp1_start[1] + ramp1_end[1]) / 2.0 + 1.0)
+    ramp1 = ramp1 & _vertical_keep_halfspace(
+        (17.591093815727, 3.407148478693), ramp1_start, ramp1_keep
+    )
+    ramp1 = ramp1 & _vertical_keep_halfspace(
+        ramp1_end, (6.758930004011, 14.143026689159), ramp1_keep
+    )
+    platform = platform + ramp1
+
+    ramp2_start = (2.158930003992, 8.934971052124)
+    ramp2_end = (9.658930003992, 3.937962241066)
+    ramp2 = _platform_ramp_wedge(ramp2_start, ramp2_end, 3.0, 0.0)
+    ramp2 = ramp2 & platform_limit
+    platform = platform + ramp2
+
+    ramp3_start = ramp2_end
+    ramp3_end = (9.658930003992, -3.664502723784)
+    ramp3 = _platform_ramp_wedge(ramp3_start, ramp3_end, 0.0, 3.0)
+    ramp3 = ramp3 & platform_limit
+    platform = platform + ramp3
+    body = body + platform
+    body = body - _attachment_upper_tool()
+    body = body - _blind_pin_tools()
+    return body
+
+
+def build_post_stage():
+    """Add the exact drafted and obliquely trimmed post."""
+    return _add_drafted_post(build_platform_stage())
+
+
+def build_left_pad_stage():
+    """Add the exact analytic left pad feature network."""
+    return build_post_stage() + _left_pad_complete()
+
+
+
+def build_rightbuttons():
+    """Return the complete feature tree in the exact master assembly occurrence."""
+    local_body = build_left_pad_stage() + _right_pad_complete()
+    return Location(OCCURRENCE_TRANSLATION) * local_body
+
+
+def export_outputs(output_dir: Path | None = None):
+    body = build_rightbuttons()
+    out = output_dir or (Path(__file__).resolve().parent.parent / "generated")
+    out.mkdir(parents=True, exist_ok=True)
+    export_step(body, out / "RightButtons.step")
+    export_stl(body, out / "RightButtons.stl", tolerance=0.02, angular_tolerance=0.1)
+    return body
+
+
+if __name__ == "__main__":
+    export_outputs()

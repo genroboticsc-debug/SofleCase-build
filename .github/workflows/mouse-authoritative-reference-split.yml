@@ -1,0 +1,47 @@
+name: Mouse Authoritative Reference Split
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mouse-authoritative-reference-split.yml'
+
+jobs:
+  split:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install OCP runtime
+        run: python -m pip install 'cadquery-ocp-novtk==7.9.3.1.1'
+      - name: Extract authoritative solids
+        run: |
+          mkdir -p reference authoritative_parts
+          curl --fail --location --retry 5 --output reference/Mouse.STEP 'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
+          echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
+          python - <<'PY'
+          from OCP.STEPControl import STEPControl_Reader,STEPControl_Writer,STEPControl_AsIs
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.TopAbs import TopAbs_SOLID
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopoDS import TopoDS
+          names=['ScrollWheel','ScrollWheelSpring','CutExtrude38','CutExtrude39','CutExtrude40','Chamfer43','MoveFace51','MoveFace53','MoveFace54','RightButtons']
+          r=STEPControl_Reader(); st=r.ReadFile('reference/Mouse.STEP')
+          if st != IFSelect_RetDone: raise RuntimeError(int(st))
+          r.TransferRoots(); root=r.OneShape()
+          solids=[]; e=TopExp_Explorer(root,TopAbs_SOLID)
+          while e.More(): solids.append(TopoDS.Solid_s(e.Current())); e.Next()
+          assert len(solids)==10
+          for name,solid in zip(names,solids):
+              w=STEPControl_Writer(); w.Transfer(solid,STEPControl_AsIs)
+              status=w.Write(f'authoritative_parts/{name}.step')
+              print(name,'write_status',int(status))
+          PY
+          sha256sum authoritative_parts/*.step | tee authoritative_parts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mouse-authoritative-reference-parts
+          path: authoritative_parts/

@@ -1,0 +1,140 @@
+
+    def min_x(e):
+        return min(p.X for p in _sample(e, 31))
+
+    def min_z(e):
+        return min(p.Z for p in _sample(e, 31))
+
+    neg = [e for e in edges if min_x(e) < TOR_LOC[0] - 2.0]
+    if not neg:
+        raise RuntimeError(f"{fid}: negative-X centerline branch not found")
+    outer = min(neg, key=min_z)
+    oa, ob = _edge_ends(outer)
+    junction = oa if oa.X < ob.X else ob
+
+    neighbors = []
+    for e in edges:
+        if e is outer:
+            continue
+        a, b = _edge_ends(e)
+        d = min(_dist(a, junction), _dist(b, junction))
+        if d < 1e-5:
+            neighbors.append((d, e))
+    if not neighbors:
+        raise RuntimeError(f"{fid}: semantic centerline neighbor not found")
+    neighbor = min(neighbors, key=lambda x: x[0])[1]
+
+    def seam(edge):
+        a, b = _edge_ends(edge)
+        return b if _dist(a, junction) < _dist(b, junction) else a
+
+    def seam_oriented(edge, from_seam):
+        a, b = _edge_ends(edge)
+        if _dist(a, junction) < _dist(b, junction):
+            edge_j_to_seam = edge
+        else:
+            edge_j_to_seam = _reverse(edge)
+        return _reverse(edge_j_to_seam) if from_seam else edge_j_to_seam
+
+    so, sn = seam(outer), seam(neighbor)
+    high, low = (outer, neighbor) if so.Y > sn.Y else (neighbor, outer)
+    e_high = seam_oriented(high, True)
+    e_low = seam_oriented(low, False)
+    return _pipe([e_high, e_low], 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Exact X_BUILD profile assembly from generated engineering features
+# ---------------------------------------------------------------------------
+def _analytic_sections(fid: str) -> list[Edge]:
+    return _section_edges(_cyl_side(fid, CYL[fid].radius), X_OUTER, X_BUILD - X_OUTER)
+
+
+def _torus_circle() -> tuple[Edge, float]:
+    dx = X_INNER - TOR_LOC[0]
+    rs = TOR_MAJOR - math.sqrt(TOR_MINOR * TOR_MINOR - dx * dx)
+    plane = Plane(origin=(X_BUILD, TOR_LOC[1], TOR_LOC[2]), x_dir=(0, 0, 1), z_dir=(1, 0, 0))
+    return Edge.make_circle(rs, plane), rs
+
+
+def _exact_edge_distance(a: Edge, b: Edge) -> float:
+    """Kernel exact closest distance; branch selection only, never geometry creation."""
+    return float(a.distance_to_with_closest_points(b)[0])
+
+
+def _tor_cost(e: Edge, tor: Edge) -> float:
+    return _exact_edge_distance(e, tor)
+
+
+def _select_profile_path(S: dict[str, list[Edge]], tor: Edge, rs: float):
+    names = ["F127", "F157", "F134", "F139", "F061", "F142", "F141", "F146"]
+    dp = [{i: (_tor_cost(e, tor), [i]) for i, e in enumerate(S["F127"])}]
+    for k in range(1, len(names)):
+        cur = {}
+        for j, e in enumerate(S[names[k]]):
+            best = None
+            for i, (cost, path) in dp[-1].items():
+                gap = _exact_edge_distance(S[names[k - 1]][i], e)
+                row = (cost + gap, path + [j])
+                if best is None or row[0] < best[0]:
+                    best = row
+            cur[j] = best
+        dp.append(cur)
+
+    # F115 is one analytic section. Require the candidate that closes the
+    # F146 -> F115 -> torus chain in the exact kernel, rather than selecting by
+    # sampled proximity (which previously picked a branch 3.067 mm away).
+    candidates = []
+    for j, (cost, path) in dp[-1].items():
+        for f115_idx, f115 in enumerate(S["F115"]):
+            g1 = _exact_edge_distance(S["F146"][j], f115)
+            g2 = _exact_edge_distance(f115, tor)
+            candidates.append((max(g1, g2), cost + g1 + g2, path + [f115_idx], g1, g2))
+    if not candidates:
+        raise RuntimeError("F115 single-edge closure branch not found")
+    max_gap, _, path, g1, g2 = min(candidates, key=lambda r: (r[0], r[1]))
+    if max_gap > WIRE_TOL:
+        raise RuntimeError(f"F115 exact closure failed: F146 gap={g1}, torus gap={g2}")
+    return names, path
+
+
+def _junction(a: Edge, b: Edge) -> tuple[float, Vector]:
+    d, pa, pb = a.distance_to_with_closest_points(b)
+    return d, _mid(pa, pb)
+
+
+def _trim(e: Edge, p0, p1) -> Edge:
+    # Edge.trim projects point arguments onto the exact underlying curve.
+    q = e.trim(p0, p1)
+    return q
+
+
+def _arc(p0, p1, rs: float) -> Edge:
+    p0, p1 = _v(p0), _v(p1)
+    cy, cz = TOR_LOC[1], TOR_LOC[2]
+    u0 = math.atan2(cy - p0.Y, p0.Z - cz) % (2 * math.pi)
+    u1 = math.atan2(cy - p1.Y, p1.Z - cz) % (2 * math.pi)
+    # Source-owned short traversal; three-point arc preserves exact circle law.
+    if u0 > u1:
+        u0, u1 = u1, u0
+        reverse = True
+    else:
+        reverse = False
+    um = 0.5 * (u0 + u1)
+    pm = Vector(X_BUILD, cy - rs * math.sin(um), cz + rs * math.cos(um))
+    e = Edge.make_three_point_arc(p0, pm, p1)
+    return _reverse(e) if reverse else e
+
+
+def build_native_xparent003(return_diagnostics: bool = False):
+    tor, rs = _torus_circle()
+    S = {
+        "F127": _section_edges(_r05_pipe("F127"), X_INNER, X_BUILD - X_INNER),
+        "F157": _section_edges(build_canal("F157"), X_OUTER, X_BUILD - X_OUTER),
+        "F134": _analytic_sections("F064"),
+        "F139": _section_edges(build_canal("F139"), X_OUTER, X_BUILD - X_OUTER),
+        "F061": _analytic_sections("F061"),
+        "F142": _section_edges(build_canal("F142"), X_OUTER, X_BUILD - X_OUTER),
+        "F141": _analytic_sections("F062"),
+        "F146": _section_edges(build_canal("F146"), X_OUTER, X_BUILD - X_OUTER),
+        "F115": _section_edges(_r05_pipe("F115"), X_INNER, X_BUILD - X_INNER),

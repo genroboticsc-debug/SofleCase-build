@@ -1,0 +1,81 @@
+name: Mouse Spring Native Feature Runtime
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'mouse_runtime/spring_src/**'
+      - '.github/workflows/mouse-spring-feature-runtime.yml'
+
+jobs:
+  execute:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CAD runtime
+        run: python -m pip install 'build123d==0.11.1' 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
+      - name: Reconstruct pure Build123d Spring feature source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat mouse_runtime/spring_src/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py.part* > mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py
+          python -m py_compile mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py
+          sha256sum mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py
+      - name: Purity gate and execute native features
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast, json, re, sys, traceback
+          from pathlib import Path
+          p=Path('mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py')
+          text=p.read_text()
+          ast.parse(text)
+          forbidden={
+            'direct_OCP_import': bool(re.search(r'(^|\n)\s*(from|import)\s+OCP\b',text,re.M)),
+            'runtime_STEP_STL_read': bool(re.search(r'\b(import_step|import_stl|STEPControl_Reader|BRepTools\.Read|read_step|read_stl)\b',text)),
+            'BRep_builder': bool(re.search(r'\bBRep(BuilderAPI|AlgoAPI|PrimAPI|Tools|Check)\b',text)),
+            'NURBS_control_replay': bool(re.search(r'\b(poles|knots|multiplicities|Geom_BSpline|BSplineSurface)\b',text)),
+          }
+          if any(forbidden.values()):
+              raise SystemExit('PURITY FAIL '+repr(forbidden))
+          sys.path.insert(0,str(Path('mouse_runtime').resolve()))
+          import ScrollWheelSpring_R1OwnedSectors_Build123d_Lean as sws
+          tests={}
+          for name,fn in [
+              ('XParent003',lambda: sws.build_native_xparent003(True)),
+              ('F139_R1',sws.build_f139_r1_owned_additive),
+              ('F142_R1',sws.build_f142_r1_owned_additive),
+          ]:
+              try:
+                  value=fn()
+                  if name=='XParent003':
+                      body,diag=value
+                  else:
+                      body=value; diag={}
+                  tests[name]={
+                    'success':True,
+                    'valid':bool(body.is_valid),
+                    'solid_count':len(body.solids()),
+                    'volume_mm3':float(body.volume),
+                    'face_count':len(body.faces()),
+                    'edge_count':len(body.edges()),
+                    'diagnostics':diag,
+                  }
+              except Exception as exc:
+                  tests[name]={'success':False,'error':repr(exc),'traceback':traceback.format_exc()}
+          out={'runtime':{'python':sys.version,'build123d':__import__('build123d').__version__},'purity':forbidden,'tests':tests}
+          Path('mouse_runtime/ScrollWheelSpring_NATIVE_FEATURE_RUNTIME.json').write_text(json.dumps(out,indent=2,default=str))
+          print(json.dumps(out,indent=2,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scrollwheelspring-native-feature-runtime
+          path: |
+            mouse_runtime/ScrollWheelSpring_R1OwnedSectors_Build123d_Lean.py
+            mouse_runtime/ScrollWheelSpring_NATIVE_FEATURE_RUNTIME.json
+          if-no-files-found: error

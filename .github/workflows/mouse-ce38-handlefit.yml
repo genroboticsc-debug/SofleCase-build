@@ -1,0 +1,94 @@
+name: Mouse CE38 Handlefit
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mouse-ce38-handlefit.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CAD runtime
+        run: python -m pip install 'build123d==0.11.1' 'cadquery-ocp-novtk==7.9.3.1.1' 'numpy==2.3.5'
+      - name: Restore and refine sparse CE38 engineering handles
+        run: |
+          mkdir -p mouse_runtime/generated mouse_runtime/results reference
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,hashlib,ast,re
+          payload=Path('mouse_runtime/remaining/CutExtrude38.py.gz.b64').read_text().strip()
+          s=gzip.decompress(base64.b64decode(payload)).decode()
+          repl={
+            '(1.130442843692408, 1.130003098323100)':'(1.079229989658641, 1.177135131083821)',
+            '(1.130403070865415, 1.130028472875243)':'(1.013216208876480, 1.261513643744809)',
+            '(1.130384903171009, 1.130019282530307)':'(1.038596044639664, 1.217107541822888)',
+            '(1.130339721108911, 1.130004841907834)':'(1.183580185121113, 1.042620898301929)',
+            '(1.130404400878455, 1.130053004956103)':'(1.353972163105872, 1.051974483166774)',
+          }
+          for a,b in repl.items():
+              assert a in s,a
+              s=s.replace(a,b)
+          p=Path('mouse_runtime/remaining/CutExtrude38_handlefit.py'); p.write_text(s)
+          ast.parse(s)
+          forbidden={
+            'runtime_import_step':bool(re.search(r'\b(import_step|import_stl|STEPControl_Reader|StlAPI_Reader)\b',s)),
+            'direct_brep_replay':bool(re.search(r'\b(BRep_Builder|BRepTools|read_brep|TopoDS)\b',s)),
+            'explicit_bspline_replay':bool(re.search(r'\b(Geom_BSplineCurve|Geom_BSplineSurface|Geom2d_BSplineCurve|TColgp_|TColStd_)\b',s)),
+            'mesh_reconstruction':bool(re.search(r'\b(trimesh|meshio)\b',s)),
+            'serialized_geometry':bool(re.search(r'\b(pickle|base64)\b',s)),
+          }
+          # base64 appears only in this workflow, never in generated production source.
+          print('source_sha256',hashlib.sha256(p.read_bytes()).hexdigest())
+          print('purity',forbidden)
+          assert not any(forbidden.values())
+          PY
+      - name: Fresh Build123d build
+        run: |
+          python mouse_runtime/remaining/CutExtrude38_handlefit.py
+          mv mouse_runtime/generated/CutExtrude38.step mouse_runtime/generated/CutExtrude38_handlefit.step
+          mv mouse_runtime/generated/CutExtrude38.stl mouse_runtime/generated/CutExtrude38_handlefit.stl
+      - name: SHA-verified reference and scalar check
+        run: |
+          curl --fail --location --retry 5 --output reference/Mouse.STEP 'https://raw.githubusercontent.com/ploopyco/mouse/41e3eb18e59627b181d67c270b22244a505f1315/hardware/mechanicals/Mouse.STEP'
+          echo 'fcd48ca5636fab4cb3f0ed3c69e3f7dbe00cca3c27cbb77c41fdd25bed5238cb  reference/Mouse.STEP' | sha256sum -c -
+          python - <<'PY'
+          import json,math
+          from pathlib import Path
+          from OCP.STEPControl import STEPControl_Reader
+          from OCP.IFSelect import IFSelect_RetDone
+          from OCP.TopAbs import TopAbs_SOLID
+          from OCP.TopExp import TopExp_Explorer
+          from OCP.TopoDS import TopoDS
+          from OCP.BRepGProp import BRepGProp
+          from OCP.GProp import GProp_GProps
+          from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+          from OCP.gp import gp_Trsf,gp_Vec
+          def read(p):
+              r=STEPControl_Reader(); assert r.ReadFile(p)==IFSelect_RetDone; r.TransferRoots(); return r.OneShape()
+          def solids(s):
+              out=[]; e=TopExp_Explorer(s,TopAbs_SOLID)
+              while e.More(): out.append(TopoDS.Solid_s(e.Current())); e.Next()
+              return out
+          def va(s):
+              v=GProp_GProps();a=GProp_GProps();BRepGProp.VolumeProperties_s(s,v);BRepGProp.SurfaceProperties_s(s,a);return float(v.Mass()),float(a.Mass())
+          R=solids(read('reference/Mouse.STEP'))[2]
+          G=solids(read('mouse_runtime/generated/CutExtrude38_handlefit.step'))[0]
+          tr=gp_Trsf();tr.SetTranslation(gp_Vec(4.237347181489,-26.287789030255,-5.750628132099));G=BRepBuilderAPI_Transform(G,tr,True).Shape()
+          vr,ar=va(R);vg,ag=va(G)
+          out={'vr':vr,'vg':vg,'volume_error_percent':100*abs(vg-vr)/vr,'ar':ar,'ag':ag,'area_error_percent':100*abs(ag-ar)/ar}
+          Path('mouse_runtime/results/CutExtrude38_handlefit_scalars.json').write_text(json.dumps(out,indent=2));print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mouse-ce38-handlefit
+          path: |
+            mouse_runtime/generated/CutExtrude38_handlefit.*
+            mouse_runtime/remaining/CutExtrude38_handlefit.py
+            mouse_runtime/results/CutExtrude38_handlefit_scalars.json
