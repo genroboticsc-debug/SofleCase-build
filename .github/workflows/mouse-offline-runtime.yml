@@ -1,0 +1,38 @@
+name: Mouse Offline Runtime Bundle
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mouse-offline-runtime.yml'
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build offline runtime
+        run: |
+          python -m pip install --upgrade pip
+          mkdir -p mouse_runtime/vendor313
+          python -m pip install --target mouse_runtime/vendor313 \
+            'build123d==0.11.1' \
+            'cadquery-ocp-novtk==7.9.3.1.1' \
+            'manifold3d' \
+            'trimesh==4.11.1' \
+            'numpy==2.3.5'
+          PYTHONPATH="$PWD/mouse_runtime/vendor313" python - <<'PY'
+          import build123d, trimesh, numpy, manifold3d
+          print('build123d', build123d.__version__)
+          print('trimesh', trimesh.__version__)
+          print('numpy', numpy.__version__)
+          print('manifold3d', manifold3d.__file__)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mouse-runtime-vendor313
+          path: mouse_runtime/vendor313
+          compression-level: 6
