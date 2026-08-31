@@ -1,1 +1,1 @@
-2026-08-28 Dilemma strict-SROT local runtime recovery trigger
+2026-09-01 Dilemma strict-SROT runtime recovery trigger
