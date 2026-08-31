@@ -1,0 +1,4 @@
+Dilemma Strict SROT continuation checkpoint
+Date: 2026-08-27
+Basis: authoritative Submission Validation Edition dated 2026-08-27 and supplied Validation_all.py.
+No PASS claim is made by this marker. P019, P025, and P029 remain unresolved pending fresh build, exact inventory reconciliation, and all five supplied-validator gates.
