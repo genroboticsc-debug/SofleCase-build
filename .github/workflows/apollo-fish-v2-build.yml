@@ -31,6 +31,16 @@ jobs:
           tar -xzf /tmp/ApolloFish-v2-source.tar.gz -C /tmp/apollo
           test -f /tmp/apollo/ApolloFishAndroid/app/build.gradle.kts
           test -f /tmp/apollo/ApolloFishAndroid/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/apollo/ApolloFishAndroid/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt')
+          s = p.read_text()
+          old = 'ACTION_CONFIRM -> sendText(ApolloProtocol.confirm(intent.getBooleanExtra(EXTRA_CONFIRM_OK, false)))'
+          new = 'ACTION_CONFIRM -> sendText(ApolloProtocol.confirm(intent?.getBooleanExtra(EXTRA_CONFIRM_OK, false) ?: false))'
+          if old not in s:
+              raise SystemExit('Expected nullable Intent line not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
 
       - uses: actions/setup-java@v4
         with:
