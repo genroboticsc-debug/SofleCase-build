@@ -1,0 +1,71 @@
+name: Apollo Fish v2.1 Ultra Fast APK
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-apk:
+    if: github.head_ref == 'chatgpt/apollo-fish-apk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct Apollo Fish v2.1 source
+        shell: bash
+        run: |
+          cat .apollo-fish-v21/chunk00.b64 .apollo-fish-v21/chunk01.b64 .apollo-fish-v21/chunk02.b64 | base64 -d > /tmp/ApolloFish-v2.1-source.tar.gz
+          echo '020dca0017da01fde33715ce57437876dbf364fcdb90543ce1b0fe30cb8b865c  /tmp/ApolloFish-v2.1-source.tar.gz' | sha256sum -c -
+          mkdir -p /tmp/apollo21
+          tar -xzf /tmp/ApolloFish-v2.1-source.tar.gz -C /tmp/apollo21
+          test -f /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/NvidiaNimClient.kt
+          test -f /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/HandsFreeRecognizer.kt
+          grep -q 'enable_thinking.*, false' /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/NvidiaNimClient.kt
+          grep -q 'chunk_length.*, 100' /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/FishSpeechClient.kt
+          grep -q 'android:stopWithTask="true"' /tmp/apollo21/ApolloFishV3/app/src/main/AndroidManifest.xml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        shell: bash
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build debug APK
+        working-directory: /tmp/apollo21/ApolloFishV3
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=/tmp/apollo21/ApolloFishV3/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/apolloFish-v21-badging.txt
+          grep -q "package: name='dev.heyapollo.mobile'" /tmp/apolloFish-v21-badging.txt
+          grep -q "versionName='2.1.0'" /tmp/apolloFish-v21-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee /tmp/apolloFish-v21-permissions.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apolloFish-v21-signature.txt
+          sha256sum "$APK" | tee /tmp/ApolloFish-v2.1-UltraFast.apk.sha256
+          cp "$APK" /tmp/ApolloFish-v2.1-UltraFast.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApolloFish-v2.1-UltraFast-apk
+          path: |
+            /tmp/ApolloFish-v2.1-UltraFast.apk
+            /tmp/ApolloFish-v2.1-UltraFast.apk.sha256
+            /tmp/apolloFish-v21-badging.txt
+            /tmp/apolloFish-v21-permissions.txt
+            /tmp/apolloFish-v21-signature.txt
+          if-no-files-found: error
+          retention-days: 7
