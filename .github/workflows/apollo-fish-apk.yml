@@ -9,12 +9,23 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct Android project
+      - name: Reconstruct Android project and apply compiler fix
         shell: bash
         run: |
           cat .apollo-build/chunk00 .apollo-build/chunk01 .apollo-build/chunk02 .apollo-build/chunk03 | base64 -d > /tmp/ApolloFishAndroid-source.zip
           mkdir -p /tmp/apollo
           unzip -q /tmp/ApolloFishAndroid-source.zip -d /tmp/apollo
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/apollo/ApolloFishAndroid/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt')
+          s = p.read_text()
+          old = 'ApolloProtocol.confirm(intent.getBooleanExtra(EXTRA_CONFIRM_OK, false))'
+          new = 'ApolloProtocol.confirm(intent?.getBooleanExtra(EXTRA_CONFIRM_OK, false) ?: false)'
+          if old in s:
+              p.write_text(s.replace(old, new))
+          elif new not in s:
+              raise SystemExit('Expected ApolloWebSocketService.kt expression not found')
+          PY
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -35,13 +46,14 @@ jobs:
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging "$APK" | tee /tmp/apollo-badging.txt
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apollo-signature.txt
-          sha256sum "$APK" | tee /tmp/ApolloFish.apk.sha256
+          cp "$APK" /tmp/apolloFish-debug.apk
+          sha256sum /tmp/apolloFish-debug.apk | tee /tmp/apolloFish-debug.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: ApolloFish-APK
+          name: apolloFish-debug-apk
           path: |
-            /tmp/apollo/ApolloFishAndroid/app/build/outputs/apk/debug/app-debug.apk
-            /tmp/ApolloFish.apk.sha256
+            /tmp/apolloFish-debug.apk
+            /tmp/apolloFish-debug.apk.sha256
             /tmp/apollo-badging.txt
             /tmp/apollo-signature.txt
           if-no-files-found: error
