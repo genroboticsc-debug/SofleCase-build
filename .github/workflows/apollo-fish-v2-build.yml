@@ -16,7 +16,16 @@ jobs:
       - name: Reconstruct Apollo Fish v2 source
         shell: bash
         run: |
+          printf '%s  %s\n' \
+            '4a3c78186de887d947c823a1f963f3fa18998f7f36e63e069b6daad42feab7fa' '.apollo-fish-v2/chunk00.b64' \
+            'e6a0002d9d3e1df2d418a35cf6d9c5f4a1d69425b91f20af0dc785b278ad858b' '.apollo-fish-v2/chunk01.b64' \
+            '60ec4489efe1fa169fe30b9f737b7663619e6e7fa1b8c0457a32989ae548c853' '.apollo-fish-v2/chunk02.b64' \
+            '3a266fb049da80a6d0c1aa7e81d78cdcfa2c1541b58edfb9a100549e50ece64b' '.apollo-fish-v2/chunk03.b64' \
+            'e1c4e4dd54f12d57de51535246d0b7c2aa1ed8860473db7e6fe99b1fa0f6a50c' '.apollo-fish-v2/chunk04.b64' \
+            'af31e3dd8287d4c4e365ac180c9f7b80f9a478a2dd8e950e08e4ed8f7b12413a' '.apollo-fish-v2/chunk05.b64' \
+            'bae44f9c7e39d4e1f77c40cd7dbbb312e153c38550e251fba88a0c2f8b5ad8da' '.apollo-fish-v2/chunk06.b64' | sha256sum -c -
           cat .apollo-fish-v2/chunk*.b64 | base64 -d > /tmp/ApolloFish-v2-source.tar.gz
+          echo '2e0730766e9579f622e13b10a0836aef06f35fa211010cef3f3dbb49affb6730  /tmp/ApolloFish-v2-source.tar.gz' | sha256sum -c -
           mkdir -p /tmp/apollo
           tar -xzf /tmp/ApolloFish-v2-source.tar.gz -C /tmp/apollo
           test -f /tmp/apollo/ApolloFishAndroid/app/build.gradle.kts
