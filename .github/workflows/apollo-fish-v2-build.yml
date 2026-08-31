@@ -1,0 +1,63 @@
+name: Apollo Fish v2 Android APK
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-apk:
+    if: github.head_ref == 'chatgpt/apollo-fish-apk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct Apollo Fish v2 source
+        shell: bash
+        run: |
+          cat .apollo-fish-v2/chunk*.b64 | base64 -d > /tmp/ApolloFish-v2-source.tar.gz
+          mkdir -p /tmp/apollo
+          tar -xzf /tmp/ApolloFish-v2-source.tar.gz -C /tmp/apollo
+          test -f /tmp/apollo/ApolloFishAndroid/app/build.gradle.kts
+          test -f /tmp/apollo/ApolloFishAndroid/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        shell: bash
+        run: yes | sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build debug APK
+        working-directory: /tmp/apollo/ApolloFishAndroid
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=/tmp/apollo/ApolloFishAndroid/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/apollo-fish-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apollo-fish-signature.txt
+          sha256sum "$APK" | tee /tmp/apolloFish-debug-apk.sha256
+          cp "$APK" /tmp/apolloFish-debug-apk.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apolloFish-debug-apk
+          path: |
+            /tmp/apolloFish-debug-apk.apk
+            /tmp/apolloFish-debug-apk.sha256
+            /tmp/apollo-fish-badging.txt
+            /tmp/apollo-fish-signature.txt
+          if-no-files-found: error
+          retention-days: 7
