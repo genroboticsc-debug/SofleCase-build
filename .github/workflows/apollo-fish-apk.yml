@@ -1,0 +1,48 @@
+name: Build Apollo Fish APK
+on:
+  push:
+    branches: [ chatgpt/apollo-fish-apk ]
+  workflow_dispatch:
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct Android project
+        shell: bash
+        run: |
+          cat .apollo-build/chunk00 .apollo-build/chunk01 .apollo-build/chunk02 .apollo-build/chunk03 | base64 -d > /tmp/ApolloFishAndroid-source.zip
+          mkdir -p /tmp/apollo
+          unzip -q /tmp/ApolloFishAndroid-source.zip -d /tmp/apollo
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: yes | sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Compile APK
+        working-directory: /tmp/apollo/ApolloFishAndroid
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=/tmp/apollo/ApolloFishAndroid/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging "$APK" | tee /tmp/apollo-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apollo-signature.txt
+          sha256sum "$APK" | tee /tmp/ApolloFish.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApolloFish-APK
+          path: |
+            /tmp/apollo/ApolloFishAndroid/app/build/outputs/apk/debug/app-debug.apk
+            /tmp/ApolloFish.apk.sha256
+            /tmp/apollo-badging.txt
+            /tmp/apollo-signature.txt
+          if-no-files-found: error
+          retention-days: 7
