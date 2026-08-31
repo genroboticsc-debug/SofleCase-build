@@ -1,0 +1,1 @@
+Temporary isolated Android build payload for Apollo Fish v2. The master branch is not modified unless this pull request is explicitly merged. This branch exists only to compile and retrieve the debug APK artifact.
