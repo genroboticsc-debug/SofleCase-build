@@ -1,0 +1,45 @@
+name: Apollo Fish v2.1 Source Export
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  export-source:
+    if: github.head_ref == 'chatgpt/apollo-fish-apk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact v2.1 source
+        shell: bash
+        run: |
+          cat .apollo-fish-v21/chunk00.b64 .apollo-fish-v21/chunk01.b64 .apollo-fish-v21/chunk02.b64 | base64 -d > /tmp/ApolloFish-v2.1-source.tar.gz
+          echo '020dca0017da01fde33715ce57437876dbf364fcdb90543ce1b0fe30cb8b865c  /tmp/ApolloFish-v2.1-source.tar.gz' | sha256sum -c -
+          mkdir -p /tmp/apollo21
+          tar -xzf /tmp/ApolloFish-v2.1-source.tar.gz -C /tmp/apollo21
+          test -f /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/NvidiaNimClient.kt
+          test -f /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/HandsFreeRecognizer.kt
+          test -f /tmp/apollo21/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/FishSpeechClient.kt
+          cat > /tmp/apollo21/ApolloFishV3/SOURCE_BUILD_PROVENANCE.txt <<EOF
+          Apollo Fish v2.1 UltraFast Android source
+          Exact source archive SHA-256: 020dca0017da01fde33715ce57437876dbf364fcdb90543ce1b0fe30cb8b865c
+          Built APK package: dev.heyapollo.mobile
+          Built APK version: 2.1.0
+          Source exported from build branch: chatgpt/apollo-fish-apk
+          EOF
+          cd /tmp/apollo21
+          zip -qr /tmp/ApolloFish-v2.1-UltraFast-source.zip ApolloFishV3
+          sha256sum /tmp/ApolloFish-v2.1-UltraFast-source.zip > /tmp/ApolloFish-v2.1-UltraFast-source.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApolloFish-v2.1-UltraFast-source
+          path: |
+            /tmp/ApolloFish-v2.1-UltraFast-source.zip
+            /tmp/ApolloFish-v2.1-UltraFast-source.zip.sha256
+            /tmp/ApolloFish-v2.1-source.tar.gz
+          if-no-files-found: error
+          retention-days: 7
