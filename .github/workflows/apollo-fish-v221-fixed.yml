@@ -19,6 +19,7 @@ jobs:
           mkdir -p /tmp/apollo221
           tar -xzf /tmp/v22.tar.gz -C /tmp/apollo221
           python3 .apollo-fish-v221/patch.py /tmp/apollo221/ApolloFishV3
+          python3 .apollo-fish-v221/compilefix.py /tmp/apollo221/ApolloFishV3
           grep -q 'versionName = "2.2.1"' /tmp/apollo221/ApolloFishV3/app/build.gradle.kts
           grep -q 'if (cut < 5 && text.length < 40)' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/RealtimeSpeechQueue.kt
           grep -q 'generation.incrementAndGet()' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/PcmAudioPlayer.kt
