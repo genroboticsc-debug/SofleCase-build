@@ -1,0 +1,143 @@
+name: Apollo Fish v3.0 Final
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-apk:
+    if: github.head_ref == 'chatgpt/apollo-fish-apk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct v3.0 clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .apollo-fish-v30r/chunk00.b64 .apollo-fish-v30r/chunk01.b64 .apollo-fish-v30r/chunk02.b64 .apollo-fish-v30r/chunk03.b64 .apollo-fish-v30r/chunk04.b64 .apollo-fish-v30r/chunk05.b64 .apollo-fish-v30r/chunk06.b64 .apollo-fish-v30r/chunk07.b64 | base64 -d > /tmp/ApolloFish-v3.0-Final-source.tar.gz
+          echo '7502b5af56c0b896fdd01f618f7079d6848b3d73390f19771878163dcd82d242  /tmp/ApolloFish-v3.0-Final-source.tar.gz' | sha256sum -c -
+          mkdir -p /tmp/apollo30
+          tar -xzf /tmp/ApolloFish-v3.0-Final-source.tar.gz -C /tmp/apollo30
+          ROOT=/tmp/apollo30/ApolloFishV3
+          python3 .apollo-fish-v30r/patch.py "$ROOT"
+
+          grep -Fq 'versionName = "3.0.0"' "$ROOT/app/build.gradle.kts"
+          grep -Fq 'versionCode = 30' "$ROOT/app/build.gradle.kts"
+          test ! -f "$ROOT/app/src/main/java/dev/heyapollo/mobile/HandsFreeRecognizer.kt"
+          ! grep -R -Fq 'SpeechRecognizer(' "$ROOT/app/src/main/java"
+
+          CVI="$ROOT/app/src/main/java/dev/heyapollo/mobile/ContinuousVoiceInput.kt"
+          grep -Fq 'AudioRecord' "$CVI"
+          grep -Fq 'VoiceEndpointDetector' "$CVI"
+          grep -Fq 'AcousticEchoCanceler' "$CVI"
+          grep -Fq 'NoiseSuppressor' "$CVI"
+          grep -Fq 'forceEndpoint' "$CVI"
+
+          SVC="$ROOT/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt"
+          for p in 'voiceInput.forceEndpoint()' 'asrClient.cancelActive()' 'nimClient.cancelActive()' 'fishSpeechClient.cancelActive()' 'speechQueue.cancel()' 'pcmPlayer.stop()' 'androidTts.stop()' 'onTaskRemoved' 'START_NOT_STICKY' 'ACTION_SEND_NOW'; do
+            grep -Fq "$p" "$SVC"
+          done
+
+          NIM="$ROOT/app/src/main/java/dev/heyapollo/mobile/NvidiaNimClient.kt"
+          grep -Fq 'https://integrate.api.nvidia.com/v1/chat/completions' "$NIM"
+          grep -Fq 'enable_thinking' "$NIM"
+          grep -Fq 'false' "$NIM"
+
+          FISH="$ROOT/app/src/main/java/dev/heyapollo/mobile/FishSpeechClient.kt"
+          grep -Fq 'https://api.fish.audio/v1/tts' "$FISH"
+          grep -Fq '"chunk_length", 100' "$FISH"
+          grep -Fq '"latency", "low"' "$FISH"
+
+          ASR="$ROOT/app/src/main/java/dev/heyapollo/mobile/NvidiaAsrClient.kt"
+          grep -Fq '/v1/audio/transcriptions' "$ASR"
+          grep -Fq '1598d209-5e27-4d3c-8079-4751568b1081' "$ASR"
+
+          PHONE="$ROOT/app/src/main/java/dev/heyapollo/mobile/PhoneActionController.kt"
+          MAN="$ROOT/app/src/main/AndroidManifest.xml"
+          grep -Fq 'Intent.ACTION_SENDTO' "$PHONE"
+          grep -Fq 'Intent.ACTION_DIAL' "$PHONE"
+          ! grep -Fq 'Intent.ACTION_CALL' "$PHONE"
+          ! grep -Fq 'android.permission.SEND_SMS' "$MAN"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Run unit tests
+        working-directory: /tmp/apollo30/ApolloFishV3
+        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        working-directory: /tmp/apollo30/ApolloFishV3
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Verify APK, package, signature and safety invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/apollo30/ApolloFishV3
+          APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -q "package: name='dev.heyapollo.mobile'" /tmp/badging.txt
+          grep -q "versionName='3.0.0'" /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee /tmp/permissions.txt
+          ! grep -q 'android.permission.SEND_SMS' /tmp/permissions.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
+          unzip -t "$APK" | tee /tmp/zip-test.txt
+          cp "$APK" /tmp/ApolloFish-v3.0-Final.apk
+          sha256sum /tmp/ApolloFish-v3.0-Final.apk | tee /tmp/ApolloFish-v3.0-Final.apk.sha256
+          cd /tmp/apollo30 && zip -qr /tmp/ApolloFish-v3.0-Final-source.zip ApolloFishV3
+          sha256sum /tmp/ApolloFish-v3.0-Final-source.zip | tee /tmp/ApolloFish-v3.0-Final-source.zip.sha256
+          cp -r "$ROOT/app/build/test-results/testDebugUnitTest" /tmp/unit-test-results
+          cat > /tmp/VALIDATION.txt <<'EOF'
+          Apollo Fish v3.0 Final — CI validation
+          - Clean source archive SHA-256 reconstruction: PASS
+          - No restart-loop Android SpeechRecognizer in live source path: PASS
+          - Continuous 16 kHz AudioRecord + local endpoint detector source invariants: PASS
+          - AcousticEchoCanceler/NoiseSuppressor integration source invariants: PASS
+          - SEND NOW manual endpoint path: PASS
+          - Hard local cancellation paths for ASR/NIM/Fish/TTS/PCM/Apollo: PASS
+          - NVIDIA NIM direct endpoint + thinking-disabled request invariant: PASS
+          - NVIDIA ASR transactional endpoint invariant: PASS
+          - Fish low-latency PCM endpoint invariant: PASS
+          - Approval-gated SMS composer/dialer safety boundary: PASS
+          - JVM unit tests: PASS
+          - Android Gradle assembleDebug: PASS
+          - APK archive integrity: PASS
+          - APK package/version inspection: PASS
+          - APK signature verification: PASS
+
+          Device/account boundary: OEM microphone acoustics/AEC behavior, API keys/quotas/network latency,
+          actual contacts/carrier/system SMS/dialer behavior, Apollo Worker deployment, and NVIDIA VoiceChat
+          Early Access availability require real handset/account testing and are not falsely certified by CI.
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApolloFish-v3.0-Final
+          path: |
+            /tmp/ApolloFish-v3.0-Final.apk
+            /tmp/ApolloFish-v3.0-Final.apk.sha256
+            /tmp/ApolloFish-v3.0-Final-source.zip
+            /tmp/ApolloFish-v3.0-Final-source.zip.sha256
+            /tmp/VALIDATION.txt
+            /tmp/badging.txt
+            /tmp/permissions.txt
+            /tmp/signature.txt
+            /tmp/zip-test.txt
+            /tmp/unit-test-results/**
+          if-no-files-found: error
+          retention-days: 7

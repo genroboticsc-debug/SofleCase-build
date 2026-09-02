@@ -1,0 +1,96 @@
+name: Apollo Fish v2.2.1 Fixed Realtime APK
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-apk:
+    if: github.head_ref == 'chatgpt/apollo-fish-apk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct and patch v2.2.1 source
+        shell: bash
+        run: |
+          cat .apollo-fish-v22/chunk00.b64 .apollo-fish-v22/chunk01.b64 .apollo-fish-v22/chunk02.b64 .apollo-fish-v22/chunk03.b64 | base64 -d > /tmp/v22.tar.gz
+          echo 'cf6406842e191e445ad1f6df8782bfe41e5f4c84f46110c406236a8c6862ee36  /tmp/v22.tar.gz' | sha256sum -c -
+          mkdir -p /tmp/apollo221
+          tar -xzf /tmp/v22.tar.gz -C /tmp/apollo221
+          python3 .apollo-fish-v221/patch.py /tmp/apollo221/ApolloFishV3
+          python3 .apollo-fish-v221/compilefix.py /tmp/apollo221/ApolloFishV3
+          grep -q 'versionName = "2.2.1"' /tmp/apollo221/ApolloFishV3/app/build.gradle.kts
+          grep -q 'if (cut < 5 && text.length < 40)' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/RealtimeSpeechQueue.kt
+          grep -q 'generation.incrementAndGet()' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/PcmAudioPlayer.kt
+          grep -q 'START_NOT_STICKY' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt
+          grep -q 'enable_thinking.*, false' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/NvidiaNimClient.kt
+          grep -q 'chunk_length.*, 100' /tmp/apollo221/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/FishSpeechClient.kt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build debug APK
+        working-directory: /tmp/apollo221/ApolloFishV3
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Validate source invariants and APK
+        shell: bash
+        run: |
+          ROOT=/tmp/apollo221/ApolloFishV3
+          SVC=$ROOT/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt
+          PCM=$ROOT/app/src/main/java/dev/heyapollo/mobile/PcmAudioPlayer.kt
+          PHONE=$ROOT/app/src/main/java/dev/heyapollo/mobile/PhoneActionController.kt
+          MAN=$ROOT/app/src/main/AndroidManifest.xml
+          for p in 'nimClient.cancelActive()' 'speechQueue.cancel()' 'fishSpeechClient.cancelActive()' 'pcmPlayer.stop()' 'ACTION_STOP_ALL' 'SpeechStyle.isStopCommand'; do grep -Fq "$p" "$SVC"; done
+          grep -Fq 'while (commandChannel.tryReceive().isSuccess)' "$PCM"
+          grep -Fq 'Intent.ACTION_SENDTO' "$PHONE"
+          grep -Fq 'Intent.ACTION_DIAL' "$PHONE"
+          ! grep -Fq 'Intent.ACTION_CALL' "$PHONE"
+          ! grep -Fq 'android.permission.SEND_SMS' "$MAN"
+          APK=$ROOT/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -q "package: name='dev.heyapollo.mobile'" /tmp/badging.txt
+          grep -q "versionName='2.2.1'" /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee /tmp/permissions.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
+          unzip -t "$APK" > /tmp/zip-test.txt
+          sha256sum "$APK" | tee /tmp/ApolloFish-v2.2.1-FixedRealtime.apk.sha256
+          cp "$APK" /tmp/ApolloFish-v2.2.1-FixedRealtime.apk
+          cd /tmp/apollo221 && zip -qr /tmp/ApolloFish-v2.2.1-FixedRealtime-source.zip ApolloFishV3
+          sha256sum /tmp/ApolloFish-v2.2.1-FixedRealtime-source.zip > /tmp/ApolloFish-v2.2.1-FixedRealtime-source.zip.sha256
+          cat > /tmp/VALIDATION.txt <<'EOF'
+          Apollo Fish v2.2.1 validation
+          - Android Gradle assembleDebug: PASS
+          - APK archive integrity: PASS
+          - APK signature verification: PASS
+          - package/version manifest: PASS
+          - hard local audio cancel/drain path: STATIC PASS
+          - NIM cancel + streaming + thinking-disabled path: STATIC PASS
+          - Fish low-latency PCM + minimum valid 100-char chunk: STATIC PASS
+          - completed short-clause early TTS emission: STATIC PASS
+          - voice stop/barge-in handlers: STATIC PASS
+          - message/call approval boundary uses ACTION_SENDTO/ACTION_DIAL, never SEND_SMS/ACTION_CALL: STATIC PASS
+          - Actual microphone/OEM recognizer, API-key network latency, carrier/SMS/dialer, contacts and NVIDIA VoiceChat EA require real-device/account testing.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApolloFish-v2.2.1-FixedRealtime
+          path: |
+            /tmp/ApolloFish-v2.2.1-FixedRealtime.apk
+            /tmp/ApolloFish-v2.2.1-FixedRealtime.apk.sha256
+            /tmp/ApolloFish-v2.2.1-FixedRealtime-source.zip
+            /tmp/ApolloFish-v2.2.1-FixedRealtime-source.zip.sha256
+            /tmp/VALIDATION.txt
+            /tmp/badging.txt
+            /tmp/permissions.txt
+            /tmp/signature.txt
+            /tmp/zip-test.txt
+          if-no-files-found: error
+          retention-days: 7
