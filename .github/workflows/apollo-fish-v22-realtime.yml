@@ -1,0 +1,77 @@
+name: Apollo Fish v2.2 Realtime Duplex APK
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-apk:
+    if: github.head_ref == 'chatgpt/apollo-fish-apk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct Apollo Fish v2.2 source
+        shell: bash
+        run: |
+          cat .apollo-fish-v22/chunk00.b64 .apollo-fish-v22/chunk01.b64 .apollo-fish-v22/chunk02.b64 .apollo-fish-v22/chunk03.b64 | base64 -d > /tmp/ApolloFish-v2.2-RealtimeDuplex-source.tar.gz
+          echo 'cf6406842e191e445ad1f6df8782bfe41e5f4c84f46110c406236a8c6862ee36  /tmp/ApolloFish-v2.2-RealtimeDuplex-source.tar.gz' | sha256sum -c -
+          mkdir -p /tmp/apollo22
+          tar -xzf /tmp/ApolloFish-v2.2-RealtimeDuplex-source.tar.gz -C /tmp/apollo22
+          test -f /tmp/apollo22/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/NvidiaNimClient.kt
+          test -f /tmp/apollo22/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/RealtimeSpeechQueue.kt
+          test -f /tmp/apollo22/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/PhoneActionController.kt
+          grep -q 'versionName = "2.2.0"' /tmp/apollo22/ApolloFishV3/app/build.gradle.kts
+          grep -q 'android.permission.READ_CONTACTS' /tmp/apollo22/ApolloFishV3/app/src/main/AndroidManifest.xml
+          grep -q 'START_NOT_STICKY' /tmp/apollo22/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/ApolloWebSocketService.kt
+          grep -q 's2-pro' /tmp/apollo22/ApolloFishV3/app/src/main/java/dev/heyapollo/mobile/SettingsRepository.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        shell: bash
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build debug APK
+        working-directory: /tmp/apollo22/ApolloFishV3
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=/tmp/apollo22/ApolloFishV3/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/apolloFish-v22-badging.txt
+          grep -q "package: name='dev.heyapollo.mobile'" /tmp/apolloFish-v22-badging.txt
+          grep -q "versionName='2.2.0'" /tmp/apolloFish-v22-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee /tmp/apolloFish-v22-permissions.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apolloFish-v22-signature.txt
+          cp "$APK" /tmp/ApolloFish-v2.2-RealtimeDuplex.apk
+          sha256sum /tmp/ApolloFish-v2.2-RealtimeDuplex.apk | tee /tmp/ApolloFish-v2.2-RealtimeDuplex.apk.sha256
+          cd /tmp/apollo22 && zip -qr /tmp/ApolloFish-v2.2-RealtimeDuplex-source.zip ApolloFishV3
+          sha256sum /tmp/ApolloFish-v2.2-RealtimeDuplex-source.zip | tee /tmp/ApolloFish-v2.2-RealtimeDuplex-source.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ApolloFish-v2.2-RealtimeDuplex
+          path: |
+            /tmp/ApolloFish-v2.2-RealtimeDuplex.apk
+            /tmp/ApolloFish-v2.2-RealtimeDuplex.apk.sha256
+            /tmp/ApolloFish-v2.2-RealtimeDuplex-source.zip
+            /tmp/ApolloFish-v2.2-RealtimeDuplex-source.zip.sha256
+            /tmp/apolloFish-v22-badging.txt
+            /tmp/apolloFish-v22-permissions.txt
+            /tmp/apolloFish-v22-signature.txt
+          if-no-files-found: error
+          retention-days: 7
